@@ -1,0 +1,24 @@
+# AlphaGameExplainer - Python 3.12.4
+python-chess>=1.999,<2.0
+stockfish>=3.28.0,<4.0
+
+# LLM (Ollama 本地模型)
+requests>=2.31.0,<3.0
+ollama>=0.4.0
+
+# 语音合成
+edge-tts>=6.1.0,<7.0
+pydub>=0.25.1,<1.0
+
+# 棋盘渲染
+Pillow>=10.2.0,<12.0
+
+# 视频合成
+moviepy>=2.0.0,<3.0
+numpy>=1.26.0,<2.0
+
+# 字幕处理 
+pysrt>=1.1.2,<2.0
+
+python-dotenv>=1.0.0,<2.0
+colorama>=0.4.6,<1.0
