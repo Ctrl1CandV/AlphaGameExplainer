@@ -3,11 +3,10 @@ python-chess>=1.999,<2.0
 stockfish>=3.28.0,<4.0
 
 # LLM (Ollama 本地模型)
-requests>=2.31.0,<3.0
 ollama>=0.4.0
 
 # 语音合成
-edge-tts>=6.1.0,<7.0
+pyttsx3>=2.98
 pydub>=0.25.1,<1.0
 
 # 棋盘渲染
