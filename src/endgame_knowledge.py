@@ -1,19 +1,10 @@
-import chess
 from typing import Optional
+import chess
 
 _PIECE_MAP = {
     "Q": chess.QUEEN, "R": chess.ROOK, "B": chess.BISHOP,
     "N": chess.KNIGHT, "P": chess.PAWN,
 }
-
-
-def _piece_signature(board: chess.Board, color: chess.Color) -> tuple:
-    counts = {}
-    for piece in board.piece_map().values():
-        if piece.color == color and piece.piece_type != chess.KING:
-            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
-    return tuple(sorted(counts.items()))
-
 
 ENDGAME_KB = [
     {
@@ -118,6 +109,13 @@ ENDGAME_KB = [
     },
 ]
 
+def _piece_signature(board: chess.Board, color: chess.Color) -> tuple:
+    """ 获取某一方具体的棋子情况 """
+    counts = {}
+    for piece in board.piece_map().values():
+        if piece.color == color and piece.piece_type != chess.KING:
+            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
+    return tuple(sorted(counts.items()))
 
 def _parse_type(type_key: str):
     parts = type_key.split("v")
@@ -128,11 +126,9 @@ def _parse_type(type_key: str):
     b_dict = {_PIECE_MAP[c]: b_chars.count(c) for c in _PIECE_MAP if b_chars.count(c) > 0}
     return tuple(sorted(w_dict.items())), tuple(sorted(b_dict.items()))
 
-
 _PATTERN_CACHE = {}
 for entry in ENDGAME_KB:
     _PATTERN_CACHE[entry["type"]] = _parse_type(entry["type"])
-
 
 def match(board: chess.Board) -> Optional[dict]:
     if board.is_game_over():

@@ -1,17 +1,12 @@
-from src.common import CompressedStep, Logger
+from src.common import CompressedStep, Logger, AnalyzedMove
 from src.endgame_knowledge import match as match_endgame
 from typing import List, Optional, Tuple
-import chess.engine
 import chess
 
-SF_TIME = 0.5
-ONLY_MOVE_THRESHOLD = 150
-TRAP_THRESHOLD = 100
-MAX_GROUP = 5
-LONG_LINE_GROUP = 8
+MAX_NODE_SPAN = 4
+LONG_NODE_SPAN = 6
 LONG_MOVE_THRESHOLD = 18
 COMPACT_NODE_THRESHOLD = 7
-
 
 def _tag_position(board: chess.Board, move: chess.Move) -> List[str]:
     tags = []
@@ -26,7 +21,6 @@ def _tag_position(board: chess.Board, move: chess.Move) -> List[str]:
     if t:
         tags.append(t)
     return tags
-
 
 def _detect_opposition(board: chess.Board) -> str:
     kings = [sq for sq, p in board.piece_map().items() if p.piece_type == chess.KING]
@@ -50,7 +44,6 @@ def _detect_opposition(board: chess.Board) -> str:
         return "近距离对峙"
     return ""
 
-
 def _detect_zugzwang_hint(board: chess.Board) -> str:
     if board.is_check() or board.is_game_over():
         return ""
@@ -62,58 +55,69 @@ def _detect_zugzwang_hint(board: chess.Board) -> str:
         return "王被困"
     return ""
 
+def _is_semantic_boundary(entry: dict, prev_entry: Optional[dict], board_before: chess.Board) -> bool:
+    """ 确定是否应该在此步骤前断节点 """
+    if prev_entry is None:
+        return True
+    if "将军" in entry["tags"] or "吃子" in entry["tags"]:
+        return True
+    if entry.get("only") and not entry.get("is_last"):
+        return True
+    if entry["fen_before"] == entry.get("fen_after", ""):
+        return True
+    dist = 0
+    before_sqs = set(board_before.piece_map().keys())
+    after_board = chess.Board(entry["fen_after"])
+    after_sqs = set(after_board.piece_map().keys())
+    moved = before_sqs.symmetric_difference(after_sqs)
+    kings_moved = any(board_before.piece_at(sq) and board_before.piece_at(sq).piece_type == chess.KING for sq in moved)
+    if kings_moved and prev_entry is not None:
+        prev_after = chess.Board(prev_entry["fen_after"])
+        prev_kings = {sq for sq, p in prev_after.piece_map().items() if p.piece_type == chess.KING}
+        cur_kings = {sq for sq, p in board_before.piece_map().items() if p.piece_type == chess.KING}
+        if prev_kings != cur_kings:
+            dist = min((chess.square_distance(a, b) for a in prev_kings for b in cur_kings), default=0)
+            if dist >= 2:
+                return True
+    return False
 
-def _eval_and_only(engine, board: chess.Board) -> Tuple[Optional[int], bool]:
-    try:
-        best_cp, second_cp = None, None
-        with engine.analysis(board, chess.engine.Limit(time=SF_TIME), multipv=2) as analysis:
-            for info in analysis:
-                score = info.get("score")
-                if score is None:
-                    continue
-                cp = score.relative.score(mate_score=10000)
-                if info.get("multipv") == 1:
-                    best_cp = cp
-                else:
-                    second_cp = cp
-        if best_cp is None:
-            return None, False
-        only = second_cp is not None and (best_cp - second_cp) > ONLY_MOVE_THRESHOLD
-        return best_cp, only
-    except Exception:
-        return None, False
+def _process_summary(entries: List[dict]) -> str:
+    """ 生成节点的过程摘要，描述中间发生了什么 """
+    if len(entries) <= 1:
+        return entries[0]["san"] if entries else ""
 
+    parts = []
+    checked = any("将军" in e.get("tags", []) for e in entries)
+    captured = any("吃子" in e.get("tags", []) for e in entries)
+    has_promotion = any("=" in e["san"] for e in entries)
+    kings_moved = any(
+        chess.Board(e["fen_before"]).king(chess.WHITE) != chess.Board(e["fen_after"]).king(chess.WHITE) or
+        chess.Board(e["fen_before"]).king(chess.BLACK) != chess.Board(e["fen_after"]).king(chess.BLACK)
+        for e in entries
+    )
+    first = entries[0]
+    last = entries[-1]
+    first_after = chess.Board(first["fen_after"])
+    last_before = chess.Board(last["fen_before"])
 
-def _find_trap(engine, board: chess.Board) -> Optional[str]:
-    try:
-        best_cp = None
-        trap_san = None
-        with engine.analysis(board, chess.engine.Limit(time=SF_TIME), multipv=3) as analysis:
-            for info in analysis:
-                pv = info.get("pv", [])
-                if not pv:
-                    continue
-                score = info.get("score")
-                cp = score.relative.score(mate_score=10000) if score else None
-                if info.get("multipv") == 1:
-                    best_cp = cp
-                    continue
-                if cp is not None and best_cp is not None and (best_cp - cp) > TRAP_THRESHOLD:
-                    try:
-                        trap_san = board.san(pv[0])
-                        break
-                    except Exception:
-                        pass
-    except Exception:
-        pass
-    return trap_san
+    if has_promotion:
+        promo_moves = [e["san"] for e in entries if "=" in e["san"]]
+        parts.append(f"兵连续推进并升变：{'、'.join(promo_moves)}")
+    if checked:
+        parts.append("含将军走法，压缩对方王活动空间")
+    if captured:
+        parts.append("含吃子，改变子力对比")
+    if kings_moved:
+        parts.append("双方王位置发生关键变化")
+    if not parts:
+        parts.append("调整子力位置，改善站位")
 
+    return "；".join(parts)
 
 def _is_swing_move(item: dict, prev_item: Optional[dict]) -> bool:
     if prev_item is None or item.get("eval_delta") is None or prev_item.get("eval_delta") is None:
         return False
     return abs(item["eval_delta"]) < 30 and abs(prev_item.get("eval_delta", 999)) < 30
-
 
 def _kbnk_corner_state(board: chess.Board, role_meta: dict) -> str:
     strong = role_meta.get("strong_color")
@@ -132,128 +136,130 @@ def _kbnk_corner_state(board: chess.Board, role_meta: dict) -> str:
         return "边线"
     return "中心"
 
-
-def compress(board: chess.Board, moves: List[chess.Move], stockfish_path: str) -> List[CompressedStep]:
-    """SF 标注 + 节点压缩：每≤5步一节点，检测对王摇摆自动合并"""
-    engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[CompressedStep]:
+    """ 语义压缩：按将军/吃子/升变/转折等边 界切分节点，单节点≤4步 """
     temp = board.copy()
     kb = match_endgame(board)
     endgame_name = kb["name"] if kb else "残局"
     role_meta = _role_meta(board, endgame_name)
-    kbnk_mode = endgame_name == "象马杀王" and len(moves) >= LONG_MOVE_THRESHOLD
-    long_line_mode = len(moves) >= LONG_MOVE_THRESHOLD
-    group_limit = LONG_LINE_GROUP if long_line_mode else MAX_GROUP
+    kbnk_mode = endgame_name == "象马杀王" and len(analyzed_moves) >= LONG_MOVE_THRESHOLD
+    long_line_mode = len(analyzed_moves) >= LONG_MOVE_THRESHOLD
+    max_span = LONG_NODE_SPAN if long_line_mode else MAX_NODE_SPAN
 
-    try:
-        per_move = []
-        prev_score = None
-        for i, move in enumerate(moves):
-            if temp.is_game_over():
-                break
-            turn = "白方" if temp.turn == chess.WHITE else "黑方"
-            san = temp.san(move)
-            tags = _tag_position(temp.copy(), move)
-            score, only = _eval_and_only(engine, temp)
-            fen_before = temp.fen()
-            temp.push(move)
-            fen_after = temp.fen()
+    per_move = []
+    prev_score = None
+    for i, am in enumerate(analyzed_moves):
+        if temp.is_game_over():
+            break
+        turn = "白方" if temp.turn == chess.WHITE else "黑方"
+        san = temp.san(am.move)
+        tags = _tag_position(temp.copy(), am.move)
+        score = am.score
+        only = am.is_only_move
+        fen_before = temp.fen()
+        temp.push(am.move)
+        fen_after = temp.fen()
 
-            if score is not None and prev_score is not None and len(per_move) > 0:
-                per_move[-1]["eval_delta"] = -(score + prev_score)
+        if score is not None and prev_score is not None and len(per_move) > 0:
+            per_move[-1]["eval_delta"] = -(score + prev_score)
 
-            entry = {
-                "idx": i + 1, "san": san, "tags": tags,
-                "only": only, "eval": score, "eval_delta": None,
-                "turn": turn, "fen_before": fen_before, "fen_after": fen_after,
-            }
-            per_move.append(entry)
+        entry = {
+            "idx": i + 1, "san": san, "tags": tags,
+            "only": only, "eval": score, "eval_delta": None,
+            "turn": turn, "fen_before": fen_before, "fen_after": fen_after,
+            "trap": am.trap_san,
+            "candidates": am.candidates,
+        }
+        per_move.append(entry)
+        prev_score = score
 
-            trap = None
-            if only or "将军" in tags or "吃子" in tags:
-                trap = _find_trap(engine, chess.Board(fen_before))
-            entry["trap"] = trap
-            prev_score = score
-            
-        if not temp.is_game_over() and prev_score is not None and len(per_move) > 0:
-            final_score, _ = _eval_and_only(engine, temp)
-            if final_score is not None:
-                per_move[-1]["eval_delta"] = -(final_score + prev_score)
+    if prev_score is not None and len(per_move) > 0:
+        if temp.is_game_over():
+            outcome = temp.outcome()
+            if outcome and outcome.winner is not None:
+                per_move[-1]["eval_delta"] = 9999
+        else:
+            per_move[-1]["eval_delta"] = None
 
-        for item in per_move:
-            is_first = item["idx"] == 1
-            is_last = item["idx"] == len(per_move)
-            big_delta = item.get("eval_delta") is not None and abs(item["eval_delta"]) > 200
-            state_changed = False
-            if kbnk_mode:
-                before_state = _kbnk_corner_state(chess.Board(item["fen_before"]), role_meta)
-                after_state = _kbnk_corner_state(chess.Board(item["fen_after"]), role_meta)
-                state_changed = before_state != after_state
-            item["is_critical"] = (
-                is_first or is_last or
-                "将军" in item["tags"] or "吃子" in item["tags"] or big_delta or
-                (item["only"] and not long_line_mode) or state_changed
+    for idx, item in enumerate(per_move):
+        is_first = idx == 0
+        is_last = idx == len(per_move) - 1
+        big_delta = item.get("eval_delta") is not None and abs(item["eval_delta"]) > 200
+        state_changed = False
+        if kbnk_mode:
+            before_state = _kbnk_corner_state(chess.Board(item["fen_before"]), role_meta)
+            after_state = _kbnk_corner_state(chess.Board(item["fen_after"]), role_meta)
+            state_changed = before_state != after_state
+        item["is_first"] = is_first
+        item["is_last"] = is_last
+        item["big_delta"] = big_delta
+        item["state_changed"] = state_changed
+
+    # 语义边界分组
+    groups = []
+    cur_group = []
+    for idx, item in enumerate(per_move):
+        board_before = chess.Board(item["fen_before"])
+        prev = cur_group[-1] if cur_group else None
+        boundary = _is_semantic_boundary(item, prev, board_before)
+        span_full = len(cur_group) >= max_span
+
+        if boundary and cur_group:
+            groups.append(cur_group)
+            cur_group = []
+        elif span_full:
+            groups.append(cur_group)
+            cur_group = []
+
+        cur_group.append(item)
+
+    if cur_group:
+        groups.append(cur_group)
+
+    compressed = []
+    for grp in groups:
+        if not grp:
+            continue
+        first = grp[0]
+        last = grp[-1]
+        is_critical = any(
+            g["is_first"] or g["is_last"] or
+            "将军" in g["tags"] or "吃子" in g["tags"] or
+            g.get("big_delta") or g.get("state_changed") or
+            (g["only"] and not long_line_mode)
+            for g in grp
+        )
+        all_tags = list(set(t for g in grp for t in g["tags"]))
+        swing = False
+        if len(grp) >= 3:
+            swing = all(
+                _is_swing_move(grp[j], grp[j - 1] if j > 0 else grp[0])
+                for j in range(1, len(grp))
             )
-        hard_list = [m for m in per_move if m["is_critical"]]
-        if len(hard_list) > 15:
-            keep = {0, len(per_move) - 1}
-            for i, m in enumerate(per_move):
-                if "将军" in m["tags"] or "吃子" in m["tags"]:
-                    keep.add(i)
-            for i, m in enumerate(per_move):
-                if i not in keep:
-                    m["is_critical"] = False
+        if swing:
+            all_tags.append("对王调整")
 
-        compressed = []
-        i = 0
-        while i < len(per_move):
-            cur = per_move[i]
-            if cur["is_critical"]:
-                compressed.append(CompressedStep(
-                    idx=len(compressed) + 1,
-                    sans=[cur["san"]],
-                    fen_before=cur["fen_before"],
-                    fen_after=cur["fen_after"],
-                    is_critical=True,
-                    trap=cur["trap"] or "",
-                    tags=cur["tags"],
-                    eval_delta=cur.get("eval_delta")
-                ))
-                i += 1
-            else:
-                group = []
-                swing = False
-                while i < len(per_move) and not per_move[i]["is_critical"] and len(group) < group_limit:
-                    group.append(per_move[i])
-                    i += 1
-                if len(group) >= 3:
-                    swing = all(
-                        _is_swing_move(group[j], group[j - 1] if j > 0 else group[0])
-                        for j in range(1, len(group))
-                    )
-                all_tags = list(set(t for g in group for t in g["tags"]))
-                if swing:
-                    all_tags.append("对王调整")
-                
-                # For non-critical moves, accumulate eval delta or just take the last one
-                total_delta = sum([g.get("eval_delta", 0) for g in group if g.get("eval_delta") is not None])
-                
-                compressed.append(CompressedStep(
-                    idx=len(compressed) + 1,
-                    sans=[g["san"] for g in group],
-                    fen_before=group[0]["fen_before"],
-                    fen_after=group[-1]["fen_after"],
-                    is_critical=False,
-                    tags=all_tags,
-                    eval_delta=total_delta
-                ))
+        total_delta = sum(g.get("eval_delta", 0) for g in grp if g.get("eval_delta") is not None)
+        trap = next((g["trap"] for g in grp if g.get("trap")), None) or ""
+        process_summ = _process_summary(grp)
 
-        compressed = _merge_repetitive(compressed)
+        compressed.append(CompressedStep(
+            idx=len(compressed) + 1,
+            sans=[g["san"] for g in grp],
+            fen_before=first["fen_before"],
+            fen_after=last["fen_after"],
+            is_critical=is_critical,
+            trap=trap,
+            tags=all_tags,
+            eval_delta=total_delta,
+            candidates=list(set(c for g in grp for c in g.get("candidates", []))),
+        ))
+        compressed[-1].process_summary = process_summ
 
-        Logger.info(f"压缩: {len(per_move)} 步 → {len(compressed)} 节点")
-        return compressed
-    finally:
-        engine.quit()
+    compressed = _merge_repetitive(compressed)
 
+    Logger.info(f"压缩: {len(per_move)} 步 → {len(compressed)} 节点")
+    return compressed
 
 def _same_pieces(a_fen: str, b_fen: str) -> bool:
     try:
@@ -268,7 +274,6 @@ def _same_pieces(a_fen: str, b_fen: str) -> bool:
         return a_counts == b_counts
     except Exception:
         return False
-
 
 def _merge_repetitive(steps: List[CompressedStep]) -> List[CompressedStep]:
     if len(steps) < 3:
@@ -289,7 +294,6 @@ def _merge_repetitive(steps: List[CompressedStep]) -> List[CompressedStep]:
     for i, s in enumerate(merged):
         s.idx = i + 1
     return merged
-
 
 def _describe_situation(board: chess.Board) -> str:
     """生成局面的中文描述：王位与对王关系、兵排位、车控制线"""
@@ -326,7 +330,6 @@ def _describe_situation(board: chess.Board) -> str:
 
     return "；".join(lines)
 
-
 def _compare_kings(fen_before: str, fen_after: str) -> str:
     """比较两个局面的王位变化"""
     try:
@@ -347,7 +350,6 @@ def _compare_kings(fen_before: str, fen_after: str) -> str:
     except Exception:
         return ""
 
-
 def _material_score(board: chess.Board, color: chess.Color) -> int:
     values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
     total = 0
@@ -356,10 +358,8 @@ def _material_score(board: chess.Board, color: chess.Color) -> int:
             total += values.get(piece.piece_type, 0)
     return total
 
-
 def _color_name(color: chess.Color) -> str:
     return "白方" if color == chess.WHITE else "黑方"
-
 
 def _piece_square(board: chess.Board, color: chess.Color, piece_type: chess.PieceType):
     for sq, piece in board.piece_map().items():
@@ -367,14 +367,12 @@ def _piece_square(board: chess.Board, color: chess.Color, piece_type: chess.Piec
             return sq
     return None
 
-
 def _piece_squares(board: chess.Board, color: chess.Color, piece_type: chess.PieceType) -> List[int]:
     squares = []
     for sq, piece in board.piece_map().items():
         if piece.color == color and piece.piece_type == piece_type:
             squares.append(sq)
     return sorted(squares)
-
 
 def _piece_label(piece_type: chess.PieceType) -> str:
     mapping = {
@@ -386,7 +384,6 @@ def _piece_label(piece_type: chess.PieceType) -> str:
         chess.PAWN: "兵",
     }
     return mapping.get(piece_type, "子")
-
 
 def _transition_summary(fen_before: str, fen_after: str) -> str:
     b1 = chess.Board(fen_before)
@@ -411,14 +408,12 @@ def _transition_summary(fen_before: str, fen_after: str) -> str:
                 parts.append(f"{name}{label}出现在{after_text}")
     return "；".join(parts) if parts else "起止局面结构没有实质变化，主要是反复试探与等招"
 
-
 def _compact_moves_display(sans: List[str]) -> str:
     if len(sans) <= 4:
         return " → ".join(sans)
     if len(sans) <= 8:
         return f"{sans[0]} → {sans[1]} → ... → {sans[-2]} → {sans[-1]}"
     return f"{sans[0]} → ... → {sans[-1]}"
-
 
 def _krpkr_phase_hint(board_before: chess.Board, board_after: chess.Board, role_meta: dict, same_position: bool) -> Tuple[str, str]:
     if same_position:
@@ -444,7 +439,6 @@ def _krpkr_phase_hint(board_before: chess.Board, board_after: chess.Board, role_
         return "争取突破", "有兵方的王与兵保持紧密联系，下一目标通常是切断防守方王车联系或准备搭桥"
     return "争夺关键格", "双方仍在围绕兵前关键格、侧翼骚扰位和切断线路来回调整，谁先站稳关键格谁就更接近目标"
 
-
 def _krpkr_teaching_focus(board_before: chess.Board, board_after: chess.Board, role_meta: dict, same_position: bool) -> str:
     strong = role_meta.get("strong_color")
     weak = role_meta.get("weak_color")
@@ -466,7 +460,6 @@ def _krpkr_teaching_focus(board_before: chess.Board, board_after: chess.Board, r
         return "这一段的教学重点是有兵方调整车位，为兵让路，同时准备从侧面或后方掩护推进。"
     return "这一段的教学重点是围绕兵前关键格和王车联系做准备，暂时还没有进入最后的技术兑现阶段。"
 
-
 def _hard_constraints(board: chess.Board, endgame_name: str, role_meta: dict) -> List[str]:
     rules = []
     wp = _piece_square(board, chess.WHITE, chess.PAWN)
@@ -481,7 +474,6 @@ def _hard_constraints(board: chess.Board, endgame_name: str, role_meta: dict) ->
         rules.append(f"菲利多防线只能绑定到{weak}的防守任务，卢塞纳桥位只能绑定到{strong}的进攻任务")
     return rules
 
-
 def _counterfactual_hint(node: dict) -> str:
     if node.get("trap"):
         return f"如果这一步处理失当，对手常见的反击是{node['trap']}"
@@ -494,7 +486,6 @@ def _counterfactual_hint(node: dict) -> str:
     if node.get("phase") == "争取突破":
         return "如果没有先改善王车站位，后续就算强行推进，也很难把优势真正兑现"
     return ""
-
 
 def _generic_teaching_focus(phase: str, phase_hint: str, same_position: bool) -> str:
     if same_position:
@@ -512,7 +503,6 @@ def _generic_teaching_focus(phase: str, phase_hint: str, same_position: bool) ->
     if phase_hint:
         return phase_hint
     return "这一段的教学重点是改善站位并为下一阶段目标做准备。"
-
 
 def _role_meta(board: chess.Board, endgame_name: str) -> dict:
     white_score = _material_score(board, chess.WHITE)
@@ -534,7 +524,6 @@ def _role_meta(board: chess.Board, endgame_name: str) -> dict:
             f"卢塞纳桥位属于{_color_name(strong)}的进攻策略",
         ]
     return meta
-
 
 def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
     """基于压缩节点构建叙事分镜，注入局面特征与分阶段解说提示"""
@@ -593,6 +582,7 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
             "fen_before": cs.fen_before,
             "situation_before": situation_before,
             "transition_summary": _transition_summary(cs.fen_before, cs.fen_after),
+            "process_summary": getattr(cs, "process_summary", ""),
             "teaching_focus": _krpkr_teaching_focus(board_before, board_after, role_meta, same_position) if kb and kb.get("name") == "车兵对车" else _generic_teaching_focus(cs.phase, phase_hint, same_position),
             "eval_delta": getattr(cs, "eval_delta", None),
             "same_position": same_position,
