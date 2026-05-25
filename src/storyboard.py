@@ -1,5 +1,6 @@
 from src.common import CompressedStep, Logger, AnalyzedMove
 from src.endgame_knowledge import match as match_endgame
+from src.endgame_knowledge import describe_endgame, get_forbidden_concepts
 from typing import List, Optional, Tuple
 import chess
 
@@ -541,9 +542,24 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
 
     nodes_out = []
     prev_phase = ""
+    prev_endgame_name = ""
+    prev_endgame_type = ""
     for cs in compressed:
         board_before = chess.Board(cs.fen_before)
         board_after = chess.Board(cs.fen_after)
+
+        sub_endgame = describe_endgame(board_before)
+        sub_name = sub_endgame["name"]
+        sub_type = sub_endgame.get("type", "unknown")
+        endgame_changed = (sub_type != prev_endgame_type) and prev_endgame_type != "" and sub_type != "unknown"
+        if sub_name != prev_endgame_name:
+            if prev_endgame_name:
+                Logger.info(f"  子残局切换: {prev_endgame_name} → {sub_name}")
+            prev_endgame_name = sub_name
+            prev_endgame_type = sub_type
+
+        allowed = sub_endgame.get("motifs", [])
+        forbidden = get_forbidden_concepts(board_before, sub_endgame)
 
         if len(cs.sans) > 1:
             turn = "双方交替"
@@ -589,6 +605,10 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
             "actor_role": actor_role,
             "phase_milestone": phase_milestone,
             "detail_level": detail_level,
+            "sub_endgame_name": sub_name,
+            "endgame_changed": endgame_changed,
+            "allowed_concepts": allowed,
+            "forbidden_concepts": forbidden,
         }
         node["counterfactual_hint"] = _counterfactual_hint(node)
 
@@ -612,5 +632,8 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
         "hard_constraints": _hard_constraints(board, kb["name"] if kb else "残局", role_meta),
         "compact_mode": total_halfmoves >= LONG_MOVE_THRESHOLD or n >= COMPACT_NODE_THRESHOLD,
         "target_length": "1200-1600字" if n >= COMPACT_NODE_THRESHOLD else "800-1100字",
+        "has_sub_endgame_switch": any(
+            node.get("endgame_changed") for node in nodes_out
+        ),
         "nodes": nodes_out,
     }

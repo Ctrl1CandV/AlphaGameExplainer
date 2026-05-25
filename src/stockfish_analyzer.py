@@ -195,7 +195,7 @@ def _sf_step_heavy(engine, board: chess.Board) -> AnalyzedMove:
         trap_san=trap_san, source="sf",
     )
 
-def _sf_solve(board: chess.Board, stockfish_path: str) -> List[AnalyzedMove]:
+def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "") -> List[AnalyzedMove]:
     """ 两阶段求解：先快速拿到走法序列，再对关键位置精标注 """
     def _quiet_handler(_loop, context):
         exc = context.get('exception')
@@ -211,6 +211,12 @@ def _sf_solve(board: chess.Board, stockfish_path: str) -> List[AnalyzedMove]:
     loop.set_exception_handler(_quiet_handler)
     try:
         engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        if syzygy_path:
+            try:
+                engine.configure({"SyzygyPath": syzygy_path, "SyzygyProbeDepth": 1})
+                Logger.info(f"SF 已接入 Syzygy: {syzygy_path}")
+            except Exception as e:
+                Logger.warn(f"SF 配置 Syzygy 失败: {e}")
     except Exception as e:
         Logger.error(f"无法启动Stockfish引擎: {e}")
         return []
@@ -280,10 +286,13 @@ def _sf_solve(board: chess.Board, stockfish_path: str) -> List[AnalyzedMove]:
                 pass
         loop.set_exception_handler(old_handler)
 
-def get_solution(board: chess.Board, stockfish_path: str) -> List[AnalyzedMove]:
+def get_solution(board: chess.Board, stockfish_path: str, tablebase_solver=None, syzygy_path: str = "") -> List[AnalyzedMove]:
     """
-    获取从当前局面到终局的最优解法
-    ≤7 子时优先使用ChessDB表库查询，不足部分由Stockfish逐步补全
+    获取从当前局面到终局的最优解法，优先级：本地表库 > ChessDB > Stockfish
+
+    - 本地表库 (Syzygy/Gaviota): 穷举真值，≤7子且命中的局面可直接走到终局
+    - ChessDB: ≤7子未命中表库时的在线查询，可能不完整
+    - Stockfish: 兜底搜索，可接入Syzygy辅助评估
     返回包含评分、候选走法、陷阱等元数据的AnalyzedMove列表
     """
     piece_count = len(board.piece_map())
@@ -296,7 +305,31 @@ def get_solution(board: chess.Board, stockfish_path: str) -> List[AnalyzedMove]:
         Logger.info("局面已结束，无需分析")
         return []
 
-    if piece_count <= 7:
+    if tablebase_solver is not None:
+        try:
+            tablebase_solver.open()
+        except Exception as e:
+            Logger.warn(f"表库打开失败: {e}")
+
+        if tablebase_solver.is_hit(temp):
+            Logger.info("从本地表库查询最优解法...")
+            tb_result = tablebase_solver.solve(temp)
+            if tb_result:
+                for am in tb_result:
+                    if temp.is_game_over():
+                        break
+                    if am.move not in temp.legal_moves:
+                        Logger.warn(f"表库返回非法走法 {am.move.uci()}，回退到SF")
+                        break
+                    result.append(am)
+                    temp.push(am.move)
+                if temp.is_game_over():
+                    Logger.success(f"本地表库完整解法: {len(result)} 步 (来源:{tb_result[0].source})")
+                    return result
+                if result:
+                    Logger.info(f"本地表库部分数据 ({len(result)}步)，SF 补全...")
+
+    if not temp.is_game_over() and piece_count <= 7:
         Logger.info("从 ChessDB 查询最优解法...")
         for _ in range(60):
             am = _cdb_step(temp)
@@ -313,12 +346,12 @@ def get_solution(board: chess.Board, stockfish_path: str) -> List[AnalyzedMove]:
             Logger.success(f"ChessDB 完整解法: {len(result)} 步")
             return result
 
-        if result:
+        if result and len(result) > 0 and result[-1].source == "chessdb":
             Logger.info(f"ChessDB 部分数据 ({len(result)}步)，SF 补全...")
 
     if not temp.is_game_over():
         Logger.info("Stockfish 搜索解法...")
-        sf_result = _sf_solve(temp, stockfish_path)
+        sf_result = _sf_solve(temp, stockfish_path, syzygy_path)
         for am in sf_result:
             if temp.is_game_over():
                 break

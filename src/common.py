@@ -52,9 +52,10 @@ class AnalyzedMove:
     move: chess.Move
     score: Optional[int] = None                             # 走棋前局面的centipawn评估值，走棋方视角
     candidates: List[str] = field(default_factory=list)     # MultiPV候选走法的SAN列表
-    is_only_move: bool = False                              # 是否为唯一好着（
+    is_only_move: bool = False                              # 是否为唯一好着
     trap_san: Optional[str] = None                          # 看似合理但其实导致大劣的陷阱走法SAN
-    source: str = "sf"                                      # 来源:"chessdb"或"sf"
+    source: str = "sf"                                      # 来源:"chessdb" / "sf" / "syzygy" / "gaviota"
+    dtm: Optional[int] = None                               # 距杀步数(Gaviota DTM), 正=走棋方胜, 负=走棋方负
 
 @dataclass
 class Segment:

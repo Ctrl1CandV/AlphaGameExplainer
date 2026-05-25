@@ -15,9 +15,13 @@ def _count_material(board: chess.Board):
     return white, black
 
 def is_endgame(board: chess.Board) -> bool:
-    """ 判断当前局面是否为残局 """
+    """ 判断当前局面是否为残局：材料分低或子数 ≤7（可被表库覆盖） """
     white, black = _count_material(board)
-    return white <= 14 or black <= 14 or (white + black) <= 20
+    if white <= 14 or black <= 14 or (white + black) <= 20:
+        return True
+    if len(board.piece_map()) <= 7:
+        return True
+    return False
 
 """
 国际象棋的FEN表示共有六个部分:

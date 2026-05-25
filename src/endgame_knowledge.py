@@ -142,3 +142,98 @@ def match(board: chess.Board) -> Optional[dict]:
         if w_sig == b_pat and b_sig == w_pat:
             return entry
     return None
+
+
+_CHINESE_TYPE = {
+    chess.QUEEN: "后", chess.ROOK: "车", chess.BISHOP: "象",
+    chess.KNIGHT: "马", chess.PAWN: "兵",
+}
+
+
+def _sig_name(sig: tuple) -> str:
+    parts = []
+    sig_dict = dict(sig)
+    for pt in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN):
+        count = sig_dict.get(pt, 0)
+        if count > 0:
+            name = _CHINESE_TYPE.get(pt, "?")
+            if count == 1:
+                parts.append(name)
+            else:
+                parts.append(f"{count}{name}")
+    return "".join(parts) if parts else "单王"
+
+
+def describe_endgame(board: chess.Board) -> dict:
+    kb = match(board)
+    if kb:
+        return {
+            "type": kb["type"],
+            "name": kb["name"],
+            "theory": kb["theory"],
+            "phases": kb["phases"],
+            "motifs": kb["motifs"],
+            "mistakes": kb["mistakes"],
+            "matched": True,
+        }
+    w_sig = _piece_signature(board, chess.WHITE)
+    b_sig = _piece_signature(board, chess.BLACK)
+    w_name = _sig_name(w_sig)
+    b_name = _sig_name(b_sig)
+    if w_name == "单王" and b_name == "单王":
+        name = "单王残局"
+    else:
+        name = f"{w_name}对{b_name}"
+    return {
+        "type": "unknown",
+        "name": name,
+        "theory": "",
+        "phases": [],
+        "motifs": [],
+        "mistakes": [],
+        "matched": False,
+    }
+
+
+def get_forbidden_concepts(board: chess.Board, endgame_info: dict) -> list:
+    rules = []
+    piece_map = board.piece_map()
+    has_pawn = any(p.piece_type == chess.PAWN for p in piece_map.values())
+    has_rook = any(p.piece_type == chess.ROOK for p in piece_map.values())
+    has_bishop = any(p.piece_type == chess.BISHOP for p in piece_map.values())
+    has_knight = any(p.piece_type == chess.KNIGHT for p in piece_map.values())
+    has_queen = any(p.piece_type == chess.QUEEN for p in piece_map.values())
+
+    if not has_pawn:
+        rules.append("禁止提及升变、兵推进、关键格")
+        rules.append("禁止提及「菲利多防线」「卢塞纳桥位」")
+    if not has_rook:
+        rules.append("禁止提及车控制线、横线/纵线割裂、盒子法")
+    if not has_bishop:
+        rules.append("禁止提及斜线控制、象网、同色角落")
+    if not has_knight:
+        rules.append("禁止提及马控制、W形驱赶")
+    if not has_queen:
+        rules.append("禁止提及后控制线、骑士距离")
+    if wdl := _try_wdl(board):
+        if wdl <= 0:
+            rules.append("当前局面黑方必败，禁止写成黑方优势或反击机会")
+        if wdl >= 0:
+            rules.append("当前局面白方必败，禁止写成白方优势或反击机会")
+    return rules
+
+
+def _try_wdl(board: chess.Board) -> Optional[int]:
+    try:
+        import chess.syzygy
+        syzygy_dir = None
+        import os
+        from dotenv import load_dotenv
+        load_dotenv()
+        syzygy_dir = os.getenv("SYZYGY_PATH", "")
+        if not syzygy_dir:
+            return None
+        with chess.syzygy.open_tablebase(syzygy_dir) as tb:
+            return tb.probe_wdl(board)
+    except Exception:
+        return None

@@ -51,11 +51,9 @@ def _get_example(endgame_name: str) -> str:
 
 def _build_header(storyboard: dict) -> str:
     endgame_name = storyboard.get("endgame_name", "残局")
-    motifs = storyboard.get("motifs", [])
-    mistakes = storyboard.get("mistakes", [])
     role_summary = storyboard.get("role_summary", "")
-    concept_binding = storyboard.get("concept_binding", [])
     hard_constraints = storyboard.get("hard_constraints", [])
+    has_switch = storyboard.get("has_sub_endgame_switch", False)
 
     node_count = len(storyboard.get("nodes", []))
 
@@ -63,35 +61,35 @@ def _build_header(storyboard: dict) -> str:
         "你是专业的国际象棋残局教练。请输出专业、严谨、以棋理为核心的中文解说，纯文本输出。",
         "要求：只依据给定走法和局面信息解说，禁止虚构剧情，禁止空泛比喻。你的任务是解释局面变化，而不是自由创作。",
         "",
-        f"【残局类型】{endgame_name}",
-        f"【核心策略】{storyboard.get('context', '残局局面分析')}",
+        f"【起始残局类型】{endgame_name}",
     ]
-    if motifs:
-        parts.append(f"【关键概念】{'、'.join(motifs)}")
-    if mistakes:
-        parts.append(f"【易犯错误】{'、'.join(mistakes)}")
 
     if role_summary:
         parts.append(f"【攻守角色】{role_summary}")
-    if concept_binding:
-        parts.append(f"【概念绑定】{'；'.join(concept_binding)}")
     if hard_constraints:
-        parts.append(f"【事实约束】{'；'.join(hard_constraints)}")
+        parts.append(f"【全局约束】{'；'.join(hard_constraints)}")
+
+    if has_switch:
+        parts.extend([
+            "",
+            "【重要】中途可能发生残局类型转换（如车兵对车→升变→车对车→单车杀王）。",
+            "每个节点都标注了当前的子残局类型，必须按当前类型使用对应的概念和术语。",
+            "残局类型转换后，禁止继续沿用旧类型的理论框架。",
+        ])
 
     parts.extend([
         "",
         "【解说规则】",
         f"- 你只能输出第1步到第{node_count}步这{node_count}个节点，绝不能额外扩写成更多步",
         "- 每一步都按这个顺序组织：走法是什么 → 局面变化是什么 → 为什么这样走有用 → 这一段的残局教学点是什么",
-        "- 必须优先使用提供的局面变化摘要、教学重点和战略意图，不能自行发明不存在的突破、升变或防线",
+        "- 必须严格遵循每个节点标注的【当前残局】【允许概念】【禁止概念】",
         "- 关键步骤：详细分析局面发生了什么实质变化",
         "- 多着调整步骤：概括整段机动的目的，但仍要点出关键轨迹和为什么有用",
-        "- 车只能描述为控制纵线/横线/关键格，绝不能写成对角线、斜线或斜向牵制",
         "- 如果节点起止局面相同，只能解释为反复试探、等招或调车，不得写成突破",
         "- 禁止使用引擎术语：评估值、分数、厘兵、半着、DTM、mate in N",
         "- 不得虚构或假设走法。如数据中未提供某步的精确走法，描述为「经过N着调整」而非编造格子",
         "- 禁止使用「假设」「可能」「如果」等猜测性语言描述已发生的走法",
-        "- 最后用一句话总结该残局类型的核心规律",
+        "- 最后一个节点允许总结，但只总结当前节点的子残局类型规律，不要机械地套用起始残局的框架",
         "",
     ])
     return "\n".join(parts)
@@ -116,8 +114,20 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         star = "★" if node["is_critical"] else "·"
         phase_label = f" — {node['phase']}" if node.get("phase") else ""
         phase_hint = node.get("phase_hint", "")
+        sub_name = node.get("sub_endgame_name", "")
+        forbidden = node.get("forbidden_concepts", [])
+        allowed = node.get("allowed_concepts", [])
 
         parts.append(f"{star}第{node_id}步：{node['moves']}（{node['move_count']}着, {node['turn']}）{phase_label}")
+
+        if node.get("endgame_changed"):
+            parts.append(f"  ⚠ 残局类型已切换为: {sub_name}，必须使用新类型的概念体系")
+        if sub_name:
+            parts.append(f"  【当前残局】{sub_name}")
+        if allowed:
+            parts.append(f"  【允许概念】{'、'.join(allowed)}")
+        if forbidden:
+            parts.append(f"  【禁止概念】{'、'.join(forbidden)}")
 
         if node.get("situation_before") and node["is_critical"]:
             parts.append(f"  局面特征：{node['situation_before']}")
