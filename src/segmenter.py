@@ -1,7 +1,6 @@
-import re
+from src.common import Segment, StoryboardSegment, GeneratedCommentary
 from typing import List
-from src.common import Segment
-
+import re
 
 def segment(commentary: str, move_count: int) -> List[Segment]:
     """
@@ -28,3 +27,23 @@ def segment(commentary: str, move_count: int) -> List[Segment]:
         end = start + chunk if i < move_count - 1 else total
         result.append(Segment(move_idx=i + 1, text=commentary[start:end].strip()))
     return result
+
+
+def from_storyboard_segments(segments: List[StoryboardSegment]) -> List[Segment]:
+    result = []
+    for seg in segments:
+        result.append(Segment(
+            move_idx=seg.id,
+            text=seg.voiceover,
+        ))
+    return result
+
+
+def to_segments(source: GeneratedCommentary | str | None, move_count: int = 0) -> List[Segment]:
+    if source is None:
+        return []
+    if isinstance(source, GeneratedCommentary):
+        return from_storyboard_segments(source.segments)
+    if isinstance(source, str):
+        return segment(source, move_count)
+    return []

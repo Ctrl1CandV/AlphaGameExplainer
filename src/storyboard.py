@@ -258,6 +258,7 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
         compressed[-1].process_summary = process_summ
 
     compressed = _merge_repetitive(compressed)
+    compressed = _merge_check_sequences(compressed)
 
     Logger.info(f"压缩: {len(per_move)} 步 → {len(compressed)} 节点")
     return compressed
@@ -275,6 +276,103 @@ def _same_pieces(a_fen: str, b_fen: str) -> bool:
         return a_counts == b_counts
     except Exception:
         return False
+
+def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
+    """将交替将军→非将军的驱赶序列分段合并为叙事节点，每段最多合并8个原始节点"""
+    if len(steps) < 4:
+        return steps
+
+    n = len(steps)
+    skip = [False] * n
+
+    for i in range(n):
+        if skip[i]:
+            continue
+
+        if "将军" not in steps[i].tags:
+            continue
+
+        j = i + 1
+        check_count = 1
+        quiet_count = 0
+        while j < n and (j - i) < 8:
+            cs_j = steps[j]
+            if "吃子" in cs_j.tags:
+                break
+            has_check = "将军" in cs_j.tags
+            had_check = "将军" in steps[j - 1].tags
+            if has_check:
+                check_count += 1
+            else:
+                quiet_count += 1
+            if has_check == had_check:
+                if (j - i) >= 4:
+                    j += 0
+                break
+            j += 1
+
+        run_len = j - i
+        if check_count < 2 or run_len < 3:
+            continue
+
+        first = steps[i]
+        last = steps[j - 1]
+
+        all_sans = []
+        for k in range(i, j):
+            all_sans.extend(steps[k].sans)
+
+        first_board = chess.Board(first.fen_before)
+        last_board = chess.Board(last.fen_after)
+        bk_before = first_board.king(chess.BLACK)
+        bk_after = last_board.king(chess.BLACK)
+        wk_before = first_board.king(chess.WHITE)
+        wk_after = last_board.king(chess.WHITE)
+
+        king_parts = []
+        if bk_before is not None and bk_after is not None and bk_before != bk_after:
+            king_parts.append(f"黑王{chess.square_name(bk_before)}→{chess.square_name(bk_after)}")
+        if wk_before is not None and wk_after is not None and wk_before != wk_after:
+            king_parts.append(f"白王{chess.square_name(wk_before)}→{chess.square_name(wk_after)}")
+
+        maneuver_pattern = "将军驱赶"
+        if check_count >= 4:
+            maneuver_pattern = "连续将军驱赶"
+
+        is_repeating = False
+        for seg_len in (2, 3, 4):
+            if len(all_sans) >= seg_len * 2 and all_sans[:seg_len] == all_sans[seg_len:seg_len * 2]:
+                is_repeating = True
+                break
+        if is_repeating or (king_parts and any(
+                any(pat in p for pat in ("h7→h8", "h8→h7", "f7→f8", "f8→f7"))
+                for p in king_parts)):
+            maneuver_pattern = "反复试探等待"
+
+        process_summ = f"{check_count}次将军配合{quiet_count}次躲王。"
+        if king_parts:
+            process_summ += f" 期间{'；'.join(king_parts)}。"
+
+        merged_cs = CompressedStep(
+            idx=0,
+            sans=all_sans,
+            fen_before=first.fen_before,
+            fen_after=last.fen_after,
+            is_critical=True,
+            trap=first.trap or "",
+            tags=[maneuver_pattern],
+            eval_delta=sum((steps[k].eval_delta or 0) for k in range(i, j)),
+            candidates=[],
+        )
+        merged_cs.process_summary = process_summ
+        steps[i] = merged_cs
+        for k in range(i + 1, j):
+            skip[k] = True
+
+    result = [s for idx, s in enumerate(steps) if not skip[idx]]
+    for idx, s in enumerate(result):
+        s.idx = idx + 1
+    return result
 
 def _merge_repetitive(steps: List[CompressedStep]) -> List[CompressedStep]:
     if len(steps) < 3:
@@ -526,6 +624,174 @@ def _role_meta(board: chess.Board, endgame_name: str) -> dict:
         ]
     return meta
 
+def _suggest_pacing(node: dict, cs, compressed: list) -> str:
+    is_last = cs.idx == len(compressed)
+    tags = node.get("tags", [])
+
+    if node.get("endgame_changed"):
+        return "slow"
+    if "将军" in tags and not is_last:
+        return "slow"
+    if node.get("same_position") and len(cs.sans) >= 3:
+        return "fast"
+    if node.get("is_critical") and node.get("phase_milestone"):
+        return "pause_before"
+    if node.get("is_critical") and node.get("eval_delta") is not None and abs(node["eval_delta"]) > 200:
+        return "slow"
+    if is_last and node.get("is_critical"):
+        return "pause_after"
+    if node.get("is_critical"):
+        return "slow"
+    return "normal"
+
+
+def _winner_name(outcome: Optional[chess.Outcome]) -> str:
+    if outcome is None or outcome.winner is None:
+        return ""
+    return "白方" if outcome.winner == chess.WHITE else "黑方"
+
+
+def _collect_node_move_info(board_before: chess.Board, cs) -> dict:
+    """从一个压缩节点的所有走法中提取动作事实"""
+    temp = board_before.copy()
+    checking_types = set()
+    captured_types = set()
+    moved_piece_types = set()
+    king_moved = False
+
+    for san in cs.sans:
+        try:
+            move = temp.parse_san(san)
+        except ValueError:
+            continue
+        piece = temp.piece_at(move.from_square)
+        if piece:
+            moved_piece_types.add(piece.piece_type)
+            if piece.piece_type == chess.KING:
+                king_moved = True
+        if temp.is_capture(move):
+            captured_piece = temp.piece_at(move.to_square)
+            if captured_piece:
+                captured_types.add(captured_piece.piece_type)
+        temp.push(move)
+        if temp.is_check():
+            checkers = temp.checkers()
+            for sq in checkers:
+                p = temp.piece_at(sq)
+                if p:
+                    checking_types.add(p.piece_type)
+
+    return {
+        "king_moved": king_moved,
+        "moved_piece_types": sorted(moved_piece_types),
+        "checking_piece_types": sorted(checking_types),
+        "captured_piece_types": sorted(captured_types),
+    }
+
+
+def _detect_repetition_maneuver(compressed: list, idx: int, kb_name: str) -> tuple:
+    """检测节点是否属于反复试探机动，以及重复次数和模式"""
+    cs = compressed[idx]
+    if len(cs.sans) < 2:
+        return False, 0, ""
+
+    dest_squares = []
+    temp_board = chess.Board(cs.fen_before)
+    for san in cs.sans:
+        try:
+            move = temp_board.parse_san(san)
+        except ValueError:
+            continue
+        dest_squares.append(move.to_square)
+        temp_board.push(move)
+
+    if len(dest_squares) < 3:
+        return False, 0, ""
+
+    unique = list(dict.fromkeys(dest_squares))
+    if len(unique) <= 2 and len(dest_squares) >= 3:
+        repeat_count = 1
+        for j in range(idx + 1, len(compressed)):
+            next_cs = compressed[j]
+            next_temp = chess.Board(next_cs.fen_before)
+            next_dests = []
+            for san in next_cs.sans:
+                try:
+                    m = next_temp.parse_san(san)
+                except ValueError:
+                    continue
+                next_dests.append(m.to_square)
+                next_temp.push(m)
+            next_unique = list(dict.fromkeys(next_dests))
+            if len(next_unique) <= 2 and set(next_unique) == set(unique):
+                repeat_count += 1
+                continue
+            break
+
+        if repeat_count >= 2:
+            pattern_squares = [chess.square_name(sq) for sq in unique]
+            return True, repeat_count + 1, f"{pattern_squares[0]}-{pattern_squares[1]}" if len(pattern_squares) == 2 else "-".join(pattern_squares)
+
+    return False, 0, ""
+
+
+def _classify_goal(board_before: chess.Board, board_after: chess.Board, cs, role_meta: dict) -> str:
+    weak_color = role_meta.get("weak_color")
+    if weak_color is None:
+        return "improve_piece_coordination"
+
+    if board_after.is_checkmate() or board_after.is_game_over():
+        return "convert_to_mate"
+
+    wk_before = board_before.king(weak_color)
+    wk_after = board_after.king(weak_color)
+    if wk_before is None or wk_after is None:
+        return "improve_piece_coordination"
+
+    before_escapes = sum(1 for _ in board_before.legal_moves)
+    after_escapes = sum(1 for _ in board_after.legal_moves)
+
+    weak_rank = chess.square_rank(wk_after)
+    weak_file = chess.square_file(wk_after)
+    on_edge = weak_rank in (0, 7) or weak_file in (0, 7)
+    in_corner = (weak_rank in (0, 7) and weak_file in (0, 7))
+
+    if in_corner:
+        return "drive_to_corner"
+    if on_edge and after_escapes < before_escapes:
+        return "drive_to_edge"
+    if after_escapes < before_escapes:
+        return "shrink_space"
+    if cs is not None and getattr(cs, "fen_before", "") == getattr(cs, "fen_after", ""):
+        return "hold_net"
+
+    return "improve_piece_coordination"
+
+
+def _assign_claim_level(node: dict, goal: str, is_last: bool) -> str:
+    if node.get("is_checkmate_after"):
+        return "terminal"
+    if node.get("is_game_over_after"):
+        return "terminal"
+    if is_last and goal == "convert_to_mate":
+        return "forcing"
+    if node.get("is_check_after"):
+        return "forcing"
+    if node.get("legal_reply_count_after", 10) <= 2:
+        return "forcing"
+    if goal in ("drive_to_corner", "drive_to_edge", "shrink_space"):
+        return "constraining"
+    return "positioning"
+
+
+def _assign_video_density(node: dict, contains_rep: bool, repeat_count: int) -> dict:
+    if contains_rep and repeat_count >= 3:
+        return {"density": "low", "summary_only": True}
+    if node.get("is_critical") or node.get("is_checkmate_after") or node.get("endgame_changed"):
+        return {"density": "high", "summary_only": False}
+    return {"density": "medium", "summary_only": False}
+
+
 def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
     """基于压缩节点构建叙事分镜，注入局面特征与分阶段解说提示"""
     kb = match_endgame(board)
@@ -544,9 +810,16 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
     prev_phase = ""
     prev_endgame_name = ""
     prev_endgame_type = ""
-    for cs in compressed:
+    n_compressed = len(compressed)
+
+    for idx_cs, cs in enumerate(compressed):
         board_before = chess.Board(cs.fen_before)
         board_after = chess.Board(cs.fen_after)
+
+        move_info = _collect_node_move_info(board_before, cs)
+        contains_rep, rep_count, rep_pattern = _detect_repetition_maneuver(compressed, idx_cs, kb["name"] if kb else "")
+        goal = _classify_goal(board_before, board_after, cs, role_meta if role_meta else {})
+        is_last_node = idx_cs == n_compressed - 1
 
         sub_endgame = describe_endgame(board_before)
         sub_name = sub_endgame["name"]
@@ -583,9 +856,14 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
 
         phase_milestone = bool(cs.phase and cs.phase != prev_phase)
         detail_level = "high" if cs.is_critical or phase_milestone or len(cs.sans) >= 6 else "medium"
+        outcome_after = board_after.outcome() if board_after.is_game_over() else None
+        legal_reply_count_after = sum(1 for _ in board_after.legal_moves)
+        is_capture_node = "吃子" in cs.tags
+        has_check_in_node = "将军" in cs.tags
 
         node = {
             "id": cs.idx,
+            "sans": list(cs.sans),
             "turn": turn,
             "moves": " → ".join(cs.sans),
             "moves_display": _compact_moves_display(cs.sans),
@@ -609,8 +887,33 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
             "endgame_changed": endgame_changed,
             "allowed_concepts": allowed,
             "forbidden_concepts": forbidden,
+            "is_capture_node": is_capture_node,
+            "has_check_in_node": has_check_in_node,
+            "is_check_after": board_after.is_check(),
+            "is_checkmate_after": board_after.is_checkmate(),
+            "is_stalemate_after": board_after.is_stalemate(),
+            "is_game_over_after": board_after.is_game_over(),
+            "legal_reply_count_after": legal_reply_count_after,
+            "winner_after": _winner_name(outcome_after),
+            "king_moved": move_info["king_moved"],
+            "moved_piece_types": move_info["moved_piece_types"],
+            "checking_piece_types": move_info["checking_piece_types"],
+            "captured_piece_types": move_info["captured_piece_types"],
+            "contains_repetition_maneuver": contains_rep,
+            "repeat_count": rep_count,
+            "maneuver_pattern": rep_pattern,
+            "position_goal": goal,
+            "is_last_node": is_last_node,
         }
+        claim_level = _assign_claim_level(node, goal, is_last_node)
+        node["claim_level"] = claim_level
+        video_info = _assign_video_density(node, contains_rep, rep_count)
+        node["video_density"] = video_info["density"]
+        node["summary_only"] = video_info["summary_only"]
         node["counterfactual_hint"] = _counterfactual_hint(node)
+
+        node["suggested_phase_label"] = cs.phase if cs.phase else ""
+        node["suggested_pacing"] = _suggest_pacing(node, cs, compressed)
 
         if not cs.is_critical and len(cs.sans) >= 2:
             node["king_change"] = _compare_kings(cs.fen_before, cs.fen_after)
@@ -621,6 +924,12 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
 
     total_halfmoves = sum(len(cs.sans) for cs in compressed)
 
+    strong_color = role_meta.get("strong_color")
+    weak_color = role_meta.get("weak_color")
+    winning_side = _color_name(strong_color) if strong_color is not None else ""
+    losing_side = _color_name(weak_color) if weak_color is not None else ""
+    narrative_mode = "winning_conversion" if role_meta else "balanced"
+
     return {
         "endgame_name": kb["name"] if kb else "残局",
         "context": kb["theory"] if kb else "残局局面分析",
@@ -630,6 +939,9 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
         "role_summary": role_meta.get("role_summary", ""),
         "concept_binding": role_meta.get("concept_binding", []),
         "hard_constraints": _hard_constraints(board, kb["name"] if kb else "残局", role_meta),
+        "winning_side": winning_side,
+        "losing_side": losing_side,
+        "narrative_mode": narrative_mode,
         "compact_mode": total_halfmoves >= LONG_MOVE_THRESHOLD or n >= COMPACT_NODE_THRESHOLD,
         "target_length": "1200-1600字" if n >= COMPACT_NODE_THRESHOLD else "800-1100字",
         "has_sub_endgame_switch": any(

@@ -215,25 +215,4 @@ def get_forbidden_concepts(board: chess.Board, endgame_info: dict) -> list:
         rules.append("禁止提及马控制、W形驱赶")
     if not has_queen:
         rules.append("禁止提及后控制线、骑士距离")
-    if wdl := _try_wdl(board):
-        if wdl <= 0:
-            rules.append("当前局面黑方必败，禁止写成黑方优势或反击机会")
-        if wdl >= 0:
-            rules.append("当前局面白方必败，禁止写成白方优势或反击机会")
     return rules
-
-
-def _try_wdl(board: chess.Board) -> Optional[int]:
-    try:
-        import chess.syzygy
-        syzygy_dir = None
-        import os
-        from dotenv import load_dotenv
-        load_dotenv()
-        syzygy_dir = os.getenv("SYZYGY_PATH", "")
-        if not syzygy_dir:
-            return None
-        with chess.syzygy.open_tablebase(syzygy_dir) as tb:
-            return tb.probe_wdl(board)
-    except Exception:
-        return None

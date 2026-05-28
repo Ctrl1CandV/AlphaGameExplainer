@@ -101,9 +101,16 @@ class TablebaseSolver:
         return None
 
     def _best_move_syzygy(self, board: chess.Board) -> Optional[Tuple[chess.Move, int, int]]:
+        current_wdl = self.probe_wdl(board)
+        if current_wdl is None and not self._syzygy_available:
+            return None
+
         best_move = None
-        best_wdl = -999
-        best_dtz = 0
+        best_wdl = None
+        best_dtz = None
+        best_dtz_abs = None
+        fallback_mode = current_wdl is None
+        is_winning = current_wdl > 0 if not fallback_mode else True
         for move in board.legal_moves:
             temp = board.copy()
             temp.push(move)
@@ -111,17 +118,34 @@ class TablebaseSolver:
                 wdl = self._syzygy.probe_wdl(temp)
                 if wdl is None:
                     continue
-                dtz = 0
+                dtz = None
                 try:
-                    dtz = self._syzygy.probe_dtz(temp) or 0
+                    dtz = self._syzygy.probe_dtz(temp)
                 except Exception:
                     pass
-                if wdl > best_wdl or (wdl == best_wdl and abs(dtz) < abs(best_dtz)):
-                    best_wdl, best_dtz, best_move = wdl, dtz, move
+                dtz_abs = abs(dtz) if dtz is not None else None
+                if best_wdl is None:
+                    best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
+                    continue
+                if fallback_mode:
+                    if wdl < best_wdl or (wdl == best_wdl and dtz_abs is not None and (best_dtz_abs is None or dtz_abs < best_dtz_abs)):
+                        best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
+                else:
+                    if wdl < best_wdl:
+                        best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
+                    elif wdl == best_wdl and dtz_abs is not None:
+                        if best_dtz_abs is None:
+                            best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
+                        elif is_winning:
+                            if dtz_abs < best_dtz_abs:
+                                best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
+                        else:
+                            if dtz_abs > best_dtz_abs:
+                                best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
             except Exception:
                 continue
         if best_move is not None:
-            return (best_move, best_wdl, best_dtz)
+            return (best_move, best_wdl, best_dtz if best_dtz is not None else 0)
         return None
 
     def _best_move_gaviota(self, board: chess.Board) -> Optional[Tuple[chess.Move, int, int]]:
@@ -173,6 +197,30 @@ class TablebaseSolver:
             return self._solve_with(board, use="syzygy")
         return []
 
+    def solve_step(self, board: chess.Board) -> Optional[AnalyzedMove]:
+        if not self._opened:
+            return None
+        wdl = self.probe_wdl(board)
+        if wdl is None:
+            return None
+        if self._gaviota_available and len(board.piece_map()) <= 5:
+            pair = self._best_move_gaviota(board)
+        elif self._syzygy_available:
+            pair = self._best_move_syzygy(board)
+        else:
+            return None
+        if pair is None:
+            return None
+        move, move_wdl, _ = pair
+        return AnalyzedMove(
+            move=move,
+            score=None,
+            candidates=[],
+            is_only_move=(wdl == 2 and move_wdl < 2) or (wdl == -2),
+            trap_san=None,
+            source="gaviota" if self._gaviota_available else "syzygy",
+        )
+
     def _solve_with(self, board: chess.Board, use: str) -> List[AnalyzedMove]:
         temp = board.copy()
         result = []
@@ -181,8 +229,6 @@ class TablebaseSolver:
             if temp.is_game_over():
                 break
             wdl = self.probe_wdl(temp)
-            if wdl is None:
-                break
             if use == "gaviota":
                 pair = self._best_move_gaviota(temp)
             else:
@@ -190,6 +236,8 @@ class TablebaseSolver:
             if pair is None:
                 break
             move, move_wdl, info = pair
+            if wdl is None:
+                wdl = 2 if move_wdl is not None and move_wdl < 0 else (move_wdl if move_wdl is not None else 0)
             dtm = None
             if use == "gaviota":
                 dtm = info
@@ -202,30 +250,39 @@ class TablebaseSolver:
                 source="gaviota" if use == "gaviota" else "syzygy",
                 dtm=dtm,
             ))
-            if use == "gaviota":
-                wdl_before = self.probe_wdl(temp)
-                temp.push(move)
-                wdl_after = self.probe_wdl(temp)
-                if wdl_before == wdl_after:
-                    continue
             temp.push(move)
         return result
 
     def is_hit(self, board: chess.Board) -> bool:
-        return self.probe_wdl(board) is not None
+        if self.probe_wdl(board) is not None:
+            return True
+        if self._syzygy_available:
+            return self._best_move_syzygy(board) is not None
+        return False
 
     def is_draw(self, board: chess.Board) -> Optional[bool]:
         """
-        检测局面是否为和棋（含理论必和与 cursed win / blessed loss）。
+        检测局面在五十步规则约束下是否为和棋。
         返回:
-            True  - 和棋（WDL=0 理论必和, 或 WDL=±1 超50步无法兑现）
-            False - 存在一方必胜（WDL=±2）
+            True  - 和棋（理论必和/子力不足/50步内无法兑现）
+            False - 存在一方在50步内可兑现的必胜
             None  - 表库未命中，无法判定
         """
         wdl = self.probe_wdl(board)
         if wdl is None:
             return None
-        return abs(wdl) <= 1
+        if abs(wdl) <= 1:
+            return True
+        if self._syzygy_available:
+            try:
+                dtz = self._syzygy.probe_dtz(board)
+            except (KeyError, chess.syzygy.MissingTableError):
+                dtz = None
+            if dtz is not None and dtz != 0:
+                remaining = 100 - board.halfmove_clock
+                if abs(dtz) > remaining:
+                    return True
+        return False
 
     @property
     def syzygy_path(self) -> str:

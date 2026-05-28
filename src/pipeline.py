@@ -1,7 +1,8 @@
 from src.stockfish_analyzer import get_solution
-from src.common import Logger, resolve_path
+from src.common import Logger, resolve_path, GeneratedCommentary
 from src.storyboard import compress, build
-from src.commentator import generate
+from src.commentator import generate_structured, generate
+from src.llm_backend import release_backend
 from src.tablebase import TablebaseSolver
 from dotenv import load_dotenv
 from src.parser import parse
@@ -30,6 +31,10 @@ def run(input_text: str) -> str:
     game_data = parse(input_text)
     board = chess.Board(game_data.initial_fen)
 
+    if not board.is_valid():
+        Logger.error(f"非法初始局面: FEN不合法 (status={board.status()})，无法生成解说")
+        return ""
+
     Logger.info("[2/5] 查询最优解法...")
     analyzed_moves = get_solution(board, stockfish_path, tablebase_solver, syzygy_path)
     if not analyzed_moves:
@@ -49,8 +54,25 @@ def run(input_text: str) -> str:
     storyboard = build(board, compressed)
 
     Logger.info("[5/5] 生成中文解说...")
-    commentary = generate(board, storyboard)
-    print(commentary)
+    try:
+        commentary = generate_structured(board, storyboard)
+    except Exception as e:
+        Logger.warn(f"结构化生成失败，回退纯文本: {e}")
+        text = generate(board, storyboard)
+        commentary = GeneratedCommentary(raw_text=text, fallback_used=True)
+
+    if commentary.segments:
+        Logger.info(f"  {len(commentary.segments)} 段 - pacing分布: " +
+                    ", ".join(f"{p}={sum(1 for s in commentary.segments if s.pacing == p)}"
+                              for p in ["slow", "normal", "fast", "pause_before", "pause_after"]
+                              if any(s.pacing == p for s in commentary.segments)))
+
+    print(commentary.raw_text)
+
+    try:
+        release_backend()
+    except Exception:
+        pass
 
     if tablebase_solver:
         try:
@@ -58,7 +80,7 @@ def run(input_text: str) -> str:
         except Exception:
             pass
 
-    return commentary
+    return commentary.raw_text
 
 
 def _check_draw(board, analyzed_moves, tablebase_solver) -> str:
@@ -79,13 +101,13 @@ def _check_draw(board, analyzed_moves, tablebase_solver) -> str:
             break
         temp.push(am.move)
 
-    if temp.is_game_over():
-        outcome = temp.outcome()
-        if outcome is None:
-            return ""
-        if outcome.winner is None:
-            return "该残局最优走法并未分出胜负，判定为和棋，无法生成必胜解说。"
-    else:
-        return "该残局在可搜索范围内未找到将杀路径，判定为和棋，无法生成必胜解说。"
+    if not temp.is_game_over():
+        return ""
+
+    outcome = temp.outcome()
+    if outcome is None:
+        return ""
+    if outcome.winner is None:
+        return "该残局最终局面为逼和/和棋，无法生成必胜解说。"
 
     return ""

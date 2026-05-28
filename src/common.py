@@ -79,6 +79,49 @@ class CompressedStep:
     tags: List[str] = field(default_factory=list)
     eval_delta: Optional[float] = None
 
+@dataclass
+class StoryboardArrow:
+    from_sq: str
+    to_sq: str
+    color: str
+    label: str = ""
+
+@dataclass
+class StoryboardVisuals:
+    extra_highlights: List[str] = field(default_factory=list)
+    arrows: List[StoryboardArrow] = field(default_factory=list)
+    phase_label: str = ""
+
+@dataclass
+class StoryboardSegment:
+    id: int
+    sub_endgame: str
+    voiceover: str
+    pacing: str = "normal"
+    visuals: StoryboardVisuals = field(default_factory=StoryboardVisuals)
+
+@dataclass
+class GeneratedCommentary:
+    segments: List[StoryboardSegment] = field(default_factory=list)
+    raw_text: str = ""
+    backend: str = ""
+    chunks_total: int = 0
+    chunks_succeeded: int = 0
+    retries_total: int = 0
+    fallback_used: bool = False
+
+ALLOWED_PACING = {"fast", "normal", "slow", "pause_before", "pause_after"}
+ALLOWED_ARROW_COLORS = {"red", "green", "blue", "yellow"}
+
+def is_valid_square_name(square: str) -> bool:
+    if not isinstance(square, str) or len(square) != 2:
+        return False
+    return square[0] in "abcdefgh" and square[1] in "12345678"
+
+def normalize_pacing(value: str) -> str:
+    v = (value or "").strip().lower()
+    return v if v in ALLOWED_PACING else "normal"
+
 def resolve_path(path: str) -> str:
     if not path or os.path.isabs(path):
         return path

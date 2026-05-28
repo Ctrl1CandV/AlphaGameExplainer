@@ -19,7 +19,7 @@ def is_endgame(board: chess.Board) -> bool:
     white, black = _count_material(board)
     if white <= 14 or black <= 14 or (white + black) <= 20:
         return True
-    if len(board.piece_map()) <= 7:
+    if len(board.piece_map()) <= 6:
         return True
     return False
 
