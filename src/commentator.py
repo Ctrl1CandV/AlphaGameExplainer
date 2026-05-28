@@ -332,11 +332,11 @@ def _auto_fix_voiceover(text: str, node: dict) -> str:
             fixed = fixed.replace("双方都在", "双方")
 
     if not node.get("is_capture_node"):
-        fixed = fixed.replace("吃掉", "控制").replace("吃子", "控制")
+        fixed = fixed.replace("吃掉", "控制")
+        fixed = fixed.replace("吃子", "控制子力")
+        fixed = fixed.replace("吃掉了", "控制了")
         fixed = fixed.replace("兑掉", "交换").replace("兑子", "交换子力")
         fixed = fixed.replace("吞掉", "占据")
-        fixed = fixed.replace("吃", "控制")
-        fixed = fixed.replace("控制控制", "控制")
 
     if node.get("is_game_over_after") and node.get("legal_reply_count_after", 1) == 0:
         for w in ("黑方应将", "白方应将", "黑方应对", "白方应对"):
@@ -490,56 +490,6 @@ def _build_visuals_from_node(node: dict) -> StoryboardVisuals:
     )
 
 
-def _build_bridge_prefix(prev_node: dict, is_chunk_start: bool) -> str:
-    if not prev_node:
-        return ""
-    goal = prev_node.get("position_goal", "")
-    chunk_mapping = {
-        "improve_piece_coordination": "承接前一段已经改善的站位，",
-        "hold_net": "承接前一段已经搭起的控制网，",
-        "shrink_space": "承接前一段已经完成的空间压缩，",
-        "drive_to_edge": "顺着前一段把对方王逼向边线的路线，",
-        "drive_to_corner": "顺着前一段把对方王赶向角落的思路，",
-        "convert_to_mate": "承接前一段已经形成的收网态势，",
-    }
-    inner_mapping = {
-        "improve_piece_coordination": "在前一步改善站位的基础上，",
-        "hold_net": "承接前一步已经搭起的控制网，",
-        "shrink_space": "顺着前一步的空间压缩，",
-        "drive_to_edge": "顺着前一步把对方王逼向边线的思路，",
-        "drive_to_corner": "顺着前一步把对方王赶向角落的路线，",
-        "convert_to_mate": "承接前一步已经形成的收网态势，",
-    }
-    mapping = chunk_mapping if is_chunk_start else inner_mapping
-    return mapping.get(goal, "承接前面的推进思路，")
-
-
-def _cleanup_voiceover_text(text: str) -> str:
-    fixed = text
-    fixed = re.sub(r"[，,]{2,}", "，", fixed)
-    fixed = re.sub(r"。{2,}", "。", fixed)
-    fixed = re.sub(r"\s{2,}", " ", fixed)
-
-    bridge_parts = (
-        r"(?:承接前一步|顺着前一步|在前一步|承接前一段|顺着前一段|沿着前一步)"
-        r"[^，。,]*?[，,]"
-    )
-    fixed = re.sub(rf"({bridge_parts})\s*{bridge_parts}", r"\1", fixed)
-
-    return fixed.strip()
-
-
-def _apply_chunk_bridges(chunk_segments: list, chunk_nodes: list, prev_tail_node: dict = None) -> list:
-    connective = re.compile(r"^(承接|顺着|沿着|在前一步|在前面|继续|随后|接着|紧接着)")
-    move_notation = re.compile(r"[a-h][1-8]\s*→|[KQRBNP][a-h]?[1-8]?x?[a-h][1-8]")
-    for idx, seg in enumerate(chunk_segments):
-        prev_node = prev_tail_node if idx == 0 else chunk_nodes[idx - 1]
-        prefix = _build_bridge_prefix(prev_node, idx == 0)
-        text = seg.voiceover.strip()
-        if prefix and text and not connective.match(text) and not move_notation.search(text):
-            seg.voiceover = prefix + text
-        seg.voiceover = _cleanup_voiceover_text(seg.voiceover)
-    return chunk_segments
 
 
 def _dict_to_storyboard_segments(data: dict, chunk_nodes: list) -> list:
@@ -558,38 +508,9 @@ def _dict_to_storyboard_segments(data: dict, chunk_nodes: list) -> list:
     return result
 
 
-def _polish_voiceover(text: str, backend) -> str:
-    if len(text) < 50:
-        return text
-    prompt = (
-        "你是中文编辑。使以下象棋解说更流畅自然，不改走法和结论。只输出结果。\n\n"
-        f"{text}"
-    )
-    result = backend.generate(prompt)
-    if not result:
-        return text
-    polished = _strip_thinking(result).strip()
-    if len(polished) < 20:
-        return text
-    changed = polished != text
-    if changed:
-        Logger.debug(f"      polish: {len(text)}→{len(polished)}字")
-    return polished
-
-
-def _finalize_chunk_segments(backend, data_or_segments, chunk_nodes: list, prev_tail_node: dict):
+def _finalize_chunk_segments(data_or_segments, chunk_nodes: list):
     data = data_or_segments if isinstance(data_or_segments, dict) else {"segments": data_or_segments}
-    segments = _dict_to_storyboard_segments(data, chunk_nodes)
-    segments = _apply_chunk_bridges(segments, chunk_nodes, prev_tail_node)
-    polished_count = 0
-    for seg in segments:
-        before = seg.voiceover
-        seg.voiceover = _polish_voiceover(seg.voiceover, backend)
-        if seg.voiceover != before:
-            polished_count += 1
-    if polished_count:
-        Logger.info(f"    polish: {polished_count}/{len(segments)} 段润色")
-    return segments
+    return _dict_to_storyboard_segments(data, chunk_nodes)
 
 
 def _build_chunk_grammar(n_segments: int) -> str:
@@ -823,7 +744,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
         end = min(start + CHUNK_SIZE, node_count)
         chunk_nodes = nodes[start:end]
         prev_context = _build_prev_context(nodes[start - 1]) if start > 0 else ""
-        prev_tail_node = nodes[start - 1] if start > 0 else None
 
         json_prompt = _build_chunk_prompt(
             json_header, chunk_nodes, chunk_idx, total_chunks,
@@ -857,7 +777,7 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
 
             ok, err_msg = _validate_storyboard_chunk(data, chunk_nodes)
             if ok:
-                chunk_segments = _finalize_chunk_segments(backend, data, chunk_nodes, prev_tail_node)
+                chunk_segments = _finalize_chunk_segments(data, chunk_nodes)
                 all_segments.extend(chunk_segments)
                 commentary.chunks_succeeded += 1
                 Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段")
@@ -883,7 +803,7 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                 if auto_fixed_any:
                     auto_ok, auto_err = _validate_storyboard_chunk({"segments": segments}, chunk_nodes)
                     if auto_ok:
-                        chunk_segments = _finalize_chunk_segments(backend, segments, chunk_nodes, prev_tail_node)
+                        chunk_segments = _finalize_chunk_segments(segments, chunk_nodes)
                         all_segments.extend(chunk_segments)
                         commentary.chunks_succeeded += 1
                         Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段 (自动修复)")
@@ -895,7 +815,7 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                 if repaired is not None:
                     repaired_ok, repaired_err = _validate_storyboard_chunk(repaired, chunk_nodes)
                     if repaired_ok:
-                        chunk_segments = _finalize_chunk_segments(backend, repaired, chunk_nodes, prev_tail_node)
+                        chunk_segments = _finalize_chunk_segments(repaired, chunk_nodes)
                         all_segments.extend(chunk_segments)
                         commentary.chunks_succeeded += 1
                         Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段 (单段修复)")
@@ -931,7 +851,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                     pacing=normalize_pacing(node.get("suggested_pacing", "normal")),
                     visuals=_build_visuals_from_node(node),
                 ))
-            chunk_segments = _apply_chunk_bridges(chunk_segments, chunk_nodes, prev_tail_node)
             all_segments.extend(chunk_segments)
 
     if all_segments and not commentary.fallback_used:

@@ -82,39 +82,6 @@ def _is_semantic_boundary(entry: dict, prev_entry: Optional[dict], board_before:
                 return True
     return False
 
-def _process_summary(entries: List[dict]) -> str:
-    """ 生成节点的过程摘要，描述中间发生了什么 """
-    if len(entries) <= 1:
-        return entries[0]["san"] if entries else ""
-
-    parts = []
-    checked = any("将军" in e.get("tags", []) for e in entries)
-    captured = any("吃子" in e.get("tags", []) for e in entries)
-    has_promotion = any("=" in e["san"] for e in entries)
-    kings_moved = any(
-        chess.Board(e["fen_before"]).king(chess.WHITE) != chess.Board(e["fen_after"]).king(chess.WHITE) or
-        chess.Board(e["fen_before"]).king(chess.BLACK) != chess.Board(e["fen_after"]).king(chess.BLACK)
-        for e in entries
-    )
-    first = entries[0]
-    last = entries[-1]
-    first_after = chess.Board(first["fen_after"])
-    last_before = chess.Board(last["fen_before"])
-
-    if has_promotion:
-        promo_moves = [e["san"] for e in entries if "=" in e["san"]]
-        parts.append(f"兵连续推进并升变：{'、'.join(promo_moves)}")
-    if checked:
-        parts.append("含将军走法，压缩对方王活动空间")
-    if captured:
-        parts.append("含吃子，改变子力对比")
-    if kings_moved:
-        parts.append("双方王位置发生关键变化")
-    if not parts:
-        parts.append("调整子力位置，改善站位")
-
-    return "；".join(parts)
-
 def _is_swing_move(item: dict, prev_item: Optional[dict]) -> bool:
     if prev_item is None or item.get("eval_delta") is None or prev_item.get("eval_delta") is None:
         return False
@@ -242,7 +209,6 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
 
         total_delta = sum(g.get("eval_delta", 0) for g in grp if g.get("eval_delta") is not None)
         trap = next((g["trap"] for g in grp if g.get("trap")), None) or ""
-        process_summ = _process_summary(grp)
 
         compressed.append(CompressedStep(
             idx=len(compressed) + 1,
@@ -255,7 +221,6 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
             eval_delta=total_delta,
             candidates=list(set(c for g in grp for c in g.get("candidates", []))),
         ))
-        compressed[-1].process_summary = process_summ
 
     compressed = _merge_repetitive(compressed)
     compressed = _merge_check_sequences(compressed)
@@ -349,10 +314,6 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
                 for p in king_parts)):
             maneuver_pattern = "反复试探等待"
 
-        process_summ = f"{check_count}次将军配合{quiet_count}次躲王。"
-        if king_parts:
-            process_summ += f" 期间{'；'.join(king_parts)}。"
-
         merged_cs = CompressedStep(
             idx=0,
             sans=all_sans,
@@ -364,7 +325,6 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
             eval_delta=sum((steps[k].eval_delta or 0) for k in range(i, j)),
             candidates=[],
         )
-        merged_cs.process_summary = process_summ
         steps[i] = merged_cs
         for k in range(i + 1, j):
             skip[k] = True
@@ -393,61 +353,6 @@ def _merge_repetitive(steps: List[CompressedStep]) -> List[CompressedStep]:
     for i, s in enumerate(merged):
         s.idx = i + 1
     return merged
-
-def _describe_situation(board: chess.Board) -> str:
-    """生成局面的中文描述：王位与对王关系、兵排位、车控制线"""
-    wk = board.king(chess.WHITE)
-    bk = board.king(chess.BLACK)
-    if wk is None or bk is None:
-        return ""
-    wk_name = chess.square_name(wk)
-    bk_name = chess.square_name(bk)
-    df = abs(chess.square_file(wk) - chess.square_file(bk))
-    dr = abs(chess.square_rank(wk) - chess.square_rank(bk))
-
-    lines = [f"白王{wk_name}，黑王{bk_name}"]
-    if df == 0 and dr == 2:
-        who = "白方" if board.turn == chess.BLACK else "黑方"
-        lines.append(f"（竖排对王，{who}占据主动）")
-    elif df == 2 and dr == 0:
-        lines.append("（横排对王）")
-    elif df == 2 and dr == 2:
-        lines.append("（斜线对王）")
-    elif df <= 1 and dr <= 1:
-        lines.append("（近距离对峙）")
-
-    for sq, p in board.piece_map().items():
-        if p.piece_type == chess.PAWN:
-            color = "白" if p.color == chess.WHITE else "黑"
-            rank = chess.square_rank(sq)
-            lines.append(f"{color}兵{chess.square_name(sq)}（第{rank + 1}排{'，已过中线' if (p.color == chess.WHITE and rank >= 4) or (p.color == chess.BLACK and rank <= 3) else ''}）")
-        elif p.piece_type == chess.ROOK:
-            color = "白" if p.color == chess.WHITE else "黑"
-            file_char = chr(97 + chess.square_file(sq))
-            rank_num = chess.square_rank(sq) + 1
-            lines.append(f"{color}车{chess.square_name(sq)}（控制{file_char}列和第{rank_num}排）")
-
-    return "；".join(lines)
-
-def _compare_kings(fen_before: str, fen_after: str) -> str:
-    """比较两个局面的王位变化"""
-    try:
-        b1 = chess.Board(fen_before)
-        b2 = chess.Board(fen_after)
-        wk1 = b1.king(chess.WHITE)
-        wk2 = b2.king(chess.WHITE)
-        bk1 = b1.king(chess.BLACK)
-        bk2 = b2.king(chess.BLACK)
-        parts = []
-        if wk1 is not None and wk2 is not None and wk1 != wk2:
-            parts.append(f"白王{chess.square_name(wk1)}→{chess.square_name(wk2)}")
-        if bk1 is not None and bk2 is not None and bk1 != bk2:
-            parts.append(f"黑王{chess.square_name(bk1)}→{chess.square_name(bk2)}")
-        if not parts:
-            return "王位未变，车反复等招"
-        return "，".join(parts)
-    except Exception:
-        return ""
 
 def _material_score(board: chess.Board, color: chess.Color) -> int:
     values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
@@ -538,27 +443,6 @@ def _krpkr_phase_hint(board_before: chess.Board, board_after: chess.Board, role_
         return "争取突破", "有兵方的王与兵保持紧密联系，下一目标通常是切断防守方王车联系或准备搭桥"
     return "争夺关键格", "双方仍在围绕兵前关键格、侧翼骚扰位和切断线路来回调整，谁先站稳关键格谁就更接近目标"
 
-def _krpkr_teaching_focus(board_before: chess.Board, board_after: chess.Board, role_meta: dict, same_position: bool) -> str:
-    strong = role_meta.get("strong_color")
-    weak = role_meta.get("weak_color")
-    if strong is None or weak is None:
-        return ""
-    strong_pawn_before = _piece_square(board_before, strong, chess.PAWN)
-    strong_pawn_after = _piece_square(board_after, strong, chess.PAWN)
-    strong_rook_before = _piece_square(board_before, strong, chess.ROOK)
-    strong_rook_after = _piece_square(board_after, strong, chess.ROOK)
-    weak_rook_before = _piece_square(board_before, weak, chess.ROOK)
-    weak_rook_after = _piece_square(board_after, weak, chess.ROOK)
-    if same_position:
-        return "这一段的教学重点是等招试探：双方都在确认关键格和切断线路是否会松动，而不是立即突破。"
-    if strong_pawn_before is not None and strong_pawn_after is not None and strong_pawn_before != strong_pawn_after:
-        return "这一段的教学重点是兵的推进时机：兵每前进一步，升变距离都会缩短，但前提是王车配合不能散。"
-    if weak_rook_before is not None and weak_rook_after is not None and chess.square_rank(weak_rook_before) != chess.square_rank(weak_rook_after):
-        return "这一段的教学重点是防守车换排骚扰：无兵方通过横向调车寻找更好的将军和切断位置。"
-    if strong_rook_before is not None and strong_rook_after is not None and chess.square_file(strong_rook_before) != chess.square_file(strong_rook_after):
-        return "这一段的教学重点是有兵方调整车位，为兵让路，同时准备从侧面或后方掩护推进。"
-    return "这一段的教学重点是围绕兵前关键格和王车联系做准备，暂时还没有进入最后的技术兑现阶段。"
-
 def _hard_constraints(board: chess.Board, endgame_name: str, role_meta: dict) -> List[str]:
     rules = []
     wp = _piece_square(board, chess.WHITE, chess.PAWN)
@@ -572,36 +456,6 @@ def _hard_constraints(board: chess.Board, endgame_name: str, role_meta: dict) ->
         weak = _color_name(role_meta["weak_color"])
         rules.append(f"菲利多防线只能绑定到{weak}的防守任务，卢塞纳桥位只能绑定到{strong}的进攻任务")
     return rules
-
-def _counterfactual_hint(node: dict) -> str:
-    if node.get("trap"):
-        return f"如果这一步处理失当，对手常见的反击是{node['trap']}"
-    if node.get("same_position"):
-        return "如果贸然打破当前站位，往往会先暴露关键格或让对方王重新获得活动空间"
-    if node.get("phase") == "推进兵势":
-        return "如果此时推进准备不足，兵可能失去王车保护，反而难以继续前进"
-    if node.get("phase") == "防线成型":
-        return "如果这一阶段守不住兵前关键格，原本可和的局面就可能迅速恶化"
-    if node.get("phase") == "争取突破":
-        return "如果没有先改善王车站位，后续就算强行推进，也很难把优势真正兑现"
-    return ""
-
-def _generic_teaching_focus(phase: str, phase_hint: str, same_position: bool) -> str:
-    if same_position:
-        return "这一段的教学重点是等招与站位保持：虽然没有直接突破，但关键控制线和关键格都不能轻易放松。"
-    if phase == "建立控制线":
-        return "这一段的教学重点是先把对方王的活动空间框住，后续推进才会有明确方向。"
-    if phase == "王车合围":
-        return "这一段的教学重点是让王和主力子形成呼应，避免单独将军把对方王放跑。"
-    if phase == "驱赶到边":
-        return "这一段的教学重点是先把对方王从中心赶到边线，缩小其可用逃跑空间。"
-    if phase == "引导至正确角落":
-        return "这一段的教学重点是把对方王送往唯一可被彻底封死的角落，而不是只求把王赶到任意边角。"
-    if phase == "完成将杀":
-        return "这一段的教学重点是把各子控制网拼完整，让对方王每一个逃格都被封死。"
-    if phase_hint:
-        return phase_hint
-    return "这一段的教学重点是改善站位并为下一阶段目标做准备。"
 
 def _role_meta(board: chess.Board, endgame_name: str) -> dict:
     white_score = _material_score(board, chess.WHITE)
@@ -839,8 +693,6 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
         else:
             turn = "白方走" if board_before.turn == chess.WHITE else "黑方走"
 
-        situation_before = _describe_situation(board_before)
-        situation_after = _describe_situation(board_after)
         phase_hint = getattr(cs, "phase_hint", "")
         same_position = cs.fen_before == cs.fen_after
         if kb and kb.get("name") == "车兵对车":
@@ -874,10 +726,7 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
             "tags": cs.tags,
             "trap": cs.trap,
             "fen_before": cs.fen_before,
-            "situation_before": situation_before,
             "transition_summary": _transition_summary(cs.fen_before, cs.fen_after),
-            "process_summary": getattr(cs, "process_summary", ""),
-            "teaching_focus": _krpkr_teaching_focus(board_before, board_after, role_meta, same_position) if kb and kb.get("name") == "车兵对车" else _generic_teaching_focus(cs.phase, phase_hint, same_position),
             "eval_delta": getattr(cs, "eval_delta", None),
             "same_position": same_position,
             "actor_role": actor_role,
@@ -910,14 +759,9 @@ def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
         video_info = _assign_video_density(node, contains_rep, rep_count)
         node["video_density"] = video_info["density"]
         node["summary_only"] = video_info["summary_only"]
-        node["counterfactual_hint"] = _counterfactual_hint(node)
 
         node["suggested_phase_label"] = cs.phase if cs.phase else ""
         node["suggested_pacing"] = _suggest_pacing(node, cs, compressed)
-
-        if not cs.is_critical and len(cs.sans) >= 2:
-            node["king_change"] = _compare_kings(cs.fen_before, cs.fen_after)
-            node["situation_after"] = situation_after
 
         nodes_out.append(node)
         prev_phase = cs.phase

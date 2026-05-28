@@ -14,11 +14,6 @@ PIECE_VALUES = {
     chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
 }
 
-CHINESE_PIECE = {
-    chess.KING: "王", chess.QUEEN: "后", chess.ROOK: "车",
-    chess.BISHOP: "象", chess.KNIGHT: "马", chess.PAWN: "兵",
-}
-
 class Logger:
     @staticmethod
     def _ts():
