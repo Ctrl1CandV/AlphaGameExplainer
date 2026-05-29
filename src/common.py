@@ -8,6 +8,20 @@ import os
 init()
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# 加载 .env 并配置 ffmpeg（在 pydub import 前加入 PATH，避免时序警告）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+except Exception:
+    pass
+
+_FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "")
+if _FFMPEG_PATH:
+    _FFMPEG_DIR = os.path.dirname(_FFMPEG_PATH)
+    if os.path.isdir(_FFMPEG_DIR) and _FFMPEG_DIR not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = _FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
+    os.environ["IMAGEIO_FFMPEG_EXE"] = _FFMPEG_PATH  # moviepy 2.x
+
 # 国际象棋材料价值评估
 PIECE_VALUES = {
     chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
@@ -56,6 +70,7 @@ class AnalyzedMove:
 class Segment:
     move_idx: int               # 对应第几步棋
     text: str                   # 该步的解说文本
+    pacing: str = "normal"      # 解说节奏: slow/normal/fast/pause_before/pause_after
     audio_path: str = ""        # TTS生成的音频文件路径
     duration_s: float = 0.0     # 音频时长
     start_time: float = 0.0     # 在最终视频中的起始时间

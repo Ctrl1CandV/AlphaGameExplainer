@@ -35,6 +35,7 @@ def from_storyboard_segments(segments: List[StoryboardSegment]) -> List[Segment]
         result.append(Segment(
             move_idx=seg.id,
             text=seg.voiceover,
+            pacing=seg.pacing,
         ))
     return result
 

@@ -365,8 +365,10 @@ def _validate_storyboard_chunk(data: dict, chunk_nodes: list) -> tuple:
         node = chunk_nodes[i]
 
         seg_id = seg.get("id")
-        if not isinstance(seg_id, int) or seg_id != node["id"]:
-            return False, f"segment[{i}]的id={seg_id}，应为{node['id']}"
+        if not isinstance(seg_id, int):
+            return False, f"segment[{i}]的id无效"
+        if seg_id != node["id"]:
+            seg["id"] = node["id"]  # 自动修正，不阻塞
 
         voiceover = seg.get("voiceover")
         if not isinstance(voiceover, str) or not voiceover.strip():
@@ -570,8 +572,10 @@ _SEGMENT_GRAMMAR = (
 
 def _validate_single_segment(seg: dict, node: dict) -> tuple:
     seg_id = seg.get("id")
-    if not isinstance(seg_id, int) or seg_id != node["id"]:
-        return False, f"id={seg_id}应为{node['id']}"
+    if not isinstance(seg_id, int):
+        return False, f"id={seg_id}不是有效整数"
+    if seg_id != node["id"]:
+        seg["id"] = node["id"]  # 自动修正
 
     voiceover = seg.get("voiceover")
     if not isinstance(voiceover, str) or not voiceover.strip():
@@ -775,6 +779,12 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                 Logger.warn(f"  块{chunk_idx + 1}尝试{attempt} JSON解析失败")
                 continue
 
+            # 校验前预处理：对所有 segment 先做 auto-fix 清洗，避免黑名单词导致的硬失败
+            segments = data.get("segments")
+            if isinstance(segments, list) and len(segments) == len(chunk_nodes):
+                for si, seg in enumerate(segments):
+                    seg["voiceover"] = _auto_fix_voiceover(seg.get("voiceover", ""), chunk_nodes[si])
+
             ok, err_msg = _validate_storyboard_chunk(data, chunk_nodes)
             if ok:
                 chunk_segments = _finalize_chunk_segments(data, chunk_nodes)
@@ -786,31 +796,7 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
 
             Logger.warn(f"  块{chunk_idx + 1}尝试{attempt} 校验失败: {err_msg}")
 
-            segments = data.get("segments")
             if isinstance(segments, list) and len(segments) == len(chunk_nodes):
-                auto_fixed_any = False
-                for si, seg in enumerate(segments):
-                    node = chunk_nodes[si]
-                    seg_ok, _ = _validate_single_segment(seg, node)
-                    if seg_ok:
-                        continue
-                    original_vo = seg.get("voiceover", "")
-                    fixed_vo = _auto_fix_voiceover(original_vo, node)
-                    if fixed_vo != original_vo:
-                        seg["voiceover"] = fixed_vo
-                        auto_fixed_any = True
-
-                if auto_fixed_any:
-                    auto_ok, auto_err = _validate_storyboard_chunk({"segments": segments}, chunk_nodes)
-                    if auto_ok:
-                        chunk_segments = _finalize_chunk_segments(segments, chunk_nodes)
-                        all_segments.extend(chunk_segments)
-                        commentary.chunks_succeeded += 1
-                        Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段 (自动修复)")
-                        success = True
-                        break
-                    Logger.warn(f"  块{chunk_idx + 1}自动修复后仍不通过: {auto_err}")
-
                 repaired = _repair_failed_segments(backend, segments, chunk_nodes)
                 if repaired is not None:
                     repaired_ok, repaired_err = _validate_storyboard_chunk(repaired, chunk_nodes)
@@ -821,8 +807,7 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                         Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段 (单段修复)")
                         success = True
                         break
-                    else:
-                        Logger.warn(f"  块{chunk_idx + 1}单段修复仍失败: {repaired_err}")
+                    Logger.warn(f"  块{chunk_idx + 1}单段修复仍失败: {repaired_err}")
 
         if not success:
             Logger.warn(f"  块{chunk_idx + 1}结构化生成失败，回退文本模式")

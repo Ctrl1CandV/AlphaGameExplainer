@@ -11,6 +11,8 @@ llama-cpp-python>=0.3.0
 # 语音合成
 pyttsx3>=2.98
 pydub>=0.25.1,<1.0
+soundfile>=0.12.0
+ChatTTS>=0.2.0
 
 # 棋盘渲染
 Pillow>=10.2.0,<12.0
@@ -24,3 +26,7 @@ pysrt>=1.1.2,<2.0
 
 python-dotenv>=1.0.0,<2.0
 colorama>=0.4.6,<1.0
+
+# === 视频生成相关（可选）===
+# IndexTTS2 需要独立 Python 3.10 环境安装，详见 视频生成方案.md 第二章
+# 安装: cd ../index-tts && uv sync && modelscope download --model IndexTeam/IndexTTS-2 --local_dir checkpoints

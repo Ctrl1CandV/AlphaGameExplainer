@@ -1,18 +1,179 @@
 from src.stockfish_analyzer import get_solution
-from src.common import Logger, resolve_path, GeneratedCommentary
+from src.common import Logger, resolve_path, GeneratedCommentary, Segment, AnalyzedMove, CompressedStep
 from src.storyboard import compress, build
 from src.commentator import generate_structured, generate
 from src.llm_backend import release_backend
 from src.tablebase import TablebaseSolver
+from src.segmenter import to_segments
 from dotenv import load_dotenv
 from src.parser import parse
+from typing import List
 import chess
 import time
 import os
 
 load_dotenv()
 
+
 def run(input_text: str) -> str:
+    """运行现有 5 步管线，返回解说文本"""
+    result = _run_pipeline(input_text)
+    if result is None:
+        return ""
+    commentary, _board, _game_data, _analyzed_moves, _storyboard, _compressed = result
+    print(commentary.raw_text)
+    return commentary.raw_text
+
+
+def _extract_moves(board: chess.Board, analyzed: List[AnalyzedMove]) -> List[chess.Move]:
+    """从AnalyzedMove列表提取合法走法"""
+    moves = []
+    temp = board.copy()
+    for am in analyzed:
+        if temp.is_game_over():
+            break
+        if am.move in temp.legal_moves:
+            moves.append(am.move)
+            temp.push(am.move)
+    return moves
+
+
+def run_video(input_text: str, voice_prompt: str = "",
+              endgame_name: str = "") -> str:
+    """
+    运行完整 7 步管线，生成 .mp4 解说视频。
+    返回输出视频路径。
+    """
+    result = _run_pipeline(input_text)
+    if result is None:
+        return ""
+
+    commentary, board, game_data, analyzed_moves, storyboard, compressed = result
+    moves = _extract_moves(board, analyzed_moves)
+    if not moves:
+        Logger.error("无法提取有效走法序列")
+        return ""
+
+    endgame = endgame_name or storyboard.get("endgame_name", "残局")
+
+    # [6/7] TTS 语音合成
+    Logger.info("[6/7] TTS 语音合成...")
+    from src.tts_engine import synthesize as tts_synthesize
+
+    segments = _build_move_segments(commentary, moves, board, compressed)
+    segments = tts_synthesize(segments, voice_prompt=voice_prompt)
+
+    # [7/7] 生成视频
+    Logger.info("[7/7] 生成视频...")
+    from src.board_renderer import render_animated_frames
+    from src.subtitle_gen import generate as gen_subtitles
+    from src.video_composer import compose
+
+    scores = [am.score for am in analyzed_moves]
+    panel_info = {"endgame_name": endgame} if scores else None
+    if panel_info:
+        panel_info["scores"] = scores
+
+    frame_paths, frame_durations = render_animated_frames(
+        moves, board.fen(), segments, panel_info=panel_info)
+    srt_path = gen_subtitles(segments, offset_s=2.5)
+
+    try:
+        output_path = compose(
+            frame_paths=frame_paths,
+            frame_durations=frame_durations,
+            segments=segments,
+            srt_path=srt_path,
+            endgame_name=endgame,
+        )
+        Logger.success(f"视频已生成: {output_path}")
+        return output_path
+    finally:
+        _cleanup_temp_files(frame_paths, srt_path, segments)
+
+
+def _cleanup_temp_files(frame_paths: list, srt_path: str, segments: list):
+    """清理临时文件（帧图片、音频段、字幕、批次文件等）"""
+    import shutil
+    import os as _os
+
+    # 帧图片
+    for p in frame_paths:
+        try:
+            _os.remove(p)
+        except Exception:
+            pass
+    # 音频段
+    for seg in segments:
+        if seg.audio_path and _os.path.exists(seg.audio_path):
+            try:
+                _os.remove(seg.audio_path)
+            except Exception:
+                pass
+    # 字幕
+    if _os.path.exists(srt_path):
+        try:
+            _os.remove(srt_path)
+        except Exception:
+            pass
+    # 批次文件 + 静音 + 标题卡
+    audio_dir = _os.path.join("output", "audio")
+    frames_dir = _os.path.join("output", "frames")
+    for d in (audio_dir, frames_dir):
+        if _os.path.isdir(d):
+            try:
+                shutil.rmtree(d)
+            except Exception:
+                pass
+
+
+def _build_move_segments(commentary: GeneratedCommentary, moves: List[chess.Move],
+                          board: chess.Board,
+                          compressed: List[CompressedStep] = None) -> List[Segment]:
+    """将解说词按 compressed step 映射到每步走法，继承 pacing"""
+    # 构建 compressed step → voiceover + pacing 查找表
+    voice_map: dict = {}
+    if commentary.segments:
+        for seg in commentary.segments:
+            voice_map[seg.id] = (seg.voiceover, seg.pacing)
+
+    # 构建 compressed step → [move indices] 映射
+    step_moves: dict = {}
+    if compressed:
+        move_idx = 0
+        for cs in compressed:
+            n = len(cs.sans)
+            step_moves[cs.idx] = list(range(move_idx, move_idx + n))
+            move_idx += n
+
+    result = []
+    temp = board.copy()
+    for i, move in enumerate(moves):
+        san = temp.san(move)
+
+        # 查找该 move 属于哪个 compressed step
+        text = f"第{i + 1}步: {san}"
+        pacing = "normal"
+        if step_moves:
+            for step_id, move_indices in step_moves.items():
+                if i in move_indices:
+                    vo, pac = voice_map.get(step_id, (None, "normal"))
+                    if vo:
+                        # 若一步含多着，只取第一着展示完整解说，其余简略
+                        if i == move_indices[0]:
+                            text = vo
+                        else:
+                            text = f"{san}（续前）"
+                    pacing = pac
+                    break
+
+        result.append(Segment(move_idx=i + 1, text=text, pacing=pacing))
+        temp.push(move)
+    return result
+
+
+def _run_pipeline(input_text: str):
+    """执行 5 步文本管线，返回 (commentary, board, game_data)"""
     Logger.info("=" * 20 + "AlphaGameExplainer 开始运行" + "=" * 20)
 
     stockfish_path = resolve_path(os.getenv("STOCKFISH_PATH", "stockfish-windows-x86-64-avx2.exe"))
@@ -33,19 +194,19 @@ def run(input_text: str) -> str:
 
     if not board.is_valid():
         Logger.error(f"非法初始局面: FEN不合法 (status={board.status()})，无法生成解说")
-        return ""
+        return None
 
     Logger.info("[2/5] 查询最优解法...")
     analyzed_moves = get_solution(board, stockfish_path, tablebase_solver, syzygy_path)
     if not analyzed_moves:
         Logger.warn("未能找到解法")
-        return ""
+        return None
 
     draw_error = _check_draw(board, analyzed_moves, tablebase_solver)
     if draw_error:
         Logger.error(draw_error)
         Logger.error("当前版本仅支持必胜残局解说，和棋局面暂不处理。")
-        return ""
+        return None
 
     Logger.info("[3/5] 节点压缩...")
     compressed = compress(board, analyzed_moves)
@@ -67,20 +228,17 @@ def run(input_text: str) -> str:
                               for p in ["slow", "normal", "fast", "pause_before", "pause_after"]
                               if any(s.pacing == p for s in commentary.segments)))
 
-    print(commentary.raw_text)
-
     try:
         release_backend()
     except Exception:
         pass
-
     if tablebase_solver:
         try:
             tablebase_solver.close()
         except Exception:
             pass
 
-    return commentary.raw_text
+    return commentary, board, game_data, analyzed_moves, storyboard, compressed
 
 
 def _check_draw(board, analyzed_moves, tablebase_solver) -> str:

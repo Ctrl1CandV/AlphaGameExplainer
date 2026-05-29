@@ -6,6 +6,5 @@ __pycache__/
 *.exe
 output/
 *.mp4
-*.wav
 *.srt
 *test*
