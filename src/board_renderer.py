@@ -18,12 +18,22 @@ IMG_W_FULL = IMG_W + PANEL_GAP + PANEL_WIDTH  # 762 (with panel)
 PIECES_DIR = os.path.join("assets", "pieces")
 FRAMES_DIR = os.path.join("output", "frames")
 
+# ---- 计时模型（与 video_composer 输出 fps 对齐，保证滑动不丢帧）----
+FPS = 30                 # 渲染与最终视频统一帧率
+SLIDE_SEC = 0.45         # 棋子滑动时长（与解说时长解耦，固定快速平滑）
+GLOW_SEC = 0.30          # 落子后的高光脉冲时长
+INTRO_SEC = 1.5          # 开场静态展示初始局面的时长
+MIN_HOLD_SEC = 0.4       # 滑动+高光后最短定格时长
+
 COLOR_LIGHT = (240, 217, 181)
 COLOR_DARK = (181, 136, 99)
 COLOR_HIGHLIGHT_FROM = (255, 255, 0, 90)
 COLOR_HIGHLIGHT_TO = (255, 165, 0, 110)
 COLOR_HIGHLIGHT_CHECK = (255, 50, 50, 130)
 COLOR_BG = (30, 30, 30)
+COLOR_GLOW = (255, 215, 0)        # 落子高光（金）
+COLOR_CHECK_GLOW = (255, 60, 60)  # 将军高光（红）
+COLOR_CAPTURE_GLOW = (255, 140, 0)  # 吃子高光（橙）
 
 PIECE_MAP = {
     "K": "king-w.png", "Q": "queen-w.png", "R": "rook-w.png",
@@ -127,6 +137,25 @@ def _draw_coordinates(draw: ImageDraw.ImageDraw):
 def _draw_highlight(img: Image.Image, sq: int, color: tuple):
     x, y = _sq_xy(sq)
     overlay = Image.new("RGBA", (SQUARE, SQUARE), color)
+    img.paste(overlay, (x, y), overlay)
+
+
+def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
+    """在格子上叠加一层发光边框，intensity 0~1 控制亮度，用于落子脉冲/呼吸效果"""
+    if intensity <= 0:
+        return
+    intensity = max(0.0, min(1.0, intensity))
+    x, y = _sq_xy(sq)
+    overlay = Image.new("RGBA", (SQUARE, SQUARE), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    # 多层递减边框模拟辉光
+    layers = 5
+    for i in range(layers):
+        a = int(150 * intensity * (1 - i / layers))
+        if a <= 0:
+            continue
+        od.rectangle([i, i, SQUARE - 1 - i, SQUARE - 1 - i],
+                     outline=color + (a,), width=2)
     img.paste(overlay, (x, y), overlay)
 
 
@@ -240,67 +269,82 @@ def render_frame(board: chess.Board, from_sq=None, to_sq=None,
     return img
 
 
-def _render_move_animation(board_before: chess.Board, move: chess.Move,
-                           board_after: chess.Board, num_frames: int = 24,
-                           is_check: bool = False,
-                           info: Optional[dict] = None) -> List[Image.Image]:
-    """为单步走法生成平滑动画帧序列"""
+def _render_move_sequence(board_before: chess.Board, move: chess.Move,
+                          board_after: chess.Board, seg_dur: float,
+                          is_check: bool = False,
+                          info: Optional[dict] = None) -> List[Tuple[Image.Image, float]]:
+    """
+    为单步走法生成 (帧, 时长) 序列，三阶段：
+      1. 滑动：固定 SLIDE_SEC 的快速平滑移动（与解说时长解耦）
+      2. 落子高光脉冲：GLOW_SEC 的辉光呼吸（将军红/吃子橙/普通金）
+      3. 定格保持：剩余时长用单帧撑满，让解说继续播
+    """
     from_sq = move.from_square
     to_sq = move.to_square
     piece = board_before.piece_at(from_sq)
     w = IMG_W_FULL if info else IMG_W
+    frame_dur = 1.0 / FPS
+    is_capture = board_before.is_capture(move)
+    out: List[Tuple[Image.Image, float]] = []
 
     if piece is None:
-        return [render_frame(board_after, from_sq, to_sq, is_check=is_check, info=info)]
+        img = render_frame(board_after, from_sq, to_sq, is_check=is_check, info=info)
+        out.append((img, max(MIN_HOLD_SEC, seg_dur)))
+        return out
 
     captured = board_before.piece_at(to_sq)
     piece_img = _load_piece(str(piece))
     from_x, from_y = _sq_xy(from_sq)
     to_x, to_y = _sq_xy(to_sq)
 
-    frames = []
-    half = max(1, num_frames // 2)
-    for i in range(num_frames):
-        t = ease_in_out_cubic(i / max(1, num_frames - 1))
+    # ---- 阶段1：滑动 ----
+    slide_n = max(2, round(SLIDE_SEC * FPS))
+    for i in range(slide_n):
+        t = ease_in_out_cubic(i / (slide_n - 1))
         img = _get_background(w, IMG_H)
         draw = ImageDraw.Draw(img)
         _draw_board(draw)
         _draw_coordinates(draw)
         _draw_highlight(img, from_sq, COLOR_HIGHLIGHT_FROM)
-
-        if i >= half:
-            _draw_highlight(img, to_sq, COLOR_HIGHLIGHT_CHECK if is_check else COLOR_HIGHLIGHT_TO)
-
-        board_for_static = board_before if i < half else board_after
-        _draw_pieces_static(img, board_for_static, skip_sq=from_sq if i < half else None)
-
-        if i < half and captured is not None:
-            alpha = 1.0 - t * 2
+        _draw_pieces_static(img, board_before, skip_sq=from_sq)
+        # 被吃子在滑动过程中淡出
+        if captured is not None:
             cap_img = _load_piece(str(captured)).copy()
-            cap_img.putalpha(int(255 * max(0, alpha)))
+            cap_img.putalpha(int(255 * max(0.0, 1.0 - t)))
             img.paste(cap_img, (to_x, to_y), cap_img)
-
         cur_x = int(lerp(from_x, to_x, t))
         cur_y = int(lerp(from_y, to_y, t))
         img.paste(piece_img, (cur_x, cur_y), piece_img)
-
-        if i >= half and from_sq != to_sq:
-            _draw_arrow(draw, from_sq, to_sq)
-
         if info:
             _draw_info_panel(img, info)
+        out.append((img, frame_dur))
 
-        frames.append(img)
-    return frames
+    # ---- 阶段2：落子高光脉冲 ----
+    glow_color = COLOR_CHECK_GLOW if is_check else (COLOR_CAPTURE_GLOW if is_capture else COLOR_GLOW)
+    glow_n = max(2, round(GLOW_SEC * FPS))
+    for i in range(glow_n):
+        intensity = math.sin((i / (glow_n - 1)) * math.pi)  # 0→1→0 脉冲
+        img = render_frame(board_after, from_sq=from_sq, to_sq=to_sq,
+                           is_check=is_check, info=info)
+        _draw_glow(img, to_sq, glow_color, intensity)
+        out.append((img, frame_dur))
+
+    # ---- 阶段3：定格保持（用实际帧数计算，保证每步总时长精确等于 seg_dur）----
+    used = (slide_n + glow_n) / FPS
+    hold = max(MIN_HOLD_SEC, seg_dur - used)
+    hold_img = render_frame(board_after, from_sq=from_sq, to_sq=to_sq,
+                            is_check=is_check, info=info)
+    out.append((hold_img, hold))
+    return out
 
 
 def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment],
-                           fps: int = 30, show_sec: float = 1.2,
                            panel_info: Optional[dict] = None) -> Tuple[List[str], List[float]]:
     """
     根据走法列表生成平滑动画帧序列。
     panel_info 可选: {"endgame_name": str, "scores": [...]}
     返回: (frame_paths, frame_durations)
+    每步时长 = INTRO_SEC(首帧) 或 该段音频时长(seg_dur)，与音频严格对齐。
     """
     os.makedirs(FRAMES_DIR, exist_ok=True)
     board = chess.Board(initial_fen)
@@ -311,26 +355,25 @@ def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment
     durations = []
     fnum = 0
 
-    # 初始局面
-    init_info = _make_frame_info(panel_info, 0, total, history, 0.0)
-    path = os.path.join(FRAMES_DIR, f"frame_{fnum:05d}.png")
-    img0 = render_frame(board, info=init_info)
-    if img0.mode != "RGB":
-        img0 = img0.convert("RGB")
-    img0.save(path)
-    frame_paths.append(path)
-    durations.append(2.5)
-    fnum += 1
+    def _save(img: Image.Image, dur: float):
+        nonlocal fnum
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        fpath = os.path.join(FRAMES_DIR, f"frame_{fnum:05d}.png")
+        img.save(fpath)
+        frame_paths.append(fpath)
+        durations.append(dur)
+        fnum += 1
 
-    # 增加动画帧数到30帧，让动画更流畅
-    anim_frames_per_move = 30
+    # 初始局面（静态展示 INTRO_SEC，音频侧由 composer 补等长静音对齐）
+    init_info = _make_frame_info(panel_info, 0, total, history, 0.0)
+    _save(render_frame(board, info=init_info), INTRO_SEC)
 
     for i, move in enumerate(moves):
         seg = segments[i] if i < len(segments) else None
         seg_dur = seg.duration_s if seg else 3.0
         is_check = board.gives_check(move)
-        san = board.san(move)
-        history.append(san)
+        history.append(board.san(move))
 
         score = panel_info.get("scores", [None] * total)[i] if panel_info else None
         frame_info = _make_frame_info(panel_info, i + 1, total, history, score)
@@ -338,32 +381,11 @@ def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment
         board_before = board.copy()
         board.push(move)
 
-        anim_frames = _render_move_animation(board_before, move, board,
-                                              anim_frames_per_move, is_check, info=frame_info)
-        # 计算每帧时长，确保动画总时长与音频匹配
-        anim_total_dur = max(0.5, seg_dur - show_sec)
-        anim_dur_per_frame = anim_total_dur / max(1, len(anim_frames))
+        for img, dur in _render_move_sequence(board_before, move, board, seg_dur,
+                                              is_check, info=frame_info):
+            _save(img, dur)
 
-        for frame in anim_frames:
-            fpath = os.path.join(FRAMES_DIR, f"frame_{fnum:05d}.png")
-            if frame.mode != "RGB":
-                frame = frame.convert("RGB")
-            frame.save(fpath)
-            frame_paths.append(fpath)
-            durations.append(max(0.033, anim_dur_per_frame))  # 最小33ms约30fps
-            fnum += 1
-
-        show_frame = render_frame(board, from_sq=move.from_square, to_sq=move.to_square,
-                                  is_check=is_check, info=frame_info)
-        if show_frame.mode != "RGB":
-            show_frame = show_frame.convert("RGB")
-        fpath = os.path.join(FRAMES_DIR, f"frame_{fnum:05d}.png")
-        show_frame.save(fpath)
-        frame_paths.append(fpath)
-        durations.append(show_sec)
-        fnum += 1
-
-    Logger.success(f"动画渲染完成: {len(frame_paths)} 帧")
+    Logger.success(f"动画渲染完成: {len(frame_paths)} 帧, {sum(durations):.1f}s")
     return frame_paths, durations
 
 
@@ -378,8 +400,3 @@ def _make_frame_info(panel_info: Optional[dict], move_num: int, total: int,
         "history": list(history),
         "score": score,
     }
-
-
-def render_frames(game_data, segments: List[Segment]) -> Tuple[List[str], List[float]]:
-    """向后兼容的静态帧渲染"""
-    return render_animated_frames(game_data.moves, game_data.initial_fen, segments)

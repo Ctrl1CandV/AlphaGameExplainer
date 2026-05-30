@@ -3,16 +3,18 @@ from typing import List
 from PIL import Image, ImageDraw, ImageFont
 from moviepy import (
     ImageSequenceClip, AudioFileClip, CompositeVideoClip,
-    concatenate_audioclips, TextClip, ColorClip,
+    concatenate_audioclips, TextClip, ImageClip,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from src.common import Logger
-from src.board_renderer import IMG_W, IMG_H, COLOR_BG
+from src.board_renderer import IMG_W, IMG_H, COLOR_BG, INTRO_SEC, FPS as RENDER_FPS
 
 TITLE_SEC = 2.5
-FPS = 24
-SUBTITLE_HEIGHT = 80
-SUBTITLE_MARGIN = 20
+FPS = RENDER_FPS              # 与渲染帧率统一，避免重采样导致的卡顿
+SUBTITLE_HEIGHT = 84
+SUBTITLE_MARGIN = 18
+# 视频开头静音 = 片头标题卡 + 初始局面静态展示，二者都没有解说音频
+LEAD_SILENCE = TITLE_SEC + INTRO_SEC
 
 
 def _make_title_card(endgame_name: str, width: int, height: int) -> str:
@@ -104,15 +106,15 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     # 片头
     title_path = _make_title_card(endgame_name or "残局讲解", frame_w, frame_h)
 
-    # 组装帧序列
+    # 组装帧序列：片头标题卡 + 渲染帧
     all_frames = [title_path] + frame_paths
     all_durations = [TITLE_SEC] + frame_durations
 
     video = ImageSequenceClip(all_frames, durations=all_durations)
 
-    # 组装音频: 片头静音 + TTS 音频
+    # 组装音频: 开头静音(标题卡+初始局面，无解说) + 逐段 TTS 音频
     silence_path = os.path.join(frames_dir, "_silence.wav")
-    _make_silence(TITLE_SEC, silence_path)
+    _make_silence(LEAD_SILENCE, silence_path)
     audio_clips = [AudioFileClip(silence_path)]
     for seg in segments:
         if seg.audio_path and os.path.exists(seg.audio_path):
@@ -123,25 +125,27 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     if len(audio_clips) > 1:
         video = video.with_audio(concatenate_audioclips(audio_clips))
 
-    # 字幕背景
+    # 字幕带：固定在底部留白区（棋盘下方，不覆盖棋盘）
+    band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
     sub_bg_path = _create_subtitle_background(frame_w, SUBTITLE_HEIGHT)
     sub_bg_clip = (ImageClip(sub_bg_path)
                    .with_duration(video.duration)
-                   .with_position(("center", frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN)))
+                   .with_position((0, band_top)))
 
-    # 字幕
+    # 字幕文本：固定尺寸 caption（高度封顶，绝不向上压棋盘、向下溢出画面）
     _FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
 
     def _mk_sub(txt):
         return TextClip(
             text=txt, font=_FONT_PATH, font_size=22, color="white",
             stroke_color="black", stroke_width=1,
-            method="caption", size=(frame_w - 60, None),
+            method="caption", size=(frame_w - 40, SUBTITLE_HEIGHT),
+            text_align="center",
         )
-    
+
     subs = SubtitlesClip(srt_path, encoding="utf-8", make_textclip=_mk_sub)
-    subs = subs.with_position(("center", frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN + 10))
-    
+    subs = subs.with_position((20, band_top))
+
     # 合成：视频 + 字幕背景 + 字幕
     final = CompositeVideoClip([video, sub_bg_clip, subs])
 

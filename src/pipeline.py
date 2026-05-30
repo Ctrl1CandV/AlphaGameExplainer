@@ -4,12 +4,10 @@ from src.storyboard import compress, build
 from src.commentator import generate_structured, generate
 from src.llm_backend import release_backend
 from src.tablebase import TablebaseSolver
-from src.segmenter import to_segments
 from dotenv import load_dotenv
 from src.parser import parse
 from typing import List
 import chess
-import time
 import os
 
 load_dotenv()
@@ -67,7 +65,7 @@ def run_video(input_text: str, voice_prompt: str = "",
     Logger.info("[7/7] 生成视频...")
     from src.board_renderer import render_animated_frames
     from src.subtitle_gen import generate as gen_subtitles
-    from src.video_composer import compose
+    from src.video_composer import compose, LEAD_SILENCE
 
     scores = [am.score for am in analyzed_moves]
     panel_info = {"endgame_name": endgame} if scores else None
@@ -76,7 +74,8 @@ def run_video(input_text: str, voice_prompt: str = "",
 
     frame_paths, frame_durations = render_animated_frames(
         moves, board.fen(), segments, panel_info=panel_info)
-    srt_path = gen_subtitles(segments, offset_s=2.5)
+    # 字幕起始偏移 = 视频开头静音(标题卡+初始局面)，与音频严格对齐
+    srt_path = gen_subtitles(segments, offset_s=LEAD_SILENCE)
 
     try:
         output_path = compose(

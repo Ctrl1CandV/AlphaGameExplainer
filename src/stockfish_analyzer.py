@@ -1,16 +1,12 @@
 from typing import List, Optional
 from src.common import Logger, AnalyzedMove
 import chess.engine
-import urllib.parse
 import logging
 logging.getLogger("chess.engine").setLevel(logging.CRITICAL)
-import requests
 import chess
 import time
 import os
-import re
 
-CDB_URL = "http://www.chessdb.cn/cdb.php"
 MATE_TIME = 2.0
 PER_STEP_FAST = 0.3
 PER_STEP_FAST_6P = 0.6
@@ -18,84 +14,7 @@ PER_STEP_FAST_NON_TB = 1.0
 PER_STEP_HEAVY = 1.5
 
 # ============================================================
-# ChessDB 查询（无改动）
-# ============================================================
-
-def _cdb_query(fen: str, action: str) -> Optional[str]:
-    url = f"{CDB_URL}?action={action}&board={urllib.parse.quote(fen)}"
-    try:
-        body = requests.get(url, timeout=15).text.strip()
-        if not body or body in ("unknown", "nobestmove", "invalid board"):
-            return None
-        time.sleep(0.15)
-        return body
-    except Exception:
-        return None
-
-def _query_cdb(fen: str) -> Optional[str]:
-    body = _cdb_query(fen, "query")
-    if body:
-        return body
-    body = _cdb_query(fen, "queryall")
-    if body:
-        return body
-    return None
-
-def _pick_best(cdb_body: str) -> Optional[str]:
-    trimmed = cdb_body.strip()
-    if not trimmed:
-        return None
-    if not trimmed.startswith("move:"):
-        if re.match(r"^[a-h][1-8][a-h][1-8][qrbn]?$", trimmed):
-            return trimmed
-        parts = trimmed.split("|")
-        if parts and re.match(r"^[a-h][1-8][a-h][1-8][qrbn]?$", parts[0]):
-            return parts[0]
-        return None
-    best_uci, best_score, best_rank = None, -9999999, 9999999
-    for part in cdb_body.split("|"):
-        MOVE_RE = re.compile(r"move:(\S+),score:(-?\d+),rank:(\d+),note:(.*)")
-        move = MOVE_RE.match(part.strip())
-        if not move:
-            continue
-        uci, score_str, rank_str = move.group(1), move.group(2), move.group(3)
-        try:
-            score = int(score_str)
-            rank = int(rank_str)
-        except ValueError:
-            continue
-        if score > best_score or (score == best_score and rank < best_rank):
-            best_uci, best_score, best_rank = uci, score, rank
-    return best_uci
-
-def _cdb_step(board: chess.Board) -> Optional[AnalyzedMove]:
-    body = _query_cdb(board.fen())
-    if not body:
-        return None
-    uci = _pick_best(body)
-    if not uci:
-        return None
-    try:
-        move = chess.Move.from_uci(uci)
-    except ValueError:
-        return None
-    score = None
-    for part in body.split("|"):
-        MOVE_RE = re.compile(r"move:(\S+),score:(-?\d+),rank:(\d+),note:(.*)")
-        m = MOVE_RE.match(part.strip())
-        if m and m.group(1) == uci:
-            try:
-                score = int(m.group(2))
-            except ValueError:
-                pass
-            break
-    return AnalyzedMove(
-        move=move, score=score, candidates=[],
-        is_only_move=False, trap_san=None, source="chessdb",
-    )
-
-# ============================================================
-# Stockfish 搜索函数（重写）
+# Stockfish 搜索函数
 # ============================================================
 
 def _sf_mate_try(engine, board: chess.Board) -> Optional[List[AnalyzedMove]]:
@@ -373,15 +292,13 @@ def _sf_continue_with_tablebase(board: chess.Board, tablebase_solver,
 
 def get_solution(board: chess.Board, stockfish_path: str,
                  tablebase_solver=None, syzygy_path: str = "",
-                 use_chessdb: bool = True, use_stockfish: bool = True) -> List[AnalyzedMove]:
+                 use_stockfish: bool = True) -> List[AnalyzedMove]:
     """
-    最优解法求解，优先级：本地表库 > ChessDB > Stockfish
-      - 3-5 子 Syzygy 命中 → 表库直解
-      - ≤7 子表库未命中 → ChessDB 在线查询
-      - 以上均不完备或未命中 → Stockfish 兜底（含 SyzygyPath 导入）
+    最优解法求解，优先级：本地表库 > Stockfish
+      - 3-7 子表库命中 → 表库直解
+      - 表库未命中或不完备 → Stockfish 兜底（含 SyzygyPath 导入）
     返回 AnalyzedMove 列表，调用方根据列表终局情况自行判定和棋/必胜
     """
-    piece_count = len(board.piece_map())
     temp, result = board.copy(), []
 
     if board.king(chess.WHITE) is None or board.king(chess.BLACK) is None:
@@ -416,34 +333,7 @@ def get_solution(board: chess.Board, stockfish_path: str,
                     Logger.success(f"本地表库完整解法: {len(result)} 步 (来源:{tb_result[0].source})")
                     return result
                 if result:
-                    Logger.info(f"本地表库部分数据 ({len(result)}步)，继续 ChessDB...")
-
-    if not temp.is_game_over() and piece_count <= 7 and use_chessdb:
-        Logger.info("从 ChessDB 查询最优解法...")
-        for _ in range(60):
-            am = _cdb_step(temp)
-            if am is None:
-                break
-            if am.move not in temp.legal_moves:
-                Logger.error(f"ChessDB 返回非法走法 {am.move.uci()}，中断查询")
-                break
-            result.append(am)
-            temp.push(am.move)
-        if temp.is_game_over():
-            Logger.success(f"ChessDB 完整解法: {len(result)} 步")
-            return result
-
-        if not temp.is_game_over():
-            if result:
-                Logger.warn(f"≤7子表库+ChessDB均未完整求解({len(result)}步/未终局)，不信任SF兜底，返回不完整结果")
-            else:
-                Logger.warn("≤7子表库+ChessDB均未命中，不信任SF兜底，返回空结果")
-            if not use_stockfish:
-                return result
-
-    if not temp.is_game_over() and piece_count <= 7 and not use_chessdb and not use_stockfish:
-        Logger.warn("已禁用 ChessDB 和 Stockfish，当前仅返回表库结果")
-        return result
+                    Logger.info(f"本地表库部分数据 ({len(result)}步)，继续 Stockfish...")
 
     if not temp.is_game_over() and use_stockfish:
         Logger.info("Stockfish 搜索解法...")

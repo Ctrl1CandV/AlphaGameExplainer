@@ -1,16 +1,12 @@
 from src.common import Logger, StoryboardSegment, StoryboardVisuals, StoryboardArrow
 from src.common import GeneratedCommentary, ALLOWED_PACING, ALLOWED_ARROW_COLORS
 from src.common import is_valid_square_name, normalize_pacing
-from src.llm_backend import create_backend_from_env, release_backend
-from dotenv import load_dotenv
+from src.llm_backend import create_backend_from_env
 from typing import Optional
 import chess
 import json
-import os
 import re
 
-load_dotenv()
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 CHUNK_SIZE = 4
 MAX_CHARS = 1800
 MAX_RETRIES = 1

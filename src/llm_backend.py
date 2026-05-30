@@ -17,37 +17,6 @@ class LLMBackend(ABC):
     def name(self) -> str:
         return self.__class__.__name__
 
-class OllamaBackend(LLMBackend):
-    def __init__(self, model: str = None, temperature: float = 0.2):
-        self.model = model or os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-        self.temperature = temperature
-
-    def generate(self, prompt: str, grammar: str = None) -> str:
-        import ollama
-
-        prompt_no_think = prompt + "\n/no_think"
-        for use_think in (True, False):
-            try:
-                pieces = []
-                kwargs = {
-                    "model": self.model,
-                    "prompt": prompt_no_think,
-                    "stream": True,
-                    "options": {"temperature": self.temperature},
-                }
-                if use_think:
-                    kwargs["think"] = False
-                for chunk in ollama.generate(**kwargs):
-                    piece = chunk.response if hasattr(chunk, "response") else chunk.get("response", "")
-                    if piece:
-                        pieces.append(piece)
-                text = "".join(pieces)
-                if text:
-                    return text
-            except Exception as e:
-                Logger.warn(f"  ollama generate 异常: {type(e).__name__}: {e}")
-        return ""
-
 class LlamaCppBackend(LLMBackend):
     def __init__(
         self,
@@ -150,18 +119,11 @@ LLM_BACKEND_CACHE = {}
 def create_backend_from_env() -> LLMBackend:
     global LLM_BACKEND_CACHE
 
-    backend_type = os.getenv("LLM_BACKEND", "ollama").strip().lower()
-    cache_key = backend_type
-
+    cache_key = "llama_cpp"
     if cache_key in LLM_BACKEND_CACHE:
         return LLM_BACKEND_CACHE[cache_key]
 
-    if backend_type == "llama_cpp":
-        backend = LlamaCppBackend()
-    else:
-        temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
-        backend = OllamaBackend(temperature=temperature)
-
+    backend = LlamaCppBackend()
     LLM_BACKEND_CACHE[cache_key] = backend
     Logger.info(f"LLM 后端: {backend.name}")
     return backend
