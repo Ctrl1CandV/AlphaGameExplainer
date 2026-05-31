@@ -20,6 +20,8 @@ def run(input_text: str) -> str:
         return ""
     commentary, _board, _game_data, _analyzed_moves, _storyboard, _compressed = result
     print(commentary.raw_text)
+    if commentary.summary:
+        print("\n" + commentary.summary)
     return commentary.raw_text
 
 
@@ -59,6 +61,13 @@ def run_video(input_text: str, voice_prompt: str = "",
     from src.tts_engine import synthesize as tts_synthesize
 
     segments = _build_move_segments(commentary, moves, board, compressed)
+    # 追加结尾总结段：挂到最终局面上播放（技法/经验总结）
+    if commentary.summary:
+        segments.append(Segment(
+            move_idx=len(moves) + 1,
+            text=commentary.summary,
+            pacing="slow",
+        ))
     segments = tts_synthesize(segments, voice_prompt=voice_prompt)
 
     # [7/7] 生成视频
@@ -75,7 +84,9 @@ def run_video(input_text: str, voice_prompt: str = "",
     frame_paths, frame_durations = render_animated_frames(
         moves, board.fen(), segments, panel_info=panel_info)
     # 字幕起始偏移 = 视频开头静音(标题卡+初始局面)，与音频严格对齐
+    from src.subtitle_gen import build_cues
     srt_path = gen_subtitles(segments, offset_s=LEAD_SILENCE)
+    cues = build_cues(segments, offset_s=LEAD_SILENCE)
 
     try:
         output_path = compose(
@@ -84,6 +95,7 @@ def run_video(input_text: str, voice_prompt: str = "",
             segments=segments,
             srt_path=srt_path,
             endgame_name=endgame,
+            cues=cues,
         )
         Logger.success(f"视频已生成: {output_path}")
         return output_path
@@ -158,11 +170,13 @@ def _build_move_segments(commentary: GeneratedCommentary, moves: List[chess.Move
                 if i in move_indices:
                     vo, pac = voice_map.get(step_id, (None, "normal"))
                     if vo:
-                        # 若一步含多着，只取第一着展示完整解说，其余简略
+                        # 若一步含多着，只取第一着展示完整解说；
+                        # 其余跟随步置空文本——静默快速走子，避免 TTS 念
+                        # "SAN（续前）"造成中英混读、碎读、含糊。
                         if i == move_indices[0]:
                             text = vo
                         else:
-                            text = f"{san}（续前）"
+                            text = ""
                     pacing = pac
                     break
 
@@ -211,7 +225,8 @@ def _run_pipeline(input_text: str):
     compressed = compress(board, analyzed_moves)
 
     Logger.info("[4/5] 构建叙事分镜...")
-    storyboard = build(board, compressed)
+    winner_color = _determine_winner(board, analyzed_moves)
+    storyboard = build(board, compressed, winner_color=winner_color)
 
     Logger.info("[5/5] 生成中文解说...")
     try:
@@ -238,6 +253,27 @@ def _run_pipeline(input_text: str):
             pass
 
     return commentary, board, game_data, analyzed_moves, storyboard, compressed
+
+
+def _determine_winner(board, analyzed_moves):
+    """复盘解法到终局，返回实际获胜方颜色(chess.WHITE/BLACK)，无法判定返回 None。
+
+    用于让解说立场从「实际终局结果」反推，而不是按初始子力猜强弱。
+    否则求解器若走出反常线路（如强方弃子被杀），解说会与画面完全相反。
+    """
+    temp = board.copy()
+    for am in analyzed_moves:
+        if temp.is_game_over():
+            break
+        if am.move not in temp.legal_moves:
+            break
+        temp.push(am.move)
+    if not temp.is_game_over():
+        return None
+    outcome = temp.outcome()
+    if outcome is None:
+        return None
+    return outcome.winner  # chess.WHITE / chess.BLACK / None(和棋)
 
 
 def _check_draw(board, analyzed_moves, tablebase_solver) -> str:

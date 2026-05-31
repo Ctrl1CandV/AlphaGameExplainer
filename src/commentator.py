@@ -110,6 +110,7 @@ def _build_json_header(storyboard: dict) -> str:
     parts = [
         "你是国际象棋赛事解说员，负责为残局教学视频配解说词。只输出合法JSON，不加任何解释或markdown标记。",
         "风格要求：像专业赛事解说员那样——既有技术深度，又有叙事感染力。把每一段残局讲成一个有推进感的故事。",
+        "关键步骤（转折、吃子、将军、收官）浓墨重彩、写出张力；过渡和重复试探的步骤一笔带过，让整段解说有起伏、不平淡。",
         "",
         f"【残局类型】{endgame_name}",
     ]
@@ -143,6 +144,8 @@ def _build_json_header(storyboard: dict) -> str:
         "- 各段之间连续推进，后一段承接前一段已建立的局面",
         "- 最后一段若是terminal权限，以「至此形成将杀」或「至此胜负已定」收束",
         "- 王的描述侧重于「逼近」「封住逃格」「配合主力子压缩空间」等位置性语言",
+        "- voiceover用纯中文口播，禁止出现棋盘坐标（如h7、g5）、棋子英文字母、数字和升变记号；",
+        "  需要指位置时改用「底线」「边线」「右上角」「兵前一格」「同一条线」等中文说法",
         "",
     ])
     return "\n".join(parts)
@@ -220,6 +223,12 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         drive_tag = next((t for t in tags if t in ("将军驱赶", "连续将军驱赶", "反复试探等待")), "")
         if drive_tag:
             parts.append(f"类型: 「{drive_tag}」叙事块 — 这是多着合并，描述整体过程，不要逐步数着")
+
+        # 温和增强：重点节点写出张力，过渡节点一笔带过
+        if summary_only or node.get("video_density") == "low":
+            parts.append("详略: 过渡/重复节点 — 一句话带过即可，不要展开")
+        elif node.get("is_critical"):
+            parts.append("详略: 重点节点 — 这是关键转折，请写得更有张力，点出它为什么重要")
 
         if summary_only:
             parts.append("概括模式: 只1句话概括（≤80字）")
@@ -565,6 +574,17 @@ _SEGMENT_GRAMMAR = (
     'ws ::= [ \\t\\n]*'
 )
 
+# 总结词专用语法：token 级只允许中文 + 中文标点，物理上无法吐出英文思维链/
+# 棋谱记号/数字/符号，从根上杜绝「标点汤喂 ChatTTS 念崩」。2-3 句。
+_SUMMARY_GRAMMAR = (
+    'root ::= sentence sentence sentence?\n'
+    'sentence ::= cjk (sep cjk)* end\n'
+    'cjk ::= han+\n'
+    'han ::= [\\u4e00-\\u9fff]\n'
+    'sep ::= "，" | "、"\n'
+    'end ::= "。" | "！" | "？"'
+)
+
 
 def _validate_single_segment(seg: dict, node: dict) -> tuple:
     seg_id = seg.get("id")
@@ -717,6 +737,165 @@ def _parse_single_segment(raw_text: str) -> Optional[dict]:
     return None
 
 
+def _clean_summary_text(text: str) -> str:
+    """清洗总结词：白名单方式，只保留中文与少量中文标点，其余一律剔除。
+
+    旧实现用黑名单（列举要删的字符），漏掉了 . : ' " ? & ; 和全角标点，
+    一旦 LLM 泄漏英文思维链/复读提示词，删掉字母数字后会剩一大坨标点汤，
+    喂 ChatTTS 直接崩成咿呀。改为白名单后，无论上游来什么都只剩干净中文。
+    """
+    t = text.strip().strip("「」\"'`").strip()
+    # 去掉可能的前缀（整段剥离，避免旧正则把"总结一下，"切成残体"一下，"）。
+    # 这里统一去前缀做标准化，由 generate_summary 末尾统一补回，保证不重复也不残缺。
+    t = re.sub(r"^总结(一下)?[，,：:]?", "", t).strip()
+    # 白名单：仅保留中文字符 + 常用中文标点（逗号/句号/顿号/叹问号）
+    t = re.sub(r"[^一-鿿，。、！？]", "", t)
+    # 清理因删除产生的连续标点与开头标点
+    t = re.sub(r"[，、]{2,}", "，", t)
+    t = re.sub(r"。{2,}", "。", t)
+    t = re.sub(r"[，、！？]+。", "。", t)
+    t = re.sub(r"^[，、！？。]+", "", t)
+    return t.strip()
+
+
+def _has_forbidden_chars(text: str) -> bool:
+    """是否仍含字母/数字（清洗失败的标志）。"""
+    return bool(re.search(r"[A-Za-z0-9]", text))
+
+
+# 只放「描述任务 / 对模型说话」的元指令措辞——真正的总结绝不会出现这些。
+# 切忌放领域词（核心技法 / 常见错误 / 取胜方 / 残局类型…）：那些是合格总结
+# 本来就会用到的词（提示词也用它们当字段标签），放进来会把好总结误判成泄漏。
+# 「提示词被原样复述」这种泄漏交给 _looks_like_prompt_echo 做语义级重合度检测，
+# 那个对提示词如何改写都自适应，不必在这里逐词追加（黑名单永远追不完）。
+_SUMMARY_META_MARKERS = (
+    "节点", "残局局面分析", "thinking", "voiceover", "segment",
+    "将杀绝杀", "承接关系", "复述提示词", "推进性描述",
+    "用户要求", "需要扮演", "你是国际象棋", "请写", "要求写",
+    "字总结", "对着镜头", "对镜头", "收尾总结", "做收尾", "镜头做",
+    "纯口语", "不要标题", "不要逐步", "禁止出现", "禁止引擎", "绝对禁止",
+)
+
+
+def _looks_like_prompt_echo(text: str, prompt: str) -> bool:
+    """检测 text 是否在「复述提示词」：按字符 4-gram 算 text 落在 prompt 里的比例。
+
+    元指令词黑名单只能挡住列举过的措辞，提示词换一种写法就失效。改用与提示词
+    本身的重合度判断：真总结是模型新写的内容，与提示词重合度低；把提示词指令
+    当输出念回来则高度重合。对提示词怎么改写都自适应，无需逐词维护。
+    阈值 0.5：超过一半的 4-gram 都来自提示词，几乎可以肯定是复述。
+    """
+    if not text or not prompt:
+        return False
+    grams = {prompt[i:i + 4] for i in range(len(prompt) - 3)}
+    if not grams:
+        return False
+    span = len(text) - 3
+    if span <= 0:
+        return False
+    hit = sum(1 for i in range(span) if text[i:i + 4] in grams)
+    return hit / span > 0.5
+
+
+def _summary_is_bad(text: str) -> bool:
+    """总结词是否不可用（触发纯中文模板兜底）。
+
+    比旧的「仅查字母数字」更强：长度异常、中文占比过低、含元指令碎片
+    任一命中即判废。应对 LLM 泄漏思维链或复读提示词后清洗仍残留的情况。
+    注意：「提示词被整段复述」由 _looks_like_prompt_echo 单独检测（需要 prompt），
+    这里只查不依赖上下文的硬特征。
+    """
+    if not text or len(text) < 12 or len(text) > 160:
+        return True
+    if _has_forbidden_chars(text):
+        return True
+    cjk = len(re.findall(r"[一-鿿]", text))
+    if cjk == 0 or cjk / max(len(text), 1) < 0.8:
+        return True
+    if any(marker in text for marker in _SUMMARY_META_MARKERS):
+        return True
+    return False
+
+
+def _fallback_summary(storyboard: dict) -> str:
+    """LLM 总结失败时，用知识库的技法/易错点拼一段兜底总结（纯中文）。"""
+    endgame_name = storyboard.get("endgame_name", "这类残局")
+    motifs = storyboard.get("motifs", []) or []
+    mistakes = storyboard.get("mistakes", []) or []
+    parts = [f"总结一下，{endgame_name}的取胜关键"]
+    if motifs:
+        # motif 形如「盒子法：用车画线限制对方王的活动范围」，取冒号前的技法名
+        names = [m.split("：")[0].split(":")[0] for m in motifs[:3]]
+        parts.append("在于" + "、".join(names))
+    parts.append("。")
+    if mistakes:
+        parts.append("过程中要避免" + mistakes[0].split("：")[0].split(":")[0] + "这类失误。")
+    return _clean_summary_text("".join(parts)) or f"总结一下，{endgame_name}重在稳扎稳打，逐步压缩对方空间。"
+
+
+def generate_summary(storyboard: dict, backend, segments: list = None) -> str:
+    """生成 2-3 句结尾总结词：概括这类残局的关键之处与主要逻辑思维方式。
+
+    只喂 storyboard 的结构化要点（不含 SAN 棋谱记号，避免污染），
+    要求纯中文输出，再强清洗一遍移除任何字母/数字/符号，
+    保证 ChatTTS 拿到的是干净短中文，不会崩成咿呀。
+    """
+    endgame_name = storyboard.get("endgame_name", "残局")
+    winning_side = storyboard.get("winning_side", "")
+    context = storyboard.get("context", "") or ""
+    role_summary = storyboard.get("role_summary", "") or ""
+    motifs = storyboard.get("motifs", []) or []
+    mistakes = storyboard.get("mistakes", []) or []
+    phases = storyboard.get("phases", []) or []
+
+    lines = [
+        "你是国际象棋残局教练，刚讲解完一盘残局，现在对着镜头做收尾总结。",
+        "请写一段2到3句的中文总结，要有概括性：说清这类残局取胜的关键之处，",
+        "以及背后的主要逻辑思维方式（核心取胜思路、应遵循的次序），并点出要避免的典型错误。",
+        "要求：① 纯口语中文，像讲课收尾；② 不要逐步复述具体走法；",
+        "③ 绝对禁止出现任何英文字母、数字、棋盘坐标、格子名、棋谱记号或特殊符号；",
+        "④ 不要标题、序号、引号、markdown；⑤ 禁止引擎术语（评估值、距杀步数等）。",
+        "",
+        f"残局类型：{endgame_name}",
+    ]
+    if winning_side:
+        lines.append(f"取胜方：{winning_side}")
+    if role_summary:
+        lines.append(f"攻守角色：{role_summary}")
+    if context:
+        lines.append(f"理论要点：{context}")
+    if phases:
+        phase_names = "、".join(p[0] for p in phases if isinstance(p, (list, tuple)) and p)
+        if phase_names:
+            lines.append(f"取胜阶段：{phase_names}")
+    if motifs:
+        lines.append("核心技法：" + "；".join(motifs[:3]))
+    if mistakes:
+        lines.append("常见错误：" + "；".join(mistakes[:2]))
+
+    prompt = "\n".join(lines)
+    # 根上减少泄漏：给模型一个明确的「该你输出了」落点。没有落点时，模型容易
+    # 把指令段当成要续写的上文、原样复述回来（线上见过的「需要扮演…用户要求写…」
+    # 就是这么来的）。结尾用「总结：」起头，让它直接从这里续写正文。
+    prompt = prompt + "\n\n现在直接输出总结正文（不要复述以上要求）：\n总结："
+    # /no_think 关闭 Qwen 思维链（总结只需稳定，不需要推理过程，且能避免
+    # 思维链以纯文本泄漏到输出）；_SUMMARY_GRAMMAR 从 token 级锁死只能吐中文。
+    raw = _strip_thinking(backend.generate("/no_think\n" + prompt, grammar=_SUMMARY_GRAMMAR))
+    text = _clean_summary_text(raw)
+
+    # 校验兜底：硬特征判废（过短/过长/中文占比低/含元指令碎片/残留字母数字），
+    # 或与提示词高度重合（整段复述提示词）→ 纯中文模板兜底。
+    if _summary_is_bad(text) or _looks_like_prompt_echo(text, prompt):
+        text = _fallback_summary(storyboard)
+    # 统一补前缀：清洗阶段已把"总结一下，"剥掉做标准化，这里对所有路径（含兜底，
+    # _fallback_summary 末尾也会经 _clean_summary_text 剥掉前缀）统一补回，
+    # 保证开头总有"总结"二字（曾出现兜底路径缺"总结"开头的 bug）。
+    if not text.startswith("总结"):
+        text = "总结一下，" + text
+    return text
+
+
+
 def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommentary:
     nodes = storyboard.get("nodes", [])
     commentary = GeneratedCommentary()
@@ -848,6 +1027,14 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
     commentary.raw_text = "\n".join(
         f"第{seg.id}步：{seg.voiceover}" for seg in all_segments
     )
+
+    # 结尾总结词（技法/经验），独立于分步解说，挂到最终局面播放
+    if all_segments:
+        try:
+            commentary.summary = generate_summary(storyboard, backend, all_segments)
+        except Exception as e:
+            Logger.warn(f"总结词生成异常，使用模板兜底: {e}")
+            commentary.summary = _fallback_summary(storyboard)
 
     status = "结构化完成" if not commentary.fallback_used else f"部分回退(成功{commentary.chunks_succeeded}/{total_chunks})"
     Logger.success(f"解说生成: {len(all_segments)} 段 ({status}, 重试{commentary.retries_total}次)")

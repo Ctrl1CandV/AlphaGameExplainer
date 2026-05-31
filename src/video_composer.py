@@ -81,13 +81,15 @@ def _create_subtitle_background(width: int, height: int) -> str:
 
 def compose(frame_paths: List[str], frame_durations: List[float],
             segments, srt_path: str, endgame_name: str = "",
-            fps: int = FPS) -> str:
+            fps: int = FPS, cues=None) -> str:
     """
     合成最终视频。
     frame_paths: 帧图片路径
     frame_durations: 每帧显示秒数
     segments: 含 audio_path 的段列表
-    srt_path: SRT 字幕文件
+    srt_path: SRT 字幕文件（留档用）
+    cues: 字幕 cue 列表 [((start_s,end_s),text),...]，优先用于构造字幕，
+          绕开 moviepy 脆弱的 SRT 文本解析。为 None 时回退从 srt_path 读取。
     """
     Logger.info("合成视频...")
 
@@ -113,24 +115,34 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     video = ImageSequenceClip(all_frames, durations=all_durations)
 
     # 组装音频: 开头静音(标题卡+初始局面，无解说) + 逐段 TTS 音频
+    # 关键: 每段音频后补足静音，使该段音频块时长精确等于 seg.duration_s，
+    # 与帧/字幕时间轴对齐（否则 concat 无间隙会逐段累积漂移，字幕落后于音频）。
     silence_path = os.path.join(frames_dir, "_silence.wav")
     _make_silence(LEAD_SILENCE, silence_path)
     audio_clips = [AudioFileClip(silence_path)]
-    for seg in segments:
+    pad_paths = []
+    for idx, seg in enumerate(segments):
+        clip = None
         if seg.audio_path and os.path.exists(seg.audio_path):
             try:
-                audio_clips.append(AudioFileClip(seg.audio_path))
+                clip = AudioFileClip(seg.audio_path)
+                audio_clips.append(clip)
             except Exception as e:
                 Logger.warn(f"跳过音频 {seg.audio_path}: {e}")
+        # 该段目标时长（与帧/字幕一致）减去音频实际时长，差额补静音
+        target = max(0.0, float(getattr(seg, "duration_s", 0.0)))
+        played = clip.duration if clip is not None else 0.0
+        gap = target - played
+        if gap > 0.01:
+            pad_path = os.path.join(frames_dir, f"_pad_{idx:03d}.wav")
+            _make_silence(gap, pad_path)
+            audio_clips.append(AudioFileClip(pad_path))
+            pad_paths.append(pad_path)
     if len(audio_clips) > 1:
         video = video.with_audio(concatenate_audioclips(audio_clips))
 
     # 字幕带：固定在底部留白区（棋盘下方，不覆盖棋盘）
     band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
-    sub_bg_path = _create_subtitle_background(frame_w, SUBTITLE_HEIGHT)
-    sub_bg_clip = (ImageClip(sub_bg_path)
-                   .with_duration(video.duration)
-                   .with_position((0, band_top)))
 
     # 字幕文本：固定尺寸 caption（高度封顶，绝不向上压棋盘、向下溢出画面）
     _FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
@@ -143,11 +155,31 @@ def compose(frame_paths: List[str], frame_durations: List[float],
             text_align="center",
         )
 
-    subs = SubtitlesClip(srt_path, encoding="utf-8", make_textclip=_mk_sub)
-    subs = subs.with_position((20, band_top))
+    # 优先用 cue 列表构造字幕，绕开 moviepy 脆弱的 SRT 文件解析；
+    # 列表为空（无任何字幕）时跳过字幕层，避免 SubtitlesClip 对空列表崩溃。
+    if cues is None:
+        try:
+            from moviepy.video.tools.subtitles import file_to_subtitles
+            cues = file_to_subtitles(srt_path, encoding="utf-8")
+            cues = [c for c in cues if c[0] is not None and len(c[0]) == 2]
+        except Exception as e:
+            Logger.warn(f"读取字幕文件失败，将不渲染字幕: {e}")
+            cues = []
+
+    layers = [video]
+    if cues:
+        sub_bg_path = _create_subtitle_background(frame_w, SUBTITLE_HEIGHT)
+        sub_bg_clip = (ImageClip(sub_bg_path)
+                       .with_duration(video.duration)
+                       .with_position((0, band_top)))
+        subs = SubtitlesClip(cues, make_textclip=_mk_sub)
+        subs = subs.with_position((20, band_top))
+        layers.extend([sub_bg_clip, subs])
+    else:
+        Logger.warn("无有效字幕，跳过字幕层")
 
     # 合成：视频 + 字幕背景 + 字幕
-    final = CompositeVideoClip([video, sub_bg_clip, subs])
+    final = CompositeVideoClip(layers)
 
     output = os.path.join("output", "analysis.mp4")
     final.write_videofile(output, codec="libx264", audio_codec="aac", fps=fps)

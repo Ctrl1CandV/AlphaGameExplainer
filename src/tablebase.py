@@ -101,52 +101,68 @@ class TablebaseSolver:
         return None
 
     def _best_move_syzygy(self, board: chess.Board) -> Optional[Tuple[chess.Move, int, int]]:
+        """标准 DTZ 收敛选着。
+
+        旧实现按「子局面 DTZ 绝对值最小」选着，但推兵/升变是零化着会重置 DTZ
+        变大，导致获胜方永远嫌推兵更差、死活不升变、两王无限循环最终和棋。
+        正确做法：
+          获胜方(current_wdl>0)：只在保住胜势(子局面对手 wdl<0)的着里选；
+              优先零化着(推兵/升变/吃子，board.is_zeroing)，再按子 DTZ 绝对值最小(推进最快)。
+          防守方(current_wdl<0)：拖最久——避免零化、子 DTZ 绝对值最大。
+          和棋(current_wdl==0)：维持和棋(子局面对手 wdl>=0)，DTZ 绝对值最大。
+        返回 (move, child_wdl, child_dtz)，child_wdl 为「子局面对手视角」的 WDL，
+        与旧签名一致（调用方据此判 is_only_move）。逐着 probe 失败跳过；
+        全部失败则返回 None，由上层回退 Stockfish。
+        """
         current_wdl = self.probe_wdl(board)
-        if current_wdl is None and not self._syzygy_available:
+        if not self._syzygy_available:
             return None
 
-        best_move = None
-        best_wdl = None
-        best_dtz = None
-        best_dtz_abs = None
-        fallback_mode = current_wdl is None
-        is_winning = current_wdl > 0 if not fallback_mode else True
+        # 收集所有可 probe 的候选着
+        cands = []  # (move, zeroing, child_wdl, child_dtz)
         for move in board.legal_moves:
+            zeroing = board.is_zeroing(move)
             temp = board.copy()
             temp.push(move)
             try:
-                wdl = self._syzygy.probe_wdl(temp)
-                if wdl is None:
-                    continue
-                dtz = None
-                try:
-                    dtz = self._syzygy.probe_dtz(temp)
-                except Exception:
-                    pass
-                dtz_abs = abs(dtz) if dtz is not None else None
-                if best_wdl is None:
-                    best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
-                    continue
-                if fallback_mode:
-                    if wdl < best_wdl or (wdl == best_wdl and dtz_abs is not None and (best_dtz_abs is None or dtz_abs < best_dtz_abs)):
-                        best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
-                else:
-                    if wdl < best_wdl:
-                        best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
-                    elif wdl == best_wdl and dtz_abs is not None:
-                        if best_dtz_abs is None:
-                            best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
-                        elif is_winning:
-                            if dtz_abs < best_dtz_abs:
-                                best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
-                        else:
-                            if dtz_abs > best_dtz_abs:
-                                best_wdl, best_dtz, best_dtz_abs, best_move = wdl, dtz, dtz_abs, move
+                child_wdl = self._syzygy.probe_wdl(temp)
             except Exception:
                 continue
-        if best_move is not None:
-            return (best_move, best_wdl, best_dtz if best_dtz is not None else 0)
-        return None
+            if child_wdl is None:
+                continue
+            try:
+                child_dtz = self._syzygy.probe_dtz(temp)
+            except Exception:
+                child_dtz = None
+            cands.append((move, zeroing, child_wdl, child_dtz))
+
+        if not cands:
+            return None
+
+        def dtz_abs(c):
+            return abs(c[3]) if c[3] is not None else 9999
+
+        # current_wdl 缺失时按「获胜方」保守处理（尽量推进）
+        winning = current_wdl is None or current_wdl > 0
+        losing = current_wdl is not None and current_wdl < 0
+
+        if winning:
+            # 保住胜势：我方走完后，对手视角应为负(child_wdl<0)
+            keep = [c for c in cands if c[2] < 0]
+            pool = keep or cands
+            # 零化着优先(0)，再按推进最快(子 DTZ 绝对值小)
+            best = min(pool, key=lambda c: (0 if c[1] else 1, dtz_abs(c)))
+        elif losing:
+            # 防守：避免零化、拖最久(子 DTZ 绝对值大)
+            best = min(cands, key=lambda c: (1 if c[1] else 0, -dtz_abs(c)))
+        else:
+            # 和棋：维持不输(child_wdl>=0)，拖最久
+            keep = [c for c in cands if c[2] >= 0]
+            pool = keep or cands
+            best = min(pool, key=lambda c: (1 if c[1] else 0, -dtz_abs(c)))
+
+        move, _z, child_wdl, child_dtz = best
+        return (move, child_wdl, child_dtz if child_dtz is not None else 0)
 
     def _best_move_gaviota(self, board: chess.Board) -> Optional[Tuple[chess.Move, int, int]]:
         best_move = None
@@ -187,6 +203,10 @@ class TablebaseSolver:
 
     def solve(self, board: chess.Board) -> List[AnalyzedMove]:
         if not self._opened:
+            return []
+        # 根局面本身必须可探，否则不认命中（避免 6 子根局面被
+        # _best_move_syzygy「只剩能降子的吃子着」逼着弃子走进有表可查的败局）
+        if self.probe_wdl(board) is None:
             return []
         piece_count = len(board.piece_map())
         if piece_count > 7:
@@ -254,11 +274,12 @@ class TablebaseSolver:
         return result
 
     def is_hit(self, board: chess.Board) -> bool:
-        if self.probe_wdl(board) is not None:
-            return True
-        if self._syzygy_available:
-            return self._best_move_syzygy(board) is not None
-        return False
+        # 只认「根局面本身可探」。旧实现在根局面探不到时回退
+        # _best_move_syzygy，而后者只保留「走完能落进 5 子表」的着——
+        # 6 子局面里唯一能降子的就是吃子，于是把必胜局面的弃子着误当成解，
+        # 逼着强方弃子走进有表可查的败局。表库只在能精确探到时才接管，
+        # 否则交给 Stockfish(+SyzygyPath) 求解。
+        return self.probe_wdl(board) is not None
 
     def is_draw(self, board: chess.Board) -> Optional[bool]:
         """

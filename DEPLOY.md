@@ -1,6 +1,6 @@
 # AlphaGameExplainer 完整部署文档
 
-> 最后更新：2026-05-30  
+> 最后更新：2026-05-31  
 > 适用系统：Windows 10/11 x64  
 > 最低硬件：32GB 内存 + NVIDIA GPU（16GB 显存推荐）
 
@@ -356,6 +356,7 @@ LLM_BACKEND=llama_cpp
 LLM_TEMPERATURE=0.2
 
 # ===== llama-cpp-python (本地 GGUF 模型) =====
+# 16GB 显存推荐 Q3_K_M（见第 7.1/7.4 节）；若用下面的 IQ4_XS，需把 N_CTX 降到 2048 防溢出
 LLAMA_CPP_MODEL_PATH=D:/Program Files/HuggingFace/Qwen3.6-27B-IQ4_XS.gguf
 LLAMA_CPP_N_GPU_LAYERS=-1
 LLAMA_CPP_N_CTX=4096
@@ -479,7 +480,7 @@ python main.py test.fen
 
 ```
 # 单车杀王 — 最简单，首测用
-8/8/8/3k4/8/8/8/3RK3 w - - 0 1
+8/8/8/4k3/8/8/8/R3K3 w - - 0 1
 
 # 车兵对车 — 实战常见
 k7/7R/8/8/8/8/5r2/K7 w - - 0 1
@@ -487,6 +488,9 @@ k7/7R/8/8/8/8/5r2/K7 w - - 0 1
 # 象马杀王 — 最复杂
 k7/2K5/8/8/8/8/8/N2B4 w - - 0 1
 ```
+
+> ⚠️ 输入 FEN 前确保局面合法：本方刚走完不能让对方仍处于被将状态（否则 python-chess 报 `status != 0`，求解直接失败）。
+> 例如 `8/8/8/3k4/8/8/8/3RK3 w` 是非法的——白车正将着黑王却轮白走（`OPPOSITE_CHECK`）。
 
 ---
 
@@ -496,7 +500,7 @@ k7/2K5/8/8/8/8/8/N2B4 w - - 0 1
 |---|---|---|
 | Python | 3.12.13 | conda create |
 | PyTorch | 2.x (cu124) | pip (--index-url cu124) |
-| llama-cpp-python | 0.3.23 (cu124) | pip (--extra-index-url abetlen cu124) |
+| llama-cpp-python | 0.3.23 (cu124) | pip + GitHub Release wheel URL（见第 4 节） |
 | CUDA Runtime | 12.9.79 | pip (nvidia-cuda-runtime-cu12) |
 | cuBLAS | 12.9.2.10 | pip (nvidia-cublas-cu12) |
 | Stockfish | 17 | 官网下载 exe |

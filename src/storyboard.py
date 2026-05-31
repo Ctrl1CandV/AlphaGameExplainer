@@ -457,13 +457,23 @@ def _hard_constraints(board: chess.Board, endgame_name: str, role_meta: dict) ->
         rules.append(f"菲利多防线只能绑定到{weak}的防守任务，卢塞纳桥位只能绑定到{strong}的进攻任务")
     return rules
 
-def _role_meta(board: chess.Board, endgame_name: str) -> dict:
+def _role_meta(board: chess.Board, endgame_name: str, winner_color=None) -> dict:
     white_score = _material_score(board, chess.WHITE)
     black_score = _material_score(board, chess.BLACK)
-    if white_score == black_score:
-        return {}
-    strong = chess.WHITE if white_score > black_score else chess.BLACK
-    weak = chess.BLACK if strong == chess.WHITE else chess.WHITE
+    # 优先按「实际终局赢家」定强弱（winner_color 由 pipeline 复盘终局得出）：
+    # 终局里赢的一方就是强方，这样解说立场永远与画面一致。
+    # 无终局信息(线被截断)或和棋时，回退按材料判断。
+    if winner_color is not None:
+        strong = winner_color
+        weak = chess.BLACK if strong == chess.WHITE else chess.WHITE
+        if (white_score > black_score and strong != chess.WHITE) or \
+           (black_score > white_score and strong != chess.BLACK):
+            Logger.warn(f"立场修正: 材料强方≠实际赢家，按终局结果以{_color_name(strong)}为取胜方解说")
+    else:
+        if white_score == black_score:
+            return {}
+        strong = chess.WHITE if white_score > black_score else chess.BLACK
+        weak = chess.BLACK if strong == chess.WHITE else chess.WHITE
     meta = {
         "strong_color": strong,
         "weak_color": weak,
@@ -646,11 +656,15 @@ def _assign_video_density(node: dict, contains_rep: bool, repeat_count: int) -> 
     return {"density": "medium", "summary_only": False}
 
 
-def build(board: chess.Board, compressed: List[CompressedStep]) -> dict:
-    """基于压缩节点构建叙事分镜，注入局面特征与分阶段解说提示"""
+def build(board: chess.Board, compressed: List[CompressedStep], winner_color=None) -> dict:
+    """基于压缩节点构建叙事分镜，注入局面特征与分阶段解说提示。
+
+    winner_color: 实际终局赢家颜色(chess.WHITE/BLACK)，由 pipeline 复盘得出。
+    用于让攻守立场从真实结果反推，避免解说与画面相反。
+    """
     kb = match_endgame(board)
     phases = kb["phases"] if kb else []
-    role_meta = _role_meta(board, kb["name"] if kb else "残局")
+    role_meta = _role_meta(board, kb["name"] if kb else "残局", winner_color=winner_color)
     n = len(compressed)
 
     for i, cs in enumerate(compressed):

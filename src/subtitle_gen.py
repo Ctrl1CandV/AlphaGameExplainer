@@ -106,22 +106,41 @@ def _allocate_cues(text: str, start: float, duration: float) -> List[tuple]:
     return result
 
 
-def generate(segments: List[Segment], offset_s: float = 0.0) -> str:
-    """基于 Segments 生成逐句滚动的 SRT 字幕文件"""
-    lines = []
-    num = 1
+def build_cues(segments: List[Segment], offset_s: float = 0.0) -> List[tuple]:
+    """构建字幕 cue 列表，格式 [((start_s, end_s), text), ...]。
+
+    直接供 moviepy 的 SubtitlesClip(list) 使用，绕开其脆弱的 SRT 文本解析
+    （file_to_subtitles 对多行文本/空行/数字冒号易误判，产生 None 时间戳后崩溃）。
+    过滤空文本 cue，确保下游不会拿到非法条目。
+    """
+    cues: List[tuple] = []
     for seg in segments:
         if not seg.text.strip():
             continue
         seg_start = offset_s + seg.start_time
         for start, end, text in _allocate_cues(seg.text, seg_start, seg.duration_s):
-            lines.append(str(num))
-            lines.append(f"{_fmt_time(start)} --> {_fmt_time(end)}")
-            lines.append(text)
-            lines.append("")
-            num += 1
+            t = (text or "").strip()
+            if not t:
+                continue
+            cues.append(((float(start), float(end)), t))
+    return cues
+
+
+def generate(segments: List[Segment], offset_s: float = 0.0) -> str:
+    """基于 Segments 生成 SRT 字幕文件（留档/调试用），返回路径。
+
+    视频合成不再依赖此文件解析，改用 build_cues() 的列表直接构造字幕。
+    """
+    cues = build_cues(segments, offset_s)
+    lines = []
+    for num, ((start, end), text) in enumerate(cues, 1):
+        lines.append(str(num))
+        lines.append(f"{_fmt_time(start)} --> {_fmt_time(end)}")
+        lines.append(text)
+        lines.append("")
 
     srt_path = os.path.join("output", "subtitles.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+        # 结尾补换行，确保最后一条 cue 后也有空行分隔（标准 SRT 要求）。
+        f.write("\n".join(lines) + "\n")
     return srt_path

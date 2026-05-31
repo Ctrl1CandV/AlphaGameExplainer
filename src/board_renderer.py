@@ -385,6 +385,14 @@ def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment
                                               is_check, info=frame_info):
             _save(img, dur)
 
+    # 尾部总结段（segments 比 moves 多出的部分，如结尾总结词）：
+    # 在最终局面上渲染定格帧，时长等于该段音频，让将杀局面停留并播放总结。
+    for seg in segments[total:]:
+        tail_dur = seg.duration_s if seg.duration_s > 0 else 3.0
+        tail_info = _make_frame_info(panel_info, total, total, history,
+                                     panel_info.get("scores", [None])[-1] if panel_info and panel_info.get("scores") else None)
+        _save(render_frame(board, info=tail_info), tail_dur)
+
     Logger.success(f"动画渲染完成: {len(frame_paths)} 帧, {sum(durations):.1f}s")
     return frame_paths, durations
 

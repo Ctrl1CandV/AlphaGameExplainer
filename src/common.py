@@ -114,6 +114,7 @@ class StoryboardSegment:
 class GeneratedCommentary:
     segments: List[StoryboardSegment] = field(default_factory=list)
     raw_text: str = ""
+    summary: str = ""                                       # 结尾总结词（技法/经验），独立于分步解说
     backend: str = ""
     chunks_total: int = 0
     chunks_succeeded: int = 0
