@@ -20,9 +20,8 @@
 10. [Syzygy 表库](#10-syzygy-表库)
 11. [环境变量配置（.env）](#11-环境变量配置env)
 12. [ChatTTS 模型（首次运行自动下载）](#12-chattts-模型首次运行自动下载)
-13. [IndexTTS2（可选，视频模式需要）](#13-indextts2可选视频模式需要)
-14. [启动运行](#14-启动运行)
-15. [依赖版本速查表](#15-依赖版本速查表)
+13. [启动运行](#13-启动运行)
+14. [依赖版本速查表](#14-依赖版本速查表)
 
 ---
 
@@ -416,35 +415,13 @@ python -c "from ChatTTS import Chat; chat = Chat(); chat.load(compile=False, sou
 
 ---
 
-## 13. IndexTTS2（可选，视频模式需要）
-
-IndexTTS2 用于生成高质量 TTS 语音（视频模式），需要独立的 Python 3.10 环境：
-
-```powershell
-# 进入 index-tts 目录
-cd ../index-tts
-
-# 安装 uv（Python 包管理器）
-pip install uv
-
-# 同步依赖
-uv sync
-
-# 下载模型权重
-uv run modelscope download --model IndexTeam/IndexTTS-2 --local_dir checkpoints
-```
-
-> 视频模式默认优先尝试 IndexTTS2，不可用时回退到 ChatTTS，再不行回退到 pyttsx3。
-
----
-
-## 14. 启动运行
+## 13. 启动运行
 
 > 项目有两种模式：
 > - `--text`：纯文本解说输出，**不需要 FFmpeg / TTS**，适合快速测试 LLM 是否正常
 > - 不带 `--text`：完整视频模式，生成 `.mp4` 视频，需要 FFmpeg + TTS 全部就绪
 
-### 14.1 纯文本模式（推荐首次测试）
+### 13.1 纯文本模式（推荐首次测试）
 
 ```powershell
 python main.py --text
@@ -458,7 +435,7 @@ python main.py --text
 END
 ```
 
-### 14.2 视频模式（生成 mp4 讲解视频）
+### 13.2 视频模式（生成 mp4 讲解视频）
 
 ```powershell
 python main.py
@@ -466,7 +443,7 @@ python main.py
 
 需要 **FFmpeg + MoviePy + TTS（ChatTTS / pyttsx3）全部就绪**。会生成 `output/analysis.mp4`。
 
-### 14.3 从文件批量运行
+### 13.3 从文件批量运行
 
 ```powershell
 # 纯文本模式
@@ -476,7 +453,7 @@ python main.py --text test.fen
 python main.py test.fen
 ```
 
-### 14.4 测试用 FEN
+### 13.4 测试用 FEN
 
 ```
 # 单车杀王 — 最简单，首测用
@@ -494,7 +471,7 @@ k7/2K5/8/8/8/8/8/N2B4 w - - 0 1
 
 ---
 
-## 15. 依赖版本速查表
+## 14. 依赖版本速查表
 
 | 组件 | 版本 | 安装方式 |
 |---|---|---|
