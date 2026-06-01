@@ -46,7 +46,7 @@ _EXAMPLE_FALLBACK = (
     "总结：先控制中心，再展开子力，最后集中火力发动攻击完成将杀。"
 )
 
-_JSON_EXAMPLE = """{"segments":[{"id":1,"sub_endgame":"车兵对车","voiceover":"白车退至c1建立菲利多防线，核心是让白王继续守住兵前关键格e3，同时用车在后方稳定控制c线。这样黑方即使想从正面逼近，也暂时找不到直接突破的入口。","pacing":"slow"},{"id":2,"sub_endgame":"车兵对车","voiceover":"承接前一步已经搭好的防线，黑王继续向白兵逼近，意图把白王从关键格一带挤开。这里的重点不是立刻制造战术，而是通过王位前压不断测试防线是否会出现松动。","pacing":"normal"},{"id":3,"sub_endgame":"车兵对车","voiceover":"顺着前面对防线的持续施压，黑车突然从侧翼发力，对白方王位形成更直接的骚扰。白王一旦被迫离开d线附近，原本稳定的菲利多防线就会出现裂缝，局面也会随之进入真正的转折阶段。","pacing":"slow"}]}"""
+_JSON_EXAMPLE = """{"segments":[{"id":1,"sub_endgame":"车兵对车","voiceover":"白车退回底线后方建立菲利多防线，关键是让白王稳稳守住兵前那一格，车则在身后控制住整条直线。这样一来，黑方就算想从正面压上来，也找不到直接突破的入口。","pacing":"slow"},{"id":2,"sub_endgame":"车兵对车","voiceover":"承接刚搭好的防线，黑王一步步向白兵逼近，想把白王从兵前的关键格挤开。这里的重点不是马上制造战术，而是用王不断前压，试探防线会不会出现松动。","pacing":"normal"},{"id":3,"sub_endgame":"车兵对车","voiceover":"顺着前面对防线的持续施压，黑车突然绕到侧翼发难，对白方王的位置形成更直接的骚扰。白王一旦被迫离开兵前那条线，原本稳固的菲利多防线就会裂开一道口子，局面也随之进入真正的转折。","pacing":"slow"}]}"""
 
 
 def _get_example(endgame_name: str) -> str:
@@ -105,12 +105,15 @@ def _build_json_header(storyboard: dict) -> str:
     hard_constraints = storyboard.get("hard_constraints", [])
     winning_side = storyboard.get("winning_side", "")
     losing_side = storyboard.get("losing_side", "")
+    target_length = storyboard.get("target_length", "")
     node_count = len(storyboard.get("nodes", []))
 
     parts = [
         "你是国际象棋赛事解说员，负责为残局教学视频配解说词。只输出合法JSON，不加任何解释或markdown标记。",
-        "风格要求：像专业赛事解说员那样——既有技术深度，又有叙事感染力。把每一段残局讲成一个有推进感的故事。",
-        "关键步骤（转折、吃子、将军、收官）浓墨重彩、写出张力；过渡和重复试探的步骤一笔带过，让整段解说有起伏、不平淡。",
+        "风格要求：像专业赛事解说员那样——讲得生动、有推进感，但每一句都必须落在一个具体的棋理事实上。",
+        "把每段残局讲成一个有逻辑的推进故事：先讲清这一步做了什么、局面因此发生了什么变化，再讲它为什么有用。",
+        "关键步骤（转折、吃子、将军、收官）可以多写两句、写出张力；过渡和重复试探的步骤一笔带过，让整段解说有起伏、不平淡。",
+        "底线：宁可朴素也不要空洞——没有事实支撑的形容词（精妙、默契、天衣无缝之类）一个都不要用。",
         "",
         f"【残局类型】{endgame_name}",
     ]
@@ -132,6 +135,7 @@ def _build_json_header(storyboard: dict) -> str:
         "forcing→可以讲强制/被迫  terminal→才能说将杀/绝杀",
         "",
         "节点可能标注「将军驱赶」或「反复试探等待」→ 这种节点是多着合并的叙事块，你要用流畅的段落描述这段过程，而不是逐步数着。",
+        "节点可能带「教学点」「关键变化」「必须讲到」字段→ 这是用代码从棋盘算出的真实棋理事实，请把它们用自己的话融进解说，这是让解说有内容、不空洞的关键。",
         "",
         "【JSON格式】",
         '{"segments":[{"id":int,"sub_endgame":"string","voiceover":"string","pacing":"slow|normal|fast|pause_before|pause_after"},...]}',
@@ -139,13 +143,18 @@ def _build_json_header(storyboard: dict) -> str:
         "",
         "【解说要求】",
         f"- 正好{node_count}个segment，不增不减",
+    ])
+    if target_length:
+        parts.append(f"- 全局字数预算：整段解说（所有块加起来）控制在{target_length}。关键节点可多写，过渡节点摘要带过，别平均用力")
+    parts.extend([
         "- 用自然的中文解说，避免引擎术语（如评估值、DTM、mate in N）",
         "- 每段50-200字，summary_only的用1句话概括（≤80字）",
         "- 各段之间连续推进，后一段承接前一段已建立的局面",
         "- 最后一段若是terminal权限，以「至此形成将杀」或「至此胜负已定」收束",
         "- 王的描述侧重于「逼近」「封住逃格」「配合主力子压缩空间」等位置性语言",
         "- voiceover用纯中文口播，禁止出现棋盘坐标（如h7、g5）、棋子英文字母、数字和升变记号；",
-        "  需要指位置时改用「底线」「边线」「右上角」「兵前一格」「同一条线」等中文说法",
+        "  指位置时改用方位关系：「黑王的右前方」「兵前一格」「同一条斜线」「底线」「边角」「中心方向」等，",
+        "  画面里棋盘和箭头已标出精确格子，你的任务是用关系化语言说清这一步改变了什么，而不是报格子名",
         "",
     ])
     return "\n".join(parts)
@@ -220,6 +229,22 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
                      f" | {'含吃子' if node.get('is_capture_node') else '未吃子'}")
         parts.append(f"目标: {goal} | 权限: {claim}{' (禁止将杀/绝杀)' if claim != 'terminal' else ' (可宣告胜负)'}")
 
+        # 棋理洞察（由 insight_extractor 用棋盘算出的真实事实，关系化、无坐标）。
+        # 这是让解说有内容、摆脱空洞比喻的核心信息，优先放在显眼位置。
+        teaching_point = node.get("teaching_point", "")
+        if teaching_point:
+            parts.append(f"棋理事实（务必融进解说，用自己的话讲）: {teaching_point}")
+        spatial = node.get("spatial_change", {})
+        if spatial and spatial.get("weak_before") is not None:
+            wb = spatial.get("weak_before")
+            wa = spatial.get("weak_after")
+            region = spatial.get("king_region", "")
+            extra = f"，对方王已退到{region}" if region in ("边线", "角落") else ""
+            parts.append(f"空间数据: 对方王可走的安全格 {wb}→{wa}{extra}")
+        must_mention = node.get("must_mention", [])
+        if must_mention:
+            parts.append(f"必须讲到: {'；'.join(must_mention)}")
+
         drive_tag = next((t for t in tags if t in ("将军驱赶", "连续将军驱赶", "反复试探等待")), "")
         if drive_tag:
             parts.append(f"类型: 「{drive_tag}」叙事块 — 这是多着合并，描述整体过程，不要逐步数着")
@@ -248,6 +273,140 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
 def _strip_thinking(text: str) -> str:
     text = re.sub(r'<think>[\s\S]*?</think>', '', text)
     return text.strip()
+
+
+# 反套话替换表：从实际 KBNvK 样本统计出的高频空洞修辞。
+# 原则：只清纯修辞，不动有信息量的词。多数直接删除（删掉不影响句意，
+# 因为它们本就不承载事实），少数替换成中性词以保句子通顺。
+# 删除类用空串，会在 _auto_fix_voiceover 末尾的标点收敛里清掉留下的多余标点。
+_CLICHE_PATTERNS = [
+    # (正则, 替换) —— 顺序敏感：先长后短
+    (r"如同?利剑出鞘", ""),
+    (r"如洪水般(不可阻挡)?", "持续"),
+    (r"天罗地网", "严密的控制"),
+    (r"天衣无缝", "完整"),
+    (r"密不透风", "严密"),
+    (r"无形的牢笼", "包围"),
+    (r"胜利的天平(开始|彻底)?(倾斜)?", "优势"),
+    (r"(已如)?囊中之物", "胜势已成"),
+    (r"不可阻挡", ""),
+    (r"暗藏杀机", ""),
+    (r"耐心的围猎", "稳步驱赶"),
+    (r"致命一击", "最后一击"),
+    # 形容词类修饰：删去后句子仍通顺
+    (r"精妙地?", ""),
+    (r"精湛地?", ""),
+    (r"精准地?", ""),
+    (r"精确地?", ""),
+    (r"精心(计算|策划)?地?", ""),
+    (r"深思熟虑", ""),
+    (r"完美(的|地)?", ""),
+    (r"愈发默契", "更协调"),
+    (r"(配合|协调)(愈发|越来越)默契", "配合更协调"),
+    (r"默契(的)?配合", "配合"),
+    (r"步步为营", "稳步推进"),
+    # 纯过渡凑字尾巴：「为后续/最终…做准备/奠定基础/创造条件/铺平道路」。
+    # 这类句尾不承载任何棋理事实，是 AI 最爱的空洞承诺，每次出现都删。
+    (r"[，,]?\s*为(?:后续|接下来|下一步|最终|后面|最后)(?:的)?[^，。、！]{0,16}"
+     r"(?:做准备|做好准备|奠定[了]?(?:坚实)?基础|创造[了]?[^，。]{0,8}条件|铺平[了]?道路|埋下伏笔)", ""),
+]
+
+
+def _reduce_cliches(text: str) -> str:
+    """删减空洞套话/重复比喻。不改变事实性内容，只去修辞。"""
+    out = text
+    for pat, repl in _CLICHE_PATTERNS:
+        out = re.sub(pat, repl, out)
+    return out
+
+
+# 坐标兜底清洗：prompt 已要求"禁坐标"，但 LLM 偶尔仍会吐出 e8/f8 这类格子名。
+# 坐标一旦混进 TTS 会被逐字母念（"e-eight"），非常刺耳，所以定稿前用正则强制清除。
+# 三层策略，从精到糙：
+#   1) 白名单移动动词+坐标 → 整体收成方位动词（最自然，直接丢掉坐标）；
+#   2) 通用「介词+坐标」→「介词+那一格」（动词不在白名单时，保住前面的动词不被截断）；
+#   3) catch-all 清掉任何残留的孤立坐标。
+_COORD = r"[a-h][1-8]"
+_MOVE_TO_COORD = [
+    (re.compile(rf"(?:被迫)?(?:退守|退回到|退回|退到|退至|后撤到|撤回到|撤到)\s*{_COORD}\s*格?"), "后退"),
+    (re.compile(rf"(?:移到|移至|走到|走向|来到|落到|落在|停在|占据)\s*{_COORD}\s*格?"), "就位"),
+    (re.compile(rf"(?:跳到|跳向|跳至|跳上|跃到|跃向)\s*{_COORD}\s*格?"), "跳出"),
+    (re.compile(rf"(?:切入到?|进到|进至|挺进到|推进到|杀到)\s*{_COORD}\s*格?"), "切入"),
+]
+# 通用介词：动词未被白名单覆盖时（如"逼到f8""压向a7"），把坐标换成"那一格"，
+# 让前置动词与句子结构完整保留，避免 catch-all 把动词截成残句。
+_COORD_PREP = re.compile(rf"(?<=[一-鿿])(到|至|向|在|于)\s*{_COORD}\s*格?")
+# catch-all：清除剩余的孤立坐标，连同可能的前导介词与"格"后缀一起吃掉。
+_COORD_CATCHALL = re.compile(rf"(?:从|由|到|至|向|于|在|经)?\s*{_COORD}\s*格?")
+
+
+def _strip_coordinates(text: str) -> str:
+    """清除 voiceover 中泄漏的棋盘坐标，防止进入 TTS 被逐字母念读。"""
+    out = text
+    for pat, repl in _MOVE_TO_COORD:
+        out = pat.sub(repl, out)
+    out = _COORD_PREP.sub(r"\1那一格", out)
+    out = _COORD_CATCHALL.sub("", out)
+    return out
+
+
+# 跨段去重：chunk 之间各自独立生成、LLM 看不到全局，导致同一句套话
+# （"逐步收紧包围圈""围绕对王争夺关键格"…）在多段里反复出现。这里在所有
+# segment 汇总后做一次全局扫描：每个短语家族首次出现保留原文，第二次及以后
+# 轮换成同义变体，保住语义、消除字面复读感。变体本身也要无坐标、不空洞。
+_REPEAT_FAMILIES = [
+    (re.compile(r"逐步收紧包围圈|不断收紧包围圈|收紧包围圈"),
+     ["把包围圈又收小一圈", "进一步缩小对方王的活动范围", "继续收网", "再压掉一块活动空间"]),
+    (re.compile(r"围绕对王(?:来回|反复)?调整[，、]?\s*争夺关键格|围绕对王(?:来回|反复)调整"),
+     ["贴着对方王不断换位、卡住要害格", "在关键格上与对方王反复周旋", "一格一格地抢占对方王身边的要点"]),
+    (re.compile(r"等待最佳时机完成最后一击|等待最佳时机|等待[^，。]{0,6}最后一击"),
+     ["伺机收官", "只待最后一着到位", "等收官的时机成熟"]),
+    (re.compile(r"为(?:下一步|后续)的?致命打击做准备|为致命一击蓄势"),
+     ["为收官铺路", "把收杀的条件一点点凑齐"]),
+    (re.compile(r"只能被动应对|只能被动防守|被动应对"),
+     ["几乎没有还手余地", "走一步看一步，毫无主动权", "只能跟着白方的节奏走"]),
+    (re.compile(r"逐步压缩(?:其|对方王的?)?(?:活动)?空间|不断压缩(?:其|对方)?(?:活动)?空间"),
+     ["把对方王能落脚的格子越夺越少", "活动范围被一截截切掉", "腾挪余地越来越小"]),
+]
+
+
+def _dedupe_across_segments(segments) -> None:
+    """对已汇总的 StoryboardSegment 列表原地去重高频套话短语。
+
+    首次命中保留原文；之后每次命中按家族轮换替换为同义变体。失败安全：
+    任何异常都跳过该家族，不影响解说主体。
+    """
+    if not segments:
+        return
+    for pat, variants in _REPEAT_FAMILIES:
+        if not variants:
+            continue
+        hit = 0
+        for seg in segments:
+            vo = getattr(seg, "voiceover", "") or ""
+            if not vo:
+                continue
+
+            # 逐次替换：每个命中都计数，首个全局命中保留原文，其余按家族轮换变体
+            def _sub_one(text):
+                nonlocal hit
+                out_parts = []
+                last = 0
+                for m in pat.finditer(text):
+                    out_parts.append(text[last:m.start()])
+                    if hit == 0:
+                        out_parts.append(m.group(0))  # 首次保留
+                    else:
+                        out_parts.append(variants[(hit - 1) % len(variants)])
+                    hit += 1
+                    last = m.end()
+                out_parts.append(text[last:])
+                return "".join(out_parts)
+
+            try:
+                seg.voiceover = _sub_one(vo)
+            except Exception:
+                continue
 
 
 def _extract_json_text(text: str) -> str:
@@ -349,9 +508,17 @@ def _auto_fix_voiceover(text: str, node: dict) -> str:
         fixed = re.sub(r"(?:黑方|白方)应[，,]?\s*", "", fixed)
         fixed = re.sub(r"(?:下一步|随后再)[^，。,]{0,8}(?:，|,|\s*)", "", fixed)
 
+    # 反套话：删减空洞修辞（放在标点收敛之前，让删除留下的多余标点被一并清掉）
+    fixed = _reduce_cliches(fixed)
+
+    # 坐标兜底：清除 prompt 未能压住的泄漏坐标（须在依赖坐标的"叫杀"规则之后）
+    fixed = _strip_coordinates(fixed)
+
     fixed = re.sub(r"[，,]{2,}", "，", fixed)
     fixed = re.sub(r"。{2,}", "。", fixed)
     fixed = re.sub(r"\s{2,}", " ", fixed)
+    fixed = re.sub(r"[，、]+。", "。", fixed)
+    fixed = re.sub(r"^[，、。]+", "", fixed)
     fixed = fixed.strip()
 
     return fixed
@@ -817,20 +984,107 @@ def _summary_is_bad(text: str) -> bool:
     return False
 
 
+def _winning_path_phrases(storyboard: dict) -> list:
+    """从节点的 position_goal 序列归纳「取胜路线」短语（全局去重保序）。
+
+    这是不依赖知识库(kb)的结构化素材：无论 match_endgame 是否命中，节点都带
+    position_goal，因此总能产出取胜逻辑骨架，避免 kb 未命中时总结无米下锅。
+    """
+    phrases = []
+    for n in storyboard.get("nodes", []):
+        g = n.get("position_goal", "")
+        ph = _goal_to_narrative_phrase(g) if g else ""
+        if ph and ph not in phrases:
+            phrases.append(ph)
+    return phrases
+
+
+def _build_recap_from_segments(segments, max_parts: int = 5, per_len: int = 46) -> str:
+    """把刚生成的分段解说浓缩成「讲解回顾」素材，喂给总结模型。
+
+    这是最贴切的总结依据——基于「这盘实际是怎么赢的」提炼，而不是基于贫乏的
+    kb 元数据凭空写。均匀采样若干段、每段取首句并截断，控制长度。失败安全。
+    """
+    if not segments:
+        return ""
+    vos = []
+    for seg in segments:
+        vo = (getattr(seg, "voiceover", "") or "").strip()
+        if vo:
+            vos.append(vo)
+    if not vos:
+        return ""
+    if len(vos) > max_parts:
+        idxs = sorted(set(
+            round(i * (len(vos) - 1) / (max_parts - 1)) for i in range(max_parts)
+        ))
+        vos = [vos[i] for i in idxs]
+    parts = []
+    for vo in vos:
+        first = re.split(r"[。！？]", vo)[0].strip()
+        if first:
+            parts.append(first[:per_len])
+    return "；".join(parts)
+
+
 def _fallback_summary(storyboard: dict) -> str:
-    """LLM 总结失败时，用知识库的技法/易错点拼一段兜底总结（纯中文）。"""
+    """LLM 总结失败时的纯中文兜底总结。
+
+    素材优先级：知识库技法(motifs) > 取胜路线(从节点 goal 归纳) > 子残局名。
+    无论走哪条都尽量凑出 2-3 句有阶段逻辑的话，避免落到干瘪的单句
+    （旧实现 motifs 空时只产「核心在于X阶段的处理」一句，正是线上短总结的来源）。
+    """
     endgame_name = storyboard.get("endgame_name", "这类残局")
     motifs = storyboard.get("motifs", []) or []
     mistakes = storyboard.get("mistakes", []) or []
+
     parts = [f"总结一下，{endgame_name}的取胜关键"]
     if motifs:
-        # motif 形如「盒子法：用车画线限制对方王的活动范围」，取冒号前的技法名
         names = [m.split("：")[0].split(":")[0] for m in motifs[:3]]
-        parts.append("在于" + "、".join(names))
-    parts.append("。")
+        parts.append("在于" + "、".join(names) + "。")
+    else:
+        phrases = _winning_path_phrases(storyboard)
+        if len(phrases) >= 2:
+            seq = phrases[:4]
+            connectors = ["先", "接着", "随后", "最终"]
+            steps = "，".join(
+                f"{connectors[min(i, len(connectors) - 1)]}{p}"
+                for i, p in enumerate(seq))
+            # 用逗号而非冒号衔接：_clean_summary_text 白名单会删掉全角冒号，
+            # 留下「次序先…」黏连成病句。逗号在白名单内，可安全保留。
+            parts.append("，在于把握好推进次序，" + steps + "。")
+        else:
+            sub_names = _collect_sub_endgame_names(storyboard)
+            if sub_names:
+                parts.append("，核心在于" + "、".join(sub_names[:3]) + "阶段的处理。")
+            else:
+                parts.append("，在于稳扎稳打、逐步压缩对方王的活动空间。")
+
     if mistakes:
         parts.append("过程中要避免" + mistakes[0].split("：")[0].split(":")[0] + "这类失误。")
+    else:
+        parts.append("关键是每一步都让对方的选择更少，不给对方留下反扑的机会。")
+
     return _clean_summary_text("".join(parts)) or f"总结一下，{endgame_name}重在稳扎稳打，逐步压缩对方空间。"
+
+
+def _collect_sub_endgame_names(storyboard: dict) -> list:
+    """从节点中收集不重复的子残局名（用于兜底总结提供阶段感）。"""
+    nodes = storyboard.get("nodes", [])
+    if not nodes:
+        return []
+    seen = []
+    for n in nodes:
+        name = n.get("sub_endgame_name", "")
+        if name and name not in seen and _is_meaningful_endgame_name(name):
+            seen.append(name)
+    return seen
+
+
+def _is_meaningful_endgame_name(name: str) -> bool:
+    """过滤掉无意义的残局名（"残局""未知"等）。"""
+    noise = {"残局", "未知", "unknown", "unknown_endgame", ""}
+    return name not in noise
 
 
 def generate_summary(storyboard: dict, backend, segments: list = None) -> str:
@@ -873,6 +1127,20 @@ def generate_summary(storyboard: dict, backend, segments: list = None) -> str:
     if mistakes:
         lines.append("常见错误：" + "；".join(mistakes[:2]))
 
+    # 取胜路线：不依赖 kb，从节点 goal 归纳，保证任何局面都有逻辑骨架可总结。
+    winning_path = _winning_path_phrases(storyboard)
+    if winning_path:
+        lines.append("本局取胜路线：" + " → ".join(winning_path[:5]))
+    # 讲解回顾：把刚生成的分段解说浓缩进来，这是最贴切的总结依据
+    # （基于「这盘实际怎么赢的」提炼，而非贫乏的 kb 元数据凭空写）。
+    recap = _build_recap_from_segments(segments)
+    if recap:
+        lines.append("刚才的讲解要点回顾：" + recap)
+
+    # instruction-only 骨架：仅含「对模型说话」的指令行，用于 echo 检测。
+    # 不含上面注入的领域素材——素材被模型复用是期望行为，不应判成「复述提示词」。
+    instruction_only = "\n".join(lines[:7])
+
     prompt = "\n".join(lines)
     # 根上减少泄漏：给模型一个明确的「该你输出了」落点。没有落点时，模型容易
     # 把指令段当成要续写的上文、原样复述回来（线上见过的「需要扮演…用户要求写…」
@@ -884,8 +1152,10 @@ def generate_summary(storyboard: dict, backend, segments: list = None) -> str:
     text = _clean_summary_text(raw)
 
     # 校验兜底：硬特征判废（过短/过长/中文占比低/含元指令碎片/残留字母数字），
-    # 或与提示词高度重合（整段复述提示词）→ 纯中文模板兜底。
-    if _summary_is_bad(text) or _looks_like_prompt_echo(text, prompt):
+    # 或与「指令骨架」高度重合（整段复述指令）→ 纯中文模板兜底。
+    # 注意只比对 instruction_only：注入的讲解回顾/取胜路线被模型复用是期望行为，
+    # 拿整个 prompt 比对会把正常复用素材误判成泄漏，反而逼出干瘪兜底。
+    if _summary_is_bad(text) or _looks_like_prompt_echo(text, instruction_only):
         text = _fallback_summary(storyboard)
     # 统一补前缀：清洗阶段已把"总结一下，"剥掉做标准化，这里对所有路径（含兜底，
     # _fallback_summary 末尾也会经 _clean_summary_text 剥掉前缀）统一补回，
@@ -1024,6 +1294,14 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
             last_seg.voiceover = last_seg.voiceover.rstrip("。") + conclusion
 
     commentary.segments = all_segments
+
+    # 跨段去重：消除 chunk 间各自生成导致的高频套话复读（全局视角，只能在此处做）
+    if all_segments and not commentary.fallback_used:
+        try:
+            _dedupe_across_segments(all_segments)
+        except Exception as e:
+            Logger.warn(f"跨段去重跳过: {e}")
+
     commentary.raw_text = "\n".join(
         f"第{seg.id}步：{seg.voiceover}" for seg in all_segments
     )

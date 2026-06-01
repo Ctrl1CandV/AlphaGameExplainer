@@ -91,18 +91,21 @@ def _allocate_cues(text: str, start: float, duration: float) -> List[tuple]:
     if not cues:
         return []
     total_chars = sum(len(c) for c in cues) or 1
+    # 先算出各 cue 的理想时长
+    raw_durs = [duration * (len(c) / total_chars) for c in cues]
+    # 若总时长超出 duration，按比例压缩回区间内
+    raw_total = sum(raw_durs)
+    scale = duration / raw_total if raw_total > duration else 1.0
     result = []
     t = start
-    for c in cues:
-        share = duration * (len(c) / total_chars)
-        cue_dur = max(MIN_CUE_SEC, share)
+    end = start + duration
+    for i, c in enumerate(cues):
+        cue_dur = max(MIN_CUE_SEC, raw_durs[i] * scale)
+        # 守卫：不允许最后一个 cue 超出段结束时间
+        if i == len(cues) - 1:
+            cue_dur = max(MIN_CUE_SEC, end - t)
         result.append((t, t + cue_dur, _wrap_lines(c)))
         t += cue_dur
-    # 末句对齐到该段结束，避免逐句 max 累积溢出本段
-    if result:
-        last_start = result[-1][0]
-        end = max(last_start + MIN_CUE_SEC, start + duration)
-        result[-1] = (last_start, end, result[-1][2])
     return result
 
 

@@ -8,6 +8,7 @@ MAX_NODE_SPAN = 4
 LONG_NODE_SPAN = 6
 LONG_MOVE_THRESHOLD = 18
 COMPACT_NODE_THRESHOLD = 7
+MAX_SPAN_CAP = 10        # 压缩跨度上限（再长的解法每节点也不超过10着）
 
 def _tag_position(board: chess.Board, move: chess.Move) -> List[str]:
     tags = []
@@ -112,7 +113,12 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
     role_meta = _role_meta(board, endgame_name)
     kbnk_mode = endgame_name == "象马杀王" and len(analyzed_moves) >= LONG_MOVE_THRESHOLD
     long_line_mode = len(analyzed_moves) >= LONG_MOVE_THRESHOLD
-    max_span = LONG_NODE_SPAN if long_line_mode else MAX_NODE_SPAN
+    # 压缩跨度随总步数平滑增长，取代旧的 4/6 硬开关：
+    #   每节点最多合并的着数 = 4 + (总着数-6)//6，封顶 MAX_SPAN_CAP。
+    #   设计为在 18 着阈值处恰好≈6（对齐旧 LONG_NODE_SPAN），短解法仍是4、
+    #   长解法继续爬升到10——60着的解法不再用固定6硬切导致节点过多、解说啰嗦。
+    total_moves = len(analyzed_moves)
+    max_span = min(MAX_NODE_SPAN + max(0, total_moves - 6) // 6, MAX_SPAN_CAP)
 
     per_move = []
     prev_score = None
@@ -225,8 +231,109 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
     compressed = _merge_repetitive(compressed)
     compressed = _merge_check_sequences(compressed)
 
+    # 自适应节点预算：节点数随解法长度次线性增长（越长压得越狠），只减不增。
+    # 取代旧的「固定阈值 / max_span 上限被语义边界压制」导致的压缩比反相关问题。
+    try:
+        target_nodes = _adaptive_node_budget(len(per_move))
+        compressed = _merge_to_budget(compressed, target_nodes)
+    except Exception as e:
+        Logger.warn(f"自适应节点预算合并跳过: {e}")
+
     Logger.info(f"压缩: {len(per_move)} 步 → {len(compressed)} 节点")
     return compressed
+
+
+def _adaptive_node_budget(total_moves: int) -> int:
+    """目标压缩节点数：随解法着数次线性增长，封顶 16、保底 6。
+
+    设计意图：解法越长，单位内容越接近「重复的逼王过程」，应当压得越狠
+    （压缩比随长度单调增大），而不是节点数线性膨胀让解说啰嗦、给 AI 留出
+    编故事的空节点。系数 0.2 让 15 着≈7 节点、57 着≈15 节点。
+    """
+    return max(6, min(16, round(4 + 0.2 * total_moves)))
+
+
+def _node_is_hard_keep(s) -> bool:
+    """硬保护节点：含吃子或将军的关键事件，永不作为被吸收的 victim。
+
+    将杀节点是最后一步，由首尾保护覆盖；首尾在 _merge_to_budget 中单独排除。
+    """
+    return ("吃子" in s.tags) or ("将军" in s.tags)
+
+
+def _merge_to_budget(steps: List[CompressedStep], target: int) -> List[CompressedStep]:
+    """把压缩节点二次合并到接近 target 个（只减不增）。
+
+    规则：
+      - 首、尾节点永远保留（叙事开局/收官锚点）；
+      - 含吃子/将军的关键事件节点永不被消除（可作为吸收者接纳邻居）；
+      - 其余节点按「非关键优先、着数少优先」被选作 victim，并入相邻节点；
+      - soft_cap 限制单节点合并后的着数，避免一个画面播太久。
+    所有着法仅重新分组、总数不变（不变量，由测试保证）。
+    """
+    if len(steps) <= target:
+        return steps
+
+    work = list(steps)
+    total_sans = sum(len(s.sans) for s in work)
+    soft_cap = max(8, total_sans // max(target, 1) + 4)
+    guard = 0
+
+    while len(work) > target and guard < 2000:
+        guard += 1
+        # 选 victim：排除首尾与硬保护节点；非关键优先，再按着数少优先
+        victim_idx = None
+        best_key = None
+        for i in range(1, len(work) - 1):
+            s = work[i]
+            if _node_is_hard_keep(s):
+                continue
+            key = (0 if not s.is_critical else 1, len(s.sans))
+            if best_key is None or key < best_key:
+                best_key = key
+                victim_idx = i
+        if victim_idx is None:
+            break  # 没有可牺牲的节点（全是硬保护/首尾），停在当前节点数
+
+        i = victim_idx
+        v = work[i]
+        left = work[i - 1] if i - 1 >= 0 else None
+        right = work[i + 1] if i + 1 < len(work) else None
+
+        def fits(t):
+            return t is not None and len(t.sans) + len(v.sans) <= soft_cap
+
+        # 优先并入不超软上限的、较短的一侧；都超则仍并入较短一侧（有界放宽）
+        if fits(left) and fits(right):
+            into_left = len(left.sans) <= len(right.sans)
+        elif fits(left):
+            into_left = True
+        elif fits(right):
+            into_left = False
+        elif left is not None and right is not None:
+            into_left = len(left.sans) <= len(right.sans)
+        else:
+            into_left = left is not None
+
+        if into_left and left is not None:
+            left.sans = left.sans + v.sans
+            left.fen_after = v.fen_after
+            left.tags = list(set(left.tags + v.tags))
+            left.is_critical = left.is_critical or v.is_critical
+            left.eval_delta = (left.eval_delta or 0) + (v.eval_delta or 0)
+        elif right is not None:
+            right.sans = v.sans + right.sans
+            right.fen_before = v.fen_before
+            right.tags = list(set(right.tags + v.tags))
+            right.is_critical = right.is_critical or v.is_critical
+            right.eval_delta = (right.eval_delta or 0) + (v.eval_delta or 0)
+        else:
+            break
+        del work[i]
+
+    for i, s in enumerate(work):
+        s.idx = i + 1
+    return work
 
 def _same_pieces(a_fen: str, b_fen: str) -> bool:
     try:
@@ -656,16 +763,32 @@ def _assign_video_density(node: dict, contains_rep: bool, repeat_count: int) -> 
     return {"density": "medium", "summary_only": False}
 
 
-def build(board: chess.Board, compressed: List[CompressedStep], winner_color=None) -> dict:
+def build(board: chess.Board, compressed: List[CompressedStep], winner_color=None,
+          enable_insight: bool = True) -> dict:
     """基于压缩节点构建叙事分镜，注入局面特征与分阶段解说提示。
 
     winner_color: 实际终局赢家颜色(chess.WHITE/BLACK)，由 pipeline 复盘得出。
     用于让攻守立场从真实结果反推，避免解说与画面相反。
+
+    enable_insight: 是否启用棋理洞察层（src/insight_extractor）。默认开启；
+    任何异常都会被吞掉退回"无洞察"，保证不破坏原有链路。
     """
     kb = match_endgame(board)
     phases = kb["phases"] if kb else []
     role_meta = _role_meta(board, kb["name"] if kb else "残局", winner_color=winner_color)
     n = len(compressed)
+
+    # 棋理洞察：失败安全地提取，下面按节点注入。提取失败/禁用时为空 dict 列表。
+    insights = []
+    if enable_insight:
+        try:
+            from src.insight_extractor import extract_for_compressed
+            insights = extract_for_compressed(
+                compressed, board, role_meta if role_meta else None,
+                kb["name"] if kb else "残局")
+        except Exception as e:
+            Logger.warn(f"棋理洞察提取失败，退回无洞察模式: {e}")
+            insights = []
 
     for i, cs in enumerate(compressed):
         if phases and n > 0:
@@ -777,6 +900,29 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         node["suggested_phase_label"] = cs.phase if cs.phase else ""
         node["suggested_pacing"] = _suggest_pacing(node, cs, compressed)
 
+        # 注入棋理洞察（失败安全：insights 为空时全部跳过，node 不含这些字段，
+        # 下游 commentator 读不到即按旧行为处理）。
+        if idx_cs < len(insights):
+            insight = insights[idx_cs]
+            tp = insight.get("teaching_point", "")
+            if tp:
+                node["teaching_point"] = tp
+            mm = insight.get("must_mention", [])
+            if mm:
+                node["must_mention"] = mm
+            sc = insight.get("spatial_change", {})
+            if sc:
+                node["spatial_change"] = sc
+            imp = insight.get("importance", "")
+            if imp:
+                node["importance"] = imp
+                node["importance_reasons"] = insight.get("importance_reasons", [])
+                # importance 只上调详略/关键性，绝不下调——避免削弱已有的关键判定
+                if imp == "high":
+                    node["detail_level"] = "high"
+                    if not node["is_critical"]:
+                        node["is_critical"] = True
+
         nodes_out.append(node)
         prev_phase = cs.phase
 
@@ -801,9 +947,21 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         "losing_side": losing_side,
         "narrative_mode": narrative_mode,
         "compact_mode": total_halfmoves >= LONG_MOVE_THRESHOLD or n >= COMPACT_NODE_THRESHOLD,
-        "target_length": "1200-1600字" if n >= COMPACT_NODE_THRESHOLD else "800-1100字",
+        "target_length": _target_length(n),
         "has_sub_endgame_switch": any(
             node.get("endgame_changed") for node in nodes_out
         ),
         "nodes": nodes_out,
     }
+
+
+def _target_length(node_count: int) -> str:
+    """全局字数预算随节点数连续计算（取代旧的 ≥7 二档硬阶梯）。
+
+    每节点约 90 字、上界约 120 字，整体夹在 [700, 2000] 区间。节点越多
+    预算越大，但因节点数本身已被自适应预算压成次线性，长解法的总字数不会
+    失控膨胀，与「越长压得越狠」一致。
+    """
+    lo = max(700, node_count * 90)
+    hi = max(1000, node_count * 120)
+    return f"{lo}-{hi}字"

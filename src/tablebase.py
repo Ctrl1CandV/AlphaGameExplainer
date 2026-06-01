@@ -4,6 +4,45 @@ import chess.syzygy
 import chess.gaviota
 from src.common import Logger, AnalyzedMove
 
+
+# ============================================================
+# DTZ 平局打破启发式（纯装饰，不影响胜负/DTZ最优性/50步规则）
+#
+# 背景：KBNvK 这类无兵杀法没有零化着，强方全程靠「子局面 DTZ 绝对值最小」
+# 贪心选着。多个着 DTZ 相等时，旧实现取 legal_moves 的第一个（按格子序号），
+# 完全任意，导致弱方王活动格数在最优线里反复涨回（实测 KBNvK 出现 1→4 的
+# 回弹），观众看是「王被赶来赶去、没真正被压」，这些低进展节点没有棋理事实
+# 可讲，LLM 便填套话甚至编出不存在的吃子。
+#
+# 修法：仅在 DTZ 已经相等的着之间做二次排序，优先选「让弱方王活动格更少、
+# 更贴近角落、两王更靠近」的着。因为只在等-DTZ 的着里重排，杀法长度与胜负
+# 完全不变，只是把同样最优的「丑着」换成「收紧感强的好着」。
+# ============================================================
+
+def _king_mobility(board: chess.Board, color: bool) -> int:
+    """color 方王的安全活动格数（相邻空格或可吃子、且不被对方攻击）。越小=越被压缩。"""
+    ksq = board.king(color)
+    if ksq is None:
+        return 0
+    cnt = 0
+    for sq in chess.SQUARES:
+        if chess.square_distance(ksq, sq) != 1:
+            continue
+        if board.piece_at(sq) is not None and board.color_at(sq) == color:
+            continue
+        if board.is_attacked_by(not color, sq):
+            continue
+        cnt += 1
+    return cnt
+
+
+def _corner_distance(square: int) -> int:
+    """到最近角落的切比雪夫距离（0=已在角落）。"""
+    f = chess.square_file(square)
+    r = chess.square_rank(square)
+    return min(max(f, r), max(7 - f, r), max(f, 7 - r), max(7 - f, 7 - r))
+
+
 class TablebaseSolver:
     def __init__(self, syzygy_dir: str = "", gaviota_dir: str = ""):
         self.syzygy_dir = syzygy_dir
@@ -119,7 +158,12 @@ class TablebaseSolver:
             return None
 
         # 收集所有可 probe 的候选着
-        cands = []  # (move, zeroing, child_wdl, child_dtz)
+        # cands 元素：(move, zeroing, child_wdl, child_dtz, tiebreak)
+        # tiebreak 是「弱方王活动格, 弱方王到角距离, 两王距离」三元组，仅用于
+        # 获胜方在 DTZ 相等的着之间二次排序，值越小=收紧感越强（王更被压、更近角、
+        # 两王更贴）。两王距离取正值，让强方王在等优着里主动贴近弱方王逼角。
+        opp = not board.turn  # 弱方（被将杀方）颜色
+        cands = []
         for move in board.legal_moves:
             zeroing = board.is_zeroing(move)
             temp = board.copy()
@@ -134,7 +178,17 @@ class TablebaseSolver:
                 child_dtz = self._syzygy.probe_dtz(temp)
             except Exception:
                 child_dtz = None
-            cands.append((move, zeroing, child_wdl, child_dtz))
+            opp_ksq = temp.king(opp)
+            my_ksq = temp.king(board.turn)
+            if opp_ksq is not None and my_ksq is not None:
+                tiebreak = (
+                    _king_mobility(temp, opp),
+                    _corner_distance(opp_ksq),
+                    chess.square_distance(my_ksq, opp_ksq),
+                )
+            else:
+                tiebreak = (99, 99, 0)
+            cands.append((move, zeroing, child_wdl, child_dtz, tiebreak))
 
         if not cands:
             return None
@@ -150,8 +204,9 @@ class TablebaseSolver:
             # 保住胜势：我方走完后，对手视角应为负(child_wdl<0)
             keep = [c for c in cands if c[2] < 0]
             pool = keep or cands
-            # 零化着优先(0)，再按推进最快(子 DTZ 绝对值小)
-            best = min(pool, key=lambda c: (0 if c[1] else 1, dtz_abs(c)))
+            # 零化着优先(0)，再按推进最快(子 DTZ 绝对值小)，
+            # DTZ 相等时用 tiebreak 选收紧感最强的着（消除原地游走，不改最优性）
+            best = min(pool, key=lambda c: (0 if c[1] else 1, dtz_abs(c), c[4]))
         elif losing:
             # 防守：避免零化、拖最久(子 DTZ 绝对值大)
             best = min(cands, key=lambda c: (1 if c[1] else 0, -dtz_abs(c)))
@@ -161,7 +216,7 @@ class TablebaseSolver:
             pool = keep or cands
             best = min(pool, key=lambda c: (1 if c[1] else 0, -dtz_abs(c)))
 
-        move, _z, child_wdl, child_dtz = best
+        move, _z, child_wdl, child_dtz, _tb = best
         return (move, child_wdl, child_dtz if child_dtz is not None else 0)
 
     def _best_move_gaviota(self, board: chess.Board) -> Optional[Tuple[chess.Move, int, int]]:

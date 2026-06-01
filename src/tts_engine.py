@@ -282,7 +282,7 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
                emotion: str = "default", speed: float = 1.0) -> List[Segment]:
     """
     合成语音，音频路径和时长回填到 Segment。
-    优先级: ChatTTS > IndexTTS2 > pyttsx3
+    优先级: ChatTTS > pyttsx3
     """
     os.makedirs(AUDIO_DIR, exist_ok=True)
 
@@ -338,60 +338,16 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
             Logger.success(f"语音合成完成: {len(segments)} 段 (ChatTTS+pyttsx3), 总时长 {time_cursor:.1f}s")
             return segments
 
-    # ---- 现有逻辑: IndexTTS2 / pyttsx3（保持不变）----
-    Logger.info("ChatTTS 不可用，回退到原有 TTS 方案...")
+    Logger.info("ChatTTS 不可用，回退到 pyttsx3...")
 
-    voice = voice_prompt or os.path.abspath(DEFAULT_VOICE)
-    use_indextts = True
+    fallback_engine = _init_fallback_engine()
 
-    if not os.path.exists(voice):
-        Logger.warn(f"参考语音文件不存在: {voice}")
-        use_indextts = False
-    elif os.path.getsize(voice) < 1024:
-        Logger.warn(f"参考语音文件无效 (大小仅 {os.path.getsize(voice)} 字节): {voice}")
-        use_indextts = False
-    if not use_indextts:
-        Logger.warn("请将 5-15 秒的 WAV 参考音频放入 assets/voices/ 目录")
-        Logger.warn("当前将使用 pyttsx3 回退引擎生成语音")
-
-    batch_items = []
     for seg in segments:
         if not seg.text.strip():
             continue
         path = os.path.abspath(os.path.join(AUDIO_DIR, f"seg_{seg.move_idx:03d}.wav"))
         seg.audio_path = path
-        emo, spd = PACING_MAP.get(seg.pacing, ("default", 1.0))
-        batch_items.append({
-            "text": seg.text.strip(),
-            "output_path": path,
-            "emotion": emo,
-            "speed": spd * speed,
-        })
-
-    if not batch_items:
-        return segments
-
-    Logger.info(f"合成语音 ({len(batch_items)} 段)...")
-
-    results = _try_indextts(batch_items, voice) if use_indextts else None
-    fallback_engine = _init_fallback_engine() if not results else None
-
-    time_cursor = 0.0
-    for seg in segments:
-        if not seg.text.strip():
-            seg.duration_s = 1.0
-            seg.start_time = time_cursor
-            time_cursor += seg.duration_s
-            continue
-
-        dur = _get_result_duration(seg.audio_path, results) if results else None
-        if dur is not None:
-            seg.duration_s = dur
-        else:
-            seg.duration_s = _fallback_pyttsx3(seg.text, seg.audio_path, fallback_engine)
-
-        seg.start_time = time_cursor
-        time_cursor += seg.duration_s
+        seg.duration_s = _fallback_pyttsx3(seg.text, seg.audio_path, fallback_engine)
 
     if fallback_engine:
         try:
@@ -399,7 +355,12 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
         except Exception:
             pass
 
-    Logger.success(f"语音合成完成: {len(segments)} 段, 总时长 {time_cursor:.1f}s")
+    time_cursor = 0.0
+    for seg in segments:
+        seg.start_time = time_cursor
+        time_cursor += seg.duration_s
+
+    Logger.success(f"语音合成完成: {len(segments)} 段 (pyttsx3), 总时长 {time_cursor:.1f}s")
     return segments
 
 
@@ -411,37 +372,6 @@ def _init_fallback_engine():
     except Exception as e:
         Logger.warn(f"pyttsx3 初始化失败: {e}")
         return None
-
-
-def _try_indextts(batch_items: list, voice: str) -> dict:
-    """尝试 IndexTTS2 批量合成，返回 {output_path: duration} 或 None"""
-    try:
-        from src.tts_bridge import synthesize_batch
-        raw_results = synthesize_batch(
-            [{"text": b["text"], "output_path": b["output_path"],
-              "emotion": b["emotion"], "speed": b["speed"]}
-             for b in batch_items],
-            voice_prompt=voice,
-            output_dir=AUDIO_DIR,
-        )
-        if raw_results:
-            return {r["output_path"]: r.get("duration", 2.0)
-                    for r in raw_results if r.get("status") == "ok"}
-    except Exception as e:
-        Logger.warn(f"IndexTTS2 batch error: {e}")
-    return None
-
-
-def _get_result_duration(path: str, results: dict) -> float:
-    """从批量结果中获取音频时长，并验证文件存在"""
-    dur = results.get(path)
-    if dur and os.path.exists(path):
-        try:
-            audio = AudioSegment.from_wav(path)
-            return audio.duration_seconds + 0.3
-        except Exception:
-            return dur + 0.3
-    return None
 
 
 def _fallback_pyttsx3(text: str, output_path: str, engine) -> float:

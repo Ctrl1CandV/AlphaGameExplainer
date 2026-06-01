@@ -35,6 +35,16 @@ COLOR_GLOW = (255, 215, 0)        # 落子高光（金）
 COLOR_CHECK_GLOW = (255, 60, 60)  # 将军高光（红）
 COLOR_CAPTURE_GLOW = (255, 140, 0)  # 吃子高光（橙）
 
+# 压缩块内子步颜色轮换（from_hl, to_hl, arrow），区分连续多步
+_SUBSTEP_COLORS = [
+    ((255, 255, 0, 90),   (255, 165, 0, 110),  (255, 80, 80)),
+    ((100, 200, 255, 90), (70, 130, 255, 110),  (70, 130, 255)),
+    ((150, 255, 150, 90), (50, 200, 50, 110),   (50, 180, 50)),
+    ((255, 180, 255, 90), (200, 100, 255, 110), (180, 80, 255)),
+    ((255, 220, 100, 90), (255, 180, 50, 110),  (255, 160, 40)),
+    ((150, 255, 220, 90), (50, 220, 200, 110),  (50, 200, 200)),
+]
+
 PIECE_MAP = {
     "K": "king-w.png", "Q": "queen-w.png", "R": "rook-w.png",
     "B": "bishop-w.png", "N": "knight-w.png", "P": "pawn-w.png",
@@ -102,17 +112,17 @@ def _get_background(width: int, height: int) -> Image.Image:
 
 
 def _draw_board(draw: ImageDraw.ImageDraw):
-    # 棋盘边框阴影
+    # 棋盘边框阴影（圆角）
     shadow_offset = 3
-    board_rect = [MARGIN_LEFT - 2, MARGIN_TOP - 2, 
-                  MARGIN_LEFT + BOARD_SIZE + 1, MARGIN_TOP + BOARD_SIZE + 1]
-    draw.rectangle([board_rect[0] + shadow_offset, board_rect[1] + shadow_offset,
-                    board_rect[2] + shadow_offset, board_rect[3] + shadow_offset], 
-                   fill=(15, 15, 15))
-    
+    board_rect = [MARGIN_LEFT - 2, MARGIN_TOP - 2,
+                  MARGIN_LEFT + BOARD_SIZE + 5, MARGIN_TOP + BOARD_SIZE + 5]
+    draw.rounded_rectangle([board_rect[0] + shadow_offset, board_rect[1] + shadow_offset,
+                            board_rect[2] + shadow_offset, board_rect[3] + shadow_offset],
+                           radius=6, fill=(15, 15, 15))
+
     # 棋盘边框
-    draw.rectangle(board_rect, outline=(80, 80, 80), width=2)
-    
+    draw.rounded_rectangle(board_rect, radius=6, outline=(80, 80, 80), width=3)
+
     for r in range(8):
         for c in range(8):
             x = MARGIN_LEFT + c * SQUARE
@@ -174,16 +184,28 @@ def _draw_eval_bar(img: Image.Image, x: int, y: int, score: float,
                    width: int = 18, height: int = 120):
     """绘制评估条。score 正值=白优, 负值=黑优"""
     draw = ImageDraw.Draw(img)
-    draw.rectangle([x - 1, y - 1, x + width + 1, y + height + 1],
-                   outline=(100, 100, 100), width=1)
+    draw.rounded_rectangle([x - 1, y - 1, x + width + 1, y + height + 1],
+                           radius=3, outline=(100, 100, 100), width=1)
 
     clamped = max(-10, min(10, score))
     white_ratio = (clamped + 10) / 20
     white_h = int(height * white_ratio)
     black_h = height - white_h
 
-    draw.rectangle([x, y, x + width, y + black_h], fill=(40, 40, 40))
-    draw.rectangle([x, y + black_h, x + width, y + height], fill=(240, 240, 240))
+    # 黑方：深灰→黑渐变
+    for row in range(black_h):
+        t = row / max(black_h, 1)
+        r = int(35 + t * 10)
+        g = int(35 + t * 8)
+        b = int(40 + t * 8)
+        draw.line([(x, y + row), (x + width, y + row)], fill=(r, g, b))
+    # 白方：中灰→浅灰渐变
+    for row in range(white_h):
+        t = row / max(white_h, 1)
+        r = int(180 + t * 55)
+        g = int(180 + t * 50)
+        b = int(180 + t * 55)
+        draw.line([(x, y + black_h + row), (x + width, y + black_h + row)], fill=(r, g, b))
 
     font = _get_font(10)
     label = f"{score:+.1f}" if abs(score) < 100 else "M"
@@ -209,9 +231,16 @@ def _draw_info_panel(img: Image.Image, info: dict):
 
     y = 16
 
-    # 标题（带装饰线）
+    # 标题（按胜负方颜色区分）
     endgame_name = info.get("endgame_name", "残局")
-    draw.text((px, y), endgame_name, fill=(255, 215, 0), font=font_title)
+    winner = info.get("winner_color")
+    if winner == chess.WHITE:
+        title_color = (255, 215, 0)
+    elif winner == chess.BLACK:
+        title_color = (180, 200, 230)
+    else:
+        title_color = (255, 215, 0)
+    draw.text((px, y), endgame_name, fill=title_color, font=font_title)
     y += 28
     draw.line([(px, y), (px + PANEL_WIDTH - 16, y)], fill=(60, 60, 65), width=1)
     y += 12
@@ -220,7 +249,15 @@ def _draw_info_panel(img: Image.Image, info: dict):
     move_num = info.get("move_num", 0)
     total = info.get("total_moves", 0)
     draw.text((px, y), f"第 {move_num}/{total} 步", fill=(220, 220, 220), font=font_body)
-    y += 24
+    y += 22
+
+    # 已吃子数
+    wc = info.get("white_captured", 0)
+    bc = info.get("black_captured", 0)
+    if wc > 0 or bc > 0:
+        draw.text((px, y), f"白丢{wc}子  黑丢{bc}子",
+                  fill=(160, 160, 160), font=font_body)
+        y += 20
 
     # 评估条
     score = info.get("score")
@@ -248,8 +285,10 @@ def _draw_pieces_static(img: Image.Image, board: chess.Board, skip_sq: Optional[
 
 def render_frame(board: chess.Board, from_sq=None, to_sq=None,
                  arrow_color=(255, 80, 80), is_check: bool = False,
-                 info: Optional[dict] = None) -> Image.Image:
-    """渲染单帧棋盘，可选右侧信息面板"""
+                 info: Optional[dict] = None,
+                 from_hl_color=None, to_hl_color=None,
+                 is_mate: bool = False) -> Image.Image:
+    """渲染单帧棋盘，可选右侧信息面板；支持传入自定义高亮色用于子步区分"""
     w = IMG_W_FULL if info else IMG_W
     img = _get_background(w, IMG_H)
 
@@ -257,27 +296,41 @@ def render_frame(board: chess.Board, from_sq=None, to_sq=None,
     _draw_board(draw)
     _draw_coordinates(draw)
     if from_sq is not None:
-        _draw_highlight(img, from_sq, COLOR_HIGHLIGHT_FROM)
+        _draw_highlight(img, from_sq, from_hl_color or COLOR_HIGHLIGHT_FROM)
     if to_sq is not None:
-        hl_color = COLOR_HIGHLIGHT_CHECK if is_check else COLOR_HIGHLIGHT_TO
+        if is_check:
+            hl_color = COLOR_HIGHLIGHT_CHECK
+        else:
+            hl_color = to_hl_color or COLOR_HIGHLIGHT_TO
         _draw_highlight(img, to_sq, hl_color)
     if from_sq is not None and to_sq is not None:
         _draw_arrow(draw, from_sq, to_sq, arrow_color)
     _draw_pieces_static(img, board)
     if info:
         _draw_info_panel(img, info)
+    if is_mate:
+        mate_rect = [MARGIN_LEFT - 5, MARGIN_TOP - 5,
+                     MARGIN_LEFT + BOARD_SIZE + 6, MARGIN_TOP + BOARD_SIZE + 6]
+        draw.rounded_rectangle(mate_rect, radius=8, outline=(255, 215, 0, 220), width=4)
+        mate_font = _get_font(36)
+        draw.text((MARGIN_LEFT + BOARD_SIZE - 16, MARGIN_TOP + BOARD_SIZE - 12),
+                  "将杀", fill=(255, 215, 0), font=mate_font, anchor="rb")
     return img
 
 
 def _render_move_sequence(board_before: chess.Board, move: chess.Move,
                           board_after: chess.Board, seg_dur: float,
                           is_check: bool = False,
-                          info: Optional[dict] = None) -> List[Tuple[Image.Image, float]]:
+                          info: Optional[dict] = None,
+                          sub_colors=None,
+                          is_mate: bool = False) -> List[Tuple[Image.Image, float]]:
     """
     为单步走法生成 (帧, 时长) 序列，三阶段：
       1. 滑动：固定 SLIDE_SEC 的快速平滑移动（与解说时长解耦）
       2. 落子高光脉冲：GLOW_SEC 的辉光呼吸（将军红/吃子橙/普通金）
       3. 定格保持：剩余时长用单帧撑满，让解说继续播
+    sub_colors: 可选 (from_hl, to_hl, arrow) 用于压缩块内子步颜色区分
+    is_mate: 终局将杀时显示金色边框特效
     """
     from_sq = move.from_square
     to_sq = move.to_square
@@ -287,8 +340,15 @@ def _render_move_sequence(board_before: chess.Board, move: chess.Move,
     is_capture = board_before.is_capture(move)
     out: List[Tuple[Image.Image, float]] = []
 
+    from_hl = sub_colors[0] if sub_colors else None
+    to_hl = sub_colors[1] if sub_colors else None
+    arrow_col = sub_colors[2] if sub_colors else (255, 80, 80)
+
     if piece is None:
-        img = render_frame(board_after, from_sq, to_sq, is_check=is_check, info=info)
+        img = render_frame(board_after, from_sq, to_sq, arrow_color=arrow_col,
+                           is_check=is_check, info=info,
+                           from_hl_color=from_hl, to_hl_color=to_hl,
+                           is_mate=is_mate)
         out.append((img, max(MIN_HOLD_SEC, seg_dur)))
         return out
 
@@ -296,6 +356,10 @@ def _render_move_sequence(board_before: chess.Board, move: chess.Move,
     piece_img = _load_piece(str(piece))
     from_x, from_y = _sq_xy(from_sq)
     to_x, to_y = _sq_xy(to_sq)
+
+    # 预计算阴影（避免每帧重复 copy）
+    shadow_img = piece_img.copy()
+    shadow_img.putalpha(60)
 
     # ---- 阶段1：滑动 ----
     slide_n = max(2, round(SLIDE_SEC * FPS))
@@ -305,16 +369,16 @@ def _render_move_sequence(board_before: chess.Board, move: chess.Move,
         draw = ImageDraw.Draw(img)
         _draw_board(draw)
         _draw_coordinates(draw)
-        _draw_highlight(img, from_sq, COLOR_HIGHLIGHT_FROM)
+        _draw_highlight(img, from_sq, from_hl or COLOR_HIGHLIGHT_FROM)
         _draw_pieces_static(img, board_before, skip_sq=from_sq)
-        # 被吃子在滑动过程中淡出
         if captured is not None:
             cap_img = _load_piece(str(captured)).copy()
             cap_img.putalpha(int(255 * max(0.0, 1.0 - t)))
             img.paste(cap_img, (to_x, to_y), cap_img)
         cur_x = int(lerp(from_x, to_x, t))
         cur_y = int(lerp(from_y, to_y, t))
-        img.paste(piece_img, (cur_x, cur_y), piece_img)
+        img.paste(shadow_img, (cur_x + 4, cur_y + 4), shadow_img)
+        img.paste(piece_img, (cur_x, cur_y - 2), piece_img)
         if info:
             _draw_info_panel(img, info)
         out.append((img, frame_dur))
@@ -323,33 +387,41 @@ def _render_move_sequence(board_before: chess.Board, move: chess.Move,
     glow_color = COLOR_CHECK_GLOW if is_check else (COLOR_CAPTURE_GLOW if is_capture else COLOR_GLOW)
     glow_n = max(2, round(GLOW_SEC * FPS))
     for i in range(glow_n):
-        intensity = math.sin((i / (glow_n - 1)) * math.pi)  # 0→1→0 脉冲
+        intensity = math.sin((i / (glow_n - 1)) * math.pi)
         img = render_frame(board_after, from_sq=from_sq, to_sq=to_sq,
-                           is_check=is_check, info=info)
+                           arrow_color=arrow_col, is_check=is_check, info=info,
+                           from_hl_color=from_hl, to_hl_color=to_hl,
+                           is_mate=is_mate)
         _draw_glow(img, to_sq, glow_color, intensity)
         out.append((img, frame_dur))
 
-    # ---- 阶段3：定格保持（用实际帧数计算，保证每步总时长精确等于 seg_dur）----
+    # ---- 阶段3：定格保持 ----
     used = (slide_n + glow_n) / FPS
     hold = max(MIN_HOLD_SEC, seg_dur - used)
     hold_img = render_frame(board_after, from_sq=from_sq, to_sq=to_sq,
-                            is_check=is_check, info=info)
+                            arrow_color=arrow_col, is_check=is_check, info=info,
+                            from_hl_color=from_hl, to_hl_color=to_hl,
+                            is_mate=is_mate)
     out.append((hold_img, hold))
     return out
 
 
 def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment],
-                           panel_info: Optional[dict] = None) -> Tuple[List[str], List[float]]:
+                           panel_info: Optional[dict] = None,
+                           sub_step_indices: Optional[dict] = None) -> Tuple[List[str], List[float]]:
     """
     根据走法列表生成平滑动画帧序列。
     panel_info 可选: {"endgame_name": str, "scores": [...]}
+    sub_step_indices 可选: {move_idx: (sub_idx, total)} 用于压缩块内子步颜色轮换
     返回: (frame_paths, frame_durations)
-    每步时长 = INTRO_SEC(首帧) 或 该段音频时长(seg_dur)，与音频严格对齐。
     """
     os.makedirs(FRAMES_DIR, exist_ok=True)
     board = chess.Board(initial_fen)
     total = len(moves)
     history = []
+
+    white_captured = 0  # 白方被吃子数
+    black_captured = 0  # 黑方被吃子数
 
     frame_paths = []
     durations = []
@@ -365,7 +437,6 @@ def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment
         durations.append(dur)
         fnum += 1
 
-    # 初始局面（静态展示 INTRO_SEC，音频侧由 composer 补等长静音对齐）
     init_info = _make_frame_info(panel_info, 0, total, history, 0.0)
     _save(render_frame(board, info=init_info), INTRO_SEC)
 
@@ -375,30 +446,52 @@ def render_animated_frames(moves: list, initial_fen: str, segments: List[Segment
         is_check = board.gives_check(move)
         history.append(board.san(move))
 
+        # 跟踪吃子
+        if board.is_capture(move):
+            if board.turn == chess.WHITE:
+                black_captured += 1
+            else:
+                white_captured += 1
+
         score = panel_info.get("scores", [None] * total)[i] if panel_info else None
-        frame_info = _make_frame_info(panel_info, i + 1, total, history, score)
+        frame_info = _make_frame_info(panel_info, i + 1, total, history, score,
+                                      white_captured, black_captured)
+
+        # 子步颜色轮换
+        sub_colors = None
+        if sub_step_indices and i in sub_step_indices:
+            sub_idx, _ = sub_step_indices[i]
+            sub_colors = _SUBSTEP_COLORS[sub_idx % len(_SUBSTEP_COLORS)]
 
         board_before = board.copy()
         board.push(move)
 
+        # 检测将杀
+        is_mate = board.is_checkmate()
+
         for img, dur in _render_move_sequence(board_before, move, board, seg_dur,
-                                              is_check, info=frame_info):
+                                              is_check, info=frame_info,
+                                              sub_colors=sub_colors,
+                                              is_mate=is_mate):
             _save(img, dur)
 
     # 尾部总结段（segments 比 moves 多出的部分，如结尾总结词）：
     # 在最终局面上渲染定格帧，时长等于该段音频，让将杀局面停留并播放总结。
+    is_mate = board.is_checkmate()
     for seg in segments[total:]:
         tail_dur = seg.duration_s if seg.duration_s > 0 else 3.0
+        last_score = panel_info.get("scores", [None])[-1] if panel_info and panel_info.get("scores") else None
         tail_info = _make_frame_info(panel_info, total, total, history,
-                                     panel_info.get("scores", [None])[-1] if panel_info and panel_info.get("scores") else None)
-        _save(render_frame(board, info=tail_info), tail_dur)
+                                     last_score, white_captured, black_captured)
+        _save(render_frame(board, info=tail_info, is_mate=is_mate), tail_dur)
 
     Logger.success(f"动画渲染完成: {len(frame_paths)} 帧, {sum(durations):.1f}s")
     return frame_paths, durations
 
 
 def _make_frame_info(panel_info: Optional[dict], move_num: int, total: int,
-                     history: list, score: Optional[float]) -> Optional[dict]:
+                     history: list, score: Optional[float],
+                     white_captured: int = 0, black_captured: int = 0) -> Optional[dict]:
     if panel_info is None:
         return None
     return {
@@ -407,4 +500,7 @@ def _make_frame_info(panel_info: Optional[dict], move_num: int, total: int,
         "total_moves": total,
         "history": list(history),
         "score": score,
+        "white_captured": white_captured,
+        "black_captured": black_captured,
+        "winner_color": panel_info.get("winner_color"),
     }

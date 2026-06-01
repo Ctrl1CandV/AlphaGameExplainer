@@ -115,6 +115,9 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
         cfg = {"Hash": 128, "Threads": 1}
         if syzygy_path and os.path.isdir(syzygy_path):
             cfg["SyzygyPath"] = os.path.abspath(syzygy_path)
+            # 让 SF 在搜索中主动查表库（≤6子局面），把表库的精确胜负/DTZ
+            # 灌进搜索，减少逐步贪心选出的次优着、缩短拖沓的解法线。
+            cfg["SyzygyProbeLimit"] = 6
         engine.configure(cfg)
         return engine
 

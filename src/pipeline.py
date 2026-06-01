@@ -18,7 +18,7 @@ def run(input_text: str) -> str:
     result = _run_pipeline(input_text)
     if result is None:
         return ""
-    commentary, _board, _game_data, _analyzed_moves, _storyboard, _compressed = result
+    commentary, _board, _game_data, _analyzed_moves, _storyboard, _compressed, _winner = result
     print(commentary.raw_text)
     if commentary.summary:
         print("\n" + commentary.summary)
@@ -48,7 +48,7 @@ def run_video(input_text: str, voice_prompt: str = "",
     if result is None:
         return ""
 
-    commentary, board, game_data, analyzed_moves, storyboard, compressed = result
+    commentary, board, game_data, analyzed_moves, storyboard, compressed, winner_color = result
     moves = _extract_moves(board, analyzed_moves)
     if not moves:
         Logger.error("无法提取有效走法序列")
@@ -80,9 +80,20 @@ def run_video(input_text: str, voice_prompt: str = "",
     panel_info = {"endgame_name": endgame} if scores else None
     if panel_info:
         panel_info["scores"] = scores
+        panel_info["winner_color"] = winner_color
+
+    # 构建子步索引映射 {move_idx: (sub_idx, total)} 用于颜色轮换
+    sub_step_indices = {}
+    if compressed:
+        move_idx = 0
+        for cs in compressed:
+            for sub_idx in range(len(cs.sans)):
+                sub_step_indices[move_idx + sub_idx] = (sub_idx, len(cs.sans))
+            move_idx += len(cs.sans)
 
     frame_paths, frame_durations = render_animated_frames(
-        moves, board.fen(), segments, panel_info=panel_info)
+        moves, board.fen(), segments, panel_info=panel_info,
+        sub_step_indices=sub_step_indices)
     # 字幕起始偏移 = 视频开头静音(标题卡+初始局面)，与音频严格对齐
     from src.subtitle_gen import build_cues
     srt_path = gen_subtitles(segments, offset_s=LEAD_SILENCE)
@@ -96,6 +107,7 @@ def run_video(input_text: str, voice_prompt: str = "",
             srt_path=srt_path,
             endgame_name=endgame,
             cues=cues,
+            initial_fen=board.fen(),
         )
         Logger.success(f"视频已生成: {output_path}")
         return output_path
@@ -236,6 +248,10 @@ def _run_pipeline(input_text: str):
         text = generate(board, storyboard)
         commentary = GeneratedCommentary(raw_text=text, fallback_used=True)
 
+    if not commentary.summary:
+        from src.commentator import _fallback_summary
+        commentary.summary = _fallback_summary(storyboard)
+
     if commentary.segments:
         Logger.info(f"  {len(commentary.segments)} 段 - pacing分布: " +
                     ", ".join(f"{p}={sum(1 for s in commentary.segments if s.pacing == p)}"
@@ -252,7 +268,7 @@ def _run_pipeline(input_text: str):
         except Exception:
             pass
 
-    return commentary, board, game_data, analyzed_moves, storyboard, compressed
+    return commentary, board, game_data, analyzed_moves, storyboard, compressed, winner_color
 
 
 def _determine_winner(board, analyzed_moves):

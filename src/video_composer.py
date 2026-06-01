@@ -7,7 +7,8 @@ from moviepy import (
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from src.common import Logger
-from src.board_renderer import IMG_W, IMG_H, COLOR_BG, INTRO_SEC, FPS as RENDER_FPS
+from src.board_renderer import IMG_W, IMG_H, COLOR_BG, INTRO_SEC, FPS as RENDER_FPS, render_frame, MARGIN_LEFT, MARGIN_TOP, BOARD_SIZE
+import chess
 
 TITLE_SEC = 2.5
 FPS = RENDER_FPS              # 与渲染帧率统一，避免重采样导致的卡顿
@@ -17,18 +18,18 @@ SUBTITLE_MARGIN = 18
 LEAD_SILENCE = TITLE_SEC + INTRO_SEC
 
 
-def _make_title_card(endgame_name: str, width: int, height: int) -> str:
-    """生成片头标题卡"""
+def _make_title_card(endgame_name: str, width: int, height: int, initial_fen: str = "") -> str:
+    """生成片头标题卡，可附带棋盘缩略图"""
     img = Image.new("RGB", (width, height), COLOR_BG)
     draw = ImageDraw.Draw(img)
-    
+
     # 渐变背景
     for y in range(height):
         r = int(30 + (y / height) * 20)
         g = int(30 + (y / height) * 15)
         b = int(30 + (y / height) * 25)
         draw.line([(0, y), (width, y)], fill=(r, g, b))
-    
+
     try:
         font_big = ImageFont.truetype("simhei.ttf", 48)
         font_small = ImageFont.truetype("simhei.ttf", 24)
@@ -38,22 +39,45 @@ def _make_title_card(endgame_name: str, width: int, height: int) -> str:
         font_small = ImageFont.load_default()
         font_tiny = ImageFont.load_default()
 
+    # 左侧棋盘缩略图
+    text_x = width // 2
+    if initial_fen:
+        try:
+            b = chess.Board(initial_fen)
+            thumb = render_frame(b)
+            # 裁剪到纯棋盘区域
+            thumb = thumb.crop((
+                MARGIN_LEFT, MARGIN_TOP,
+                MARGIN_LEFT + BOARD_SIZE, MARGIN_TOP + BOARD_SIZE,
+            ))
+            thumb_size = min(height - 80, 300)
+            thumb = thumb.resize((thumb_size, thumb_size))
+            thumb_x = (width // 2 - thumb_size) // 2
+            thumb_y = (height - thumb_size) // 2
+            # 缩略图投影
+            shadow = Image.new("RGBA", (thumb_size + 12, thumb_size + 12), (0, 0, 0, 80))
+            img.paste(shadow, (thumb_x + 5, thumb_y + 5), shadow)
+            img.paste(thumb.convert("RGB"), (thumb_x, thumb_y))
+            text_x = width // 2 + thumb_size // 2
+        except Exception:
+            pass
+
     # 标题
     title_y = height // 2 - 50
-    draw.text((width // 2, title_y), "AI 讲棋",
+    draw.text((text_x, title_y), "AI 讲棋",
               fill=(255, 215, 0), font=font_big, anchor="mm")
-    
+
     # 副标题
-    draw.text((width // 2, title_y + 50), endgame_name,
+    draw.text((text_x, title_y + 50), endgame_name,
               fill=(220, 220, 220), font=font_small, anchor="mm")
-    
+
     # 装饰线
     line_y = title_y + 80
     line_width = 200
-    draw.line([(width // 2 - line_width // 2, line_y), 
-               (width // 2 + line_width // 2, line_y)], 
+    draw.line([(text_x - line_width // 2, line_y),
+               (text_x + line_width // 2, line_y)],
               fill=(100, 100, 100), width=2)
-    
+
     # 底部信息
     draw.text((width // 2, height - 40), "国际象棋残局教学",
               fill=(150, 150, 150), font=font_tiny, anchor="mm")
@@ -81,15 +105,10 @@ def _create_subtitle_background(width: int, height: int) -> str:
 
 def compose(frame_paths: List[str], frame_durations: List[float],
             segments, srt_path: str, endgame_name: str = "",
-            fps: int = FPS, cues=None) -> str:
+            fps: int = FPS, cues=None, initial_fen: str = "") -> str:
     """
     合成最终视频。
-    frame_paths: 帧图片路径
-    frame_durations: 每帧显示秒数
-    segments: 含 audio_path 的段列表
-    srt_path: SRT 字幕文件（留档用）
-    cues: 字幕 cue 列表 [((start_s,end_s),text),...]，优先用于构造字幕，
-          绕开 moviepy 脆弱的 SRT 文本解析。为 None 时回退从 srt_path 读取。
+    initial_fen: 初始局面FEN，用于片头棋盘缩略图
     """
     Logger.info("合成视频...")
 
@@ -106,7 +125,7 @@ def compose(frame_paths: List[str], frame_durations: List[float],
             pass
 
     # 片头
-    title_path = _make_title_card(endgame_name or "残局讲解", frame_w, frame_h)
+    title_path = _make_title_card(endgame_name or "残局讲解", frame_w, frame_h, initial_fen)
 
     # 组装帧序列：片头标题卡 + 渲染帧
     all_frames = [title_path] + frame_paths
@@ -144,8 +163,12 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     # 字幕带：固定在底部留白区（棋盘下方，不覆盖棋盘）
     band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
 
-    # 字幕文本：固定尺寸 caption（高度封顶，绝不向上压棋盘、向下溢出画面）
+    # 字体查找（回退链：simhei → msyh → 系统默认）
     _FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
+    if not os.path.exists(_FONT_PATH):
+        _FONT_PATH = "C:/Windows/Fonts/msyh.ttf"
+    if not os.path.exists(_FONT_PATH):
+        _FONT_PATH = "C:/Windows/Fonts/arial.ttf"
 
     def _mk_sub(txt):
         return TextClip(

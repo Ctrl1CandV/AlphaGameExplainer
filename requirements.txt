@@ -28,5 +28,3 @@ python-dotenv>=1.0.0,<2.0
 colorama>=0.4.6,<1.0
 
 # === 视频生成相关（可选）===
-# IndexTTS2 需要独立 Python 3.10 环境安装，详见 视频生成方案.md 第二章
-# 安装: cd ../index-tts && uv sync && modelscope download --model IndexTeam/IndexTTS-2 --local_dir checkpoints

@@ -8,3 +8,4 @@ output/
 *.mp4
 *.srt
 *test*
+.claude
