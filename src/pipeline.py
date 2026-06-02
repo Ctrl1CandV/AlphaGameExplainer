@@ -1,8 +1,8 @@
-from src.stockfish_analyzer import get_solution
 from src.common import Logger, resolve_path, GeneratedCommentary, Segment, AnalyzedMove, CompressedStep
-from src.storyboard import compress, build
 from src.commentator import generate_structured, generate
+from src.stockfish_analyzer import get_solution
 from src.llm_backend import release_backend
+from src.storyboard import compress, build
 from src.tablebase import TablebaseSolver
 from dotenv import load_dotenv
 from src.parser import parse
@@ -12,9 +12,8 @@ import os
 
 load_dotenv()
 
-
 def run(input_text: str) -> str:
-    """运行现有 5 步管线，返回解说文本"""
+    """ 运行现有5步管线，只返回解说文本"""
     result = _run_pipeline(input_text)
     if result is None:
         return ""
@@ -26,11 +25,9 @@ def run(input_text: str) -> str:
         print("\n" + commentary.summary)
     return commentary.raw_text
 
-
 def _extract_moves(board: chess.Board, analyzed: List[AnalyzedMove]) -> List[chess.Move]:
-    """从AnalyzedMove列表提取合法走法"""
-    moves = []
-    temp = board.copy()
+    """ 从AnalyzedMove列表提取合法走法 """
+    moves, temp = [], board.copy()
     for am in analyzed:
         if temp.is_game_over():
             break

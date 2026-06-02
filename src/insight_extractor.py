@@ -1,40 +1,32 @@
-"""棋理洞察提取层（src/insight_extractor.py）。
-
-职责：用纯 chess.Board API（零引擎依赖）从每个压缩节点的起止局面中算出
-**结构化、可表达的棋理事实**，喂给 LLM，解决"信息贫瘠→只能堆比喻"的根因。
-
-设计约束（与项目其余部分约定一致）：
-  1. 纯 board API，不持有 Stockfish/表库实例——所有指标 from chess.Board。
-     需要"是否唯一好棋"这类引擎信息时，由调用方从 AnalyzedMove 透传，不在此重算。
-  2. 产出文本一律**关系化、不含坐标**：画面里棋盘/箭头已标出精确格子，
-     语音的职责是用方位关系说清"这一步改变了什么"。所以 teaching_point /
-     must_mention 用"边线""角落""逃格""对王"这类词，绝不出现 a1-h8。
-  3. 失败安全：单节点提取抛异常只返回空洞察，不影响其余节点，更不影响主链路。
-
-对外主入口：extract_for_compressed(compressed, root_board, role_meta, endgame_name)
-"""
-from typing import List, Optional, Dict
+from src.common import PIECE_CN as _PIECE_CN, piece_cn as _piece_cn
+from typing import List, Optional
 import chess
 
+"""
+棋理洞察提取层
+职责：用纯 chess.Board API（零引擎依赖）从每个压缩节点的起止局面中算出
+**结构化、可表达的棋理事实**，喂给 LM，解决"信息贫瘠→只能堆比喻"的根因
+设计约束（与项目其余部分约定一致）：
+  1. 纯 board API，不持有 Stockfish/表库实例——所有指标 from chess.Board
+     需要"是否唯一好棋"这类引擎信息时，由调用方从 AnalyzedMove 透传，不在此重算
+  2. 产出文本一律**关系化、不含坐标**：画面里棋盘/箭头已标出精确格子
+     语音的职责是用方位关系说清"这一步改变了什么"。所以 teaching_point
+     must_mention 用"边线""角落""逃格""对王"这类词，绝不出现 a1-h8
+  3. 失败安全：单节点提取抛异常只返回空洞察，不影响其余节点，更不影响主链路
+对外主入口：extract_for_compressed(compressed, root_board, role_meta, endgame_name)
+"""
 
-_PIECE_CN = {
-    chess.KING: "王", chess.QUEEN: "后", chess.ROOK: "车",
-    chess.BISHOP: "象", chess.KNIGHT: "马", chess.PAWN: "兵",
+_REGION_CN = {
+    "corner": "角落", "edge": "边线", "center": "中心", "near_center": "中心一带",
 }
 
-
-def _piece_cn(pt: Optional[int]) -> str:
-    return _PIECE_CN.get(pt, "子")
-
-
 def _king_safe_squares(board: chess.Board, color: chess.Color) -> set:
-    """返回 color 方王在当前局面下"能安全去"的相邻格集合（近似王活动度）。
-
-    判定：相邻格中，非己方占用、不与对方王相邻、不被对方攻击。
+    """
+    返回color方王在当前局面下"能安全去"的相邻格集合（近似王活动度）
+    判定：相邻格中，非己方占用、不与对方王相邻、不被对方攻击
     这是衡量"王还剩多少活动空间"的稳健指标，且不依赖轮到谁走
-    （legal_moves 只算轮走方，残局里对方王常常不是轮走方）。
-    注：滑子穿过王当前格的 x 光攻击会被王自身遮挡而少算，
-    属残局叙事可接受的近似。
+    （legal_moves 只算轮走方，残局里对方王常常不是轮走方）
+    注：滑子穿过王当前格的 x 光攻击会被王自身遮挡而少算，属残局叙事可接受的近似
     """
     ksq = board.king(color)
     if ksq is None:
@@ -54,11 +46,9 @@ def _king_safe_squares(board: chess.Board, color: chess.Color) -> set:
         out.add(sq)
     return out
 
-
 def _square_region(sq: int) -> str:
     """把一个格子归到棋盘区域：corner / edge / center / near_center。"""
-    f = chess.square_file(sq)
-    r = chess.square_rank(sq)
+    f, r = chess.square_file(sq), chess.square_rank(sq)
     if f in (0, 7) and r in (0, 7):
         return "corner"
     if f in (0, 7) or r in (0, 7):
@@ -67,14 +57,8 @@ def _square_region(sq: int) -> str:
         return "center"
     return "near_center"
 
-
-_REGION_CN = {
-    "corner": "角落", "edge": "边线", "center": "中心", "near_center": "中心一带",
-}
-
-
 def _detect_opposition(board: chess.Board) -> str:
-    """两王相对态势（本地最小实现，避免与 storyboard 形成循环依赖）。"""
+    """ 两王相对态势（本地最小实现，避免与 toryboard形成循环依赖） """
     wk = board.king(chess.WHITE)
     bk = board.king(chess.BLACK)
     if wk is None or bk is None:
@@ -89,11 +73,10 @@ def _detect_opposition(board: chess.Board) -> str:
         return "斜向对王"
     return ""
 
-
 def _replay_node(board_before: chess.Board, sans: List[str],
                  strong_color: Optional[chess.Color]):
-    """回放节点内所有着，提取动作事实。
-
+    """
+    回放节点内所有着，提取动作事实。
     返回 dict：
       strong_actions: [(piece_type, gives_check, is_capture, is_promo), ...] 强方的着
       weak_king_fled: 弱方王是否在本节点内移动过
@@ -129,7 +112,7 @@ def _replay_node(board_before: chess.Board, sans: List[str],
 
 
 def _action_phrase(action, endgame_name: str) -> str:
-    """把单个强方动作转成关系化短语（无坐标）。"""
+    """ 把单个强方动作转成关系化短语 """
     pt, chk, cap, promo = action
     name = _piece_cn(pt)
     if promo:
@@ -154,9 +137,8 @@ def _action_phrase(action, endgame_name: str) -> str:
         return "后从远处罩住对方王的活动区"
     return f"{name}调整站位"
 
-
 def _compose_teaching(facts: dict, endgame_name: str) -> str:
-    """把结构化事实拼成 1-3 句关系化教学点（无坐标）。事实不足时返回空串。"""
+    """ 把结构化事实拼成 1-3 句关系化教学点，事实不足时返回空串 """
     clauses = []
 
     # 1) 多着合并的机动块：整体描述，不逐着数
@@ -195,7 +177,6 @@ def _compose_teaching(facts: dict, endgame_name: str) -> str:
     text = "，".join(clauses) + "。"
     return text
 
-
 def _compose_must_mention(facts: dict) -> List[str]:
     """1-3 条最该讲到的硬事实（关系化），供 prompt 软提示。"""
     bullets = []
@@ -217,25 +198,16 @@ def _compose_must_mention(facts: dict) -> List[str]:
             out.append(b)
     return out[:3]
 
-
-# ============================================================
-#  战术叙述提取器（纯 chess.Board，零引擎依赖）
-#  原则：只描述"发生了什么"和"为什么对方无法两全"，
-#  不判断"重要/不重要"，不输出坐标，全部棋理中文。
-# ============================================================
-
-
 def _material_signature(board: chess.Board, color: chess.Color) -> tuple:
-    """返回 color 方除王外的子力组成（排序后的 tuple）。"""
+    """ 返回 color 方除王外的子力组成 """
     counts = {}
     for piece in board.piece_map().values():
         if piece.color == color and piece.piece_type != chess.KING:
             counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
     return tuple(sorted(counts.items()))
 
-
 def _sig_name(sig: tuple) -> str:
-    """子力签名 → 中文简称，如 ((ROOK,1),) → '单后'"""
+    """ 子力签名 → 中文简称 """
     if not sig:
         return "单王"
     parts = []
@@ -246,8 +218,8 @@ def _sig_name(sig: tuple) -> str:
 
 
 def _extract_tactical_narrative(cs, board_before, board_after, role_meta) -> List[str]:
-    """检测本节点中需要棋理推理才能理解的战术关系。
-
+    """
+    检测本节点中需要棋理推理才能理解的战术关系。
     只产出 1-3 句纯棋理中文叙述（无坐标、无评判词）。
     失败安全：任何异常返回空列表。
     """
@@ -387,7 +359,7 @@ def _extract_tactical_narrative(cs, board_before, board_after, role_meta) -> Lis
 
 
 def _compute_importance(facts: dict, cs_is_critical: bool) -> tuple:
-    """语义重要性评分 → (level, reasons)。比旧的纯标签判定更贴近棋理。"""
+    """ 语义重要性评分 → (level, reasons)。比旧的纯标签判定更贴近棋理 """
     score = 0
     reasons = []
 
@@ -432,12 +404,12 @@ def _compute_importance(facts: dict, cs_is_critical: bool) -> tuple:
         return "medium", reasons
     return "low", reasons
 
-
-def extract_for_node(cs, root_winner_strong: Optional[chess.Color],
-                     role_meta: Optional[dict], endgame_name: str,
-                     prev_state: dict) -> dict:
-    """对单个压缩节点提取洞察。prev_state 跨节点累计（已到边线/角落标记）。
-
+def extract_for_node(
+    cs, root_winner_strong: Optional[chess.Color], 
+    role_meta: Optional[dict], endgame_name: str, prev_state: dict
+    ) -> dict:
+    """
+    对单个压缩节点提取洞察。prev_state 跨节点累计（已到边线/角落标记）。
     失败安全：任何异常都返回空洞察 dict，不抛出。
     """
     try:
@@ -544,10 +516,10 @@ def extract_for_node(cs, root_winner_strong: Optional[chess.Color],
             "tactical_narratives": [],
         }
 
-
-def extract_for_compressed(compressed: List, root_board: chess.Board,
-                           role_meta: Optional[dict] = None,
-                           endgame_name: str = "") -> List[dict]:
+def extract_for_compressed(
+    compressed: List, root_board: chess.Board,
+    role_meta: Optional[dict] = None, endgame_name: str = ""
+    ) -> List[dict]:
     """对整个压缩序列提取洞察，返回与 compressed 等长的 list。
 
     role_meta: storyboard._role_meta 的产物（含 strong_color/weak_color）。

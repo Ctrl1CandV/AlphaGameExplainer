@@ -1,0 +1,65 @@
+{
+  "motifs": [
+    { "key": "advancedPawn",      "en": "Advanced pawn",       "cn": "通路兵" },
+    { "key": "attackingF2F7",     "en": "Attacking f2 or f7",  "cn": "攻击f2/f7" },
+    { "key": "capturingDefender",  "en": "Capture the defender", "cn": "消除防守子" },
+    { "key": "discoveredAttack",   "en": "Discovered attack",   "cn": "闪击" },
+    { "key": "doubleCheck",        "en": "Double check",        "cn": "双将" },
+    { "key": "exposedKing",        "en": "Exposed king",        "cn": "暴露王" },
+    { "key": "fork",               "en": "Fork",                "cn": "叉击" },
+    { "key": "hangingPiece",       "en": "Hanging piece",       "cn": "悬子" },
+    { "key": "kingsideAttack",     "en": "Kingside attack",     "cn": "王翼进攻" },
+    { "key": "pin",                "en": "Pin",                 "cn": "牵制" },
+    { "key": "queensideAttack",    "en": "Queenside attack",    "cn": "后翼进攻" },
+    { "key": "sacrifice",          "en": "Sacrifice",           "cn": "弃子" },
+    { "key": "skewer",             "en": "Skewer",              "cn": "串击" },
+    { "key": "trappedPiece",       "en": "Trapped piece",       "cn": "困子" }
+  ],
+  "advanced": [
+    { "key": "attraction",         "en": "Attraction",          "cn": "引入" },
+    { "key": "clearance",          "en": "Clearance",           "cn": "腾挪" },
+    { "key": "collinearMove",      "en": "Collinear move",      "cn": "共线移动" },
+    { "key": "discoveredCheck",    "en": "Discovered check",    "cn": "闪将" },
+    { "key": "defensiveMove",      "en": "Defensive move",      "cn": "防守走法" },
+    { "key": "deflection",         "en": "Deflection",          "cn": "引离" },
+    { "key": "interference",       "en": "Interference",        "cn": "干扰" },
+    { "key": "intermezzo",         "en": "Intermezzo",          "cn": "间招" },
+    { "key": "quietMove",          "en": "Quiet move",          "cn": "静招" },
+    { "key": "xRayAttack",         "en": "X-Ray attack",        "cn": "X光攻击" },
+    { "key": "zugzwang",           "en": "Zugzwang",            "cn": "逼迫" }
+  ],
+  "mate_patterns": [
+    { "key": "anastasiaMate",      "en": "Anastasia's mate",    "cn": "阿纳斯塔西娅杀" },
+    { "key": "arabianMate",        "en": "Arabian mate",        "cn": "阿拉伯杀" },
+    { "key": "backRankMate",       "en": "Back rank mate",      "cn": "底线杀" },
+    { "key": "balestraMate",       "en": "Balestra mate",       "cn": "巴莱斯特拉杀" },
+    { "key": "blindSwineMate",     "en": "Blind Swine mate",    "cn": "盲猪杀" },
+    { "key": "bodenMate",          "en": "Boden's mate",        "cn": "博登杀" },
+    { "key": "cornerMate",         "en": "Corner mate",         "cn": "角杀" },
+    { "key": "doubleBishopMate",   "en": "Double bishop mate",  "cn": "双象杀" },
+    { "key": "dovetailMate",       "en": "Dovetail mate",       "cn": "燕尾杀" },
+    { "key": "epauletteMate",      "en": "Epaulette mate",      "cn": "肩章杀" },
+    { "key": "hookMate",           "en": "Hook mate",           "cn": "钩子杀" },
+    { "key": "killBoxMate",        "en": "Kill box mate",       "cn": "杀箱杀" },
+    { "key": "morphysMate",        "en": "Morphy's mate",       "cn": "莫菲杀" },
+    { "key": "operaMate",          "en": "Opera mate",          "cn": "歌剧杀" },
+    { "key": "pillsburysMate",     "en": "Pillsbury's mate",    "cn": "皮尔斯伯里杀" },
+    { "key": "smotheredMate",      "en": "Smothered mate",      "cn": "闷杀" },
+    { "key": "swallowstailMate",   "en": "Swallow's tail mate", "cn": "燕子尾杀" },
+    { "key": "triangleMate",       "en": "Triangle mate",       "cn": "三角杀" },
+    { "key": "vukovicMate",        "en": "Vukovic mate",        "cn": "武科维奇杀" }
+  ],
+  "phase_sub": [
+    { "key": "rookEndgame",        "en": "Rook endgame",        "cn": "车残局" },
+    { "key": "bishopEndgame",      "en": "Bishop endgame",      "cn": "象残局" },
+    { "key": "pawnEndgame",        "en": "Pawn endgame",        "cn": "兵残局" },
+    { "key": "knightEndgame",      "en": "Knight endgame",      "cn": "马残局" },
+    { "key": "queenEndgame",       "en": "Queen endgame",       "cn": "后残局" },
+    { "key": "queenRookEndgame",   "en": "Queen and Rook",      "cn": "后车残局" }
+  ],
+  "other": [
+    { "key": "castling",           "en": "Castling",            "cn": "王车易位" },
+    { "key": "promotion",          "en": "Promotion",           "cn": "升变" },
+    { "key": "underPromotion",     "en": "Underpromotion",      "cn": "低升变" }
+  ]
+}

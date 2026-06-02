@@ -1,11 +1,11 @@
 from src.common import CompressedStep, Logger, AnalyzedMove
+from src.common import piece_cn
 from src.endgame_knowledge import match as match_endgame
 from src.endgame_knowledge import describe_endgame, get_forbidden_concepts
 from typing import List, Optional, Tuple
 import chess
 
 MAX_NODE_SPAN = 4
-LONG_NODE_SPAN = 6
 LONG_MOVE_THRESHOLD = 18
 COMPACT_NODE_THRESHOLD = 7
 MAX_SPAN_CAP = 10        # 压缩跨度上限（再长的解法每节点也不超过10着）
@@ -373,7 +373,6 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
 
         j = i + 1
         check_count = 1
-        quiet_count = 0
         total_sans = len(steps[i].sans)
         while j < n and (j - i) < 8:
             cs_j = steps[j]
@@ -385,8 +384,6 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
             had_check = "将军" in steps[j - 1].tags
             if has_check:
                 check_count += 1
-            else:
-                quiet_count += 1
             if has_check == had_check:
                 if (j - i) >= 4:
                     j += 0
@@ -497,8 +494,6 @@ def _side_material_desc(board: chess.Board, color: chess.Color) -> str:
     在 KB 未命中的残局（双车、后兵等）下仍能产出准确的子力说明。
     """
     order = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN]
-    names = {chess.QUEEN: "后", chess.ROOK: "车", chess.BISHOP: "象",
-             chess.KNIGHT: "马", chess.PAWN: "兵"}
     cn_num = {1: "一", 2: "两", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八"}
     counts = {}
     for piece in board.piece_map().values():
@@ -508,7 +503,7 @@ def _side_material_desc(board: chess.Board, color: chess.Color) -> str:
     for pt in order:
         c = counts.get(pt, 0)
         if c > 0:
-            parts.append(f"{cn_num.get(c, str(c))}{names[pt]}")
+            parts.append(f"{cn_num.get(c, str(c))}{piece_cn(pt)}")
     return "".join(parts) if parts else "单王"
 
 def _piece_square(board: chess.Board, color: chess.Color, piece_type: chess.PieceType):
@@ -525,15 +520,7 @@ def _piece_squares(board: chess.Board, color: chess.Color, piece_type: chess.Pie
     return sorted(squares)
 
 def _piece_label(piece_type: chess.PieceType) -> str:
-    mapping = {
-        chess.KING: "王",
-        chess.QUEEN: "后",
-        chess.ROOK: "车",
-        chess.BISHOP: "象",
-        chess.KNIGHT: "马",
-        chess.PAWN: "兵",
-    }
-    return mapping.get(piece_type, "子")
+    return piece_cn(piece_type)
 
 def _transition_summary(fen_before: str, fen_after: str) -> str:
     b1 = chess.Board(fen_before)
@@ -557,13 +544,6 @@ def _transition_summary(fen_before: str, fen_after: str) -> str:
                 after_text = "、".join(chess.square_name(sq) for sq in after_sqs)
                 parts.append(f"{name}{label}出现在{after_text}")
     return "；".join(parts) if parts else "起止局面结构没有实质变化，主要是反复试探与等招"
-
-def _compact_moves_display(sans: List[str]) -> str:
-    if len(sans) <= 4:
-        return " → ".join(sans)
-    if len(sans) <= 8:
-        return f"{sans[0]} → {sans[1]} → ... → {sans[-2]} → {sans[-1]}"
-    return f"{sans[0]} → ... → {sans[-1]}"
 
 def _krpkr_phase_hint(board_before: chess.Board, board_after: chess.Board, role_meta: dict, same_position: bool) -> Tuple[str, str]:
     if same_position:
@@ -876,7 +856,6 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         if kb and kb.get("name") == "车兵对车":
             cs.phase, phase_hint = _krpkr_phase_hint(board_before, board_after, role_meta, same_position)
         elif same_position and len(cs.sans) >= 2:
-            pass
             cs.phase = "反复试探"
             phase_hint = "这段变化的起止局面相同，属于反复调车试探与等招，并未形成实质突破"
 
@@ -896,7 +875,6 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             "sans": list(cs.sans),
             "turn": turn,
             "moves": " → ".join(cs.sans),
-            "moves_display": _compact_moves_display(cs.sans),
             "move_count": len(cs.sans),
             "is_critical": cs.is_critical,
             "phase": cs.phase,

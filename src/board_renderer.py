@@ -1,11 +1,11 @@
-import chess
-import os
-import math
 from PIL import Image, ImageDraw, ImageFont
 from typing import List, Tuple, Optional
 from src.common import Segment, Logger
+import chess
+import math
+import os
 
-# ---- 画布 & 布局（16:9 标准化，720p）----
+# 画布布局,16:9,标准化720p
 CANVAS_W = 1280
 CANVAS_H = 720
 SQUARE = 75
@@ -13,19 +13,18 @@ BOARD_SIZE = 600                # SQUARE * 8
 BOARD_LEFT = 340                # (CANVAS_W - BOARD_SIZE) // 2，棋盘水平居中
 BOARD_TOP = 60                  # 顶部留空给 HUD 信息条
 TOP_BAR_H = 36                  # 顶部 HUD 条高度
-LABEL_SIZE = 16
 
 PIECES_DIR = os.path.join("assets", "pieces")
 FRAMES_DIR = os.path.join("output", "frames")
 
-# ---- 计时模型（与 video_composer 输出 fps 对齐）----
+# 计时模型
 FPS = 30
 SLIDE_SEC = 0.45
 GLOW_SEC = 0.30
 INTRO_SEC = 1.5
 MIN_STEP_HOLD = 0.35
 
-# ---- 颜色 ----
+# 颜色
 COLOR_LIGHT = (240, 217, 181)
 COLOR_DARK = (181, 136, 99)
 COLOR_HIGHLIGHT_FROM = (255, 255, 0, 90)
@@ -56,13 +55,11 @@ PIECE_MAP = {
 _piece_cache: dict = {}
 _font_cache: dict = {}
 
-
 def _load_piece(char: str) -> Image.Image:
     if char not in _piece_cache:
         path = os.path.join(PIECES_DIR, PIECE_MAP[char])
         _piece_cache[char] = Image.open(path).convert("RGBA").resize((SQUARE, SQUARE))
     return _piece_cache[char]
-
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
     if size not in _font_cache:
@@ -72,34 +69,26 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont:
             _font_cache[size] = ImageFont.load_default()
     return _font_cache[size]
 
-
 def _sq_xy(sq: int) -> Tuple[int, int]:
-    col = chess.square_file(sq)
-    row = 7 - chess.square_rank(sq)
+    col, row = chess.square_file(sq), 7 - chess.square_rank(sq)
     return BOARD_LEFT + col * SQUARE, BOARD_TOP + row * SQUARE
-
 
 def _sq_center(sq: int) -> Tuple[int, int]:
     x, y = _sq_xy(sq)
     return x + SQUARE // 2, y + SQUARE // 2
-
 
 def ease_in_out_cubic(t: float) -> float:
     if t < 0.5:
         return 4 * t * t * t
     return 1 - (-2 * t + 2) ** 3 / 2
 
-
 def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
-
-# ---- 背景缓存 ----
 _bg_cache: dict = {}
 
-
 def _get_background(width: int, height: int) -> Image.Image:
-    """预渲染的渐变背景图（缓存复用）"""
+    """ 预渲染的渐变背景图 """
     key = (width, height)
     if key not in _bg_cache:
         img = Image.new("RGBA", key, COLOR_BG)
@@ -112,15 +101,11 @@ def _get_background(width: int, height: int) -> Image.Image:
         _bg_cache[key] = img
     return _bg_cache[key].copy()
 
-
-# ============================================================
 #  绘制函数
-# ============================================================
 
 def _draw_board(draw: ImageDraw.ImageDraw):
-    """绘制棋盘（圆角边框，无阴影——棋盘居中已有呼吸感）"""
-    board_rect = [BOARD_LEFT - 2, BOARD_TOP - 2,
-                  BOARD_LEFT + BOARD_SIZE + 3, BOARD_TOP + BOARD_SIZE + 3]
+    """ 绘制棋盘（圆角边框，无阴影——棋盘居中已有呼吸感） """
+    board_rect = [BOARD_LEFT - 2, BOARD_TOP - 2, BOARD_LEFT + BOARD_SIZE + 3, BOARD_TOP + BOARD_SIZE + 3]
     draw.rounded_rectangle(board_rect, radius=6, outline=(80, 80, 80), width=3)
 
     for r in range(8):
@@ -130,30 +115,31 @@ def _draw_board(draw: ImageDraw.ImageDraw):
             color = COLOR_LIGHT if (r + c) % 2 == 0 else COLOR_DARK
             draw.rectangle([x, y, x + SQUARE - 1, y + SQUARE - 1], fill=color)
 
-
 def _draw_coordinates(draw: ImageDraw.ImageDraw):
-    """坐标标注 a-h / 1-8"""
+    """ 坐标标注 """
     font = _get_font(11)
     for i in range(8):
         # 列标 a-h（棋盘下方居中）
         x = BOARD_LEFT + i * SQUARE + SQUARE // 2
-        draw.text((x, BOARD_TOP + BOARD_SIZE + 2),
-                  chr(ord("a") + i), fill=(180, 180, 180), font=font, anchor="mt")
+        draw.text(
+            (x, BOARD_TOP + BOARD_SIZE + 2), chr(ord("a") + i),
+            fill=(180, 180, 180), font=font, anchor="mt"
+        )
         # 行标 1-8（棋盘左侧居中）
         y = BOARD_TOP + i * SQUARE + SQUARE // 2
-        draw.text((BOARD_LEFT - 10, y),
-                  str(8 - i), fill=(180, 180, 180), font=font, anchor="rm")
-
+        draw.text(
+            (BOARD_LEFT - 10, y), str(8 - i),
+            fill=(180, 180, 180), font=font, anchor="rm"
+        )
 
 def _draw_highlight(img: Image.Image, sq: int, color: tuple):
-    """格子高亮"""
+    """ 格子高亮 """
     x, y = _sq_xy(sq)
     overlay = Image.new("RGBA", (SQUARE, SQUARE), color)
     img.paste(overlay, (x, y), overlay)
 
-
 def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
-    """落子后辉光脉冲。intensity 0~1"""
+    """ 落子后辉光脉冲 """
     if intensity <= 0:
         return
     intensity = max(0.0, min(1.0, intensity))
@@ -169,12 +155,11 @@ def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
                      outline=color + (a,), width=2)
     img.paste(overlay, (x, y), overlay)
 
-
-def _draw_arrow(draw: ImageDraw.ImageDraw, from_sq: int, to_sq: int,
-                color=(255, 80, 80), progress: Optional[float] = None):
-    """绘制战术箭头。
-    progress 非 None 时在箭头上叠加移动指示圆点（滑动阶段使用）。
-    """
+def _draw_arrow(
+    draw: ImageDraw.ImageDraw, from_sq: int, to_sq: int,
+    color=(255, 80, 80), progress: Optional[float] = None
+    ):
+    """ 绘制战术箭头,progress非None时在箭头上叠加移动指示圆点（滑动阶段使用） """
     fx, fy = _sq_center(from_sq)
     tx, ty = _sq_center(to_sq)
 
@@ -199,10 +184,10 @@ def _draw_arrow(draw: ImageDraw.ImageDraw, from_sq: int, to_sq: int,
             fill=bright,
         )
 
-
-def _draw_pieces_static(img: Image.Image, board: chess.Board,
-                         skip_sq: Optional[int] = None):
-    """绘制静止棋子"""
+def _draw_pieces_static(
+    img: Image.Image, board: chess.Board, skip_sq: Optional[int] = None
+    ):
+    """ 绘制静止棋子 """
     for sq, piece in board.piece_map().items():
         if sq == skip_sq:
             continue
@@ -211,12 +196,10 @@ def _draw_pieces_static(img: Image.Image, board: chess.Board,
         img.paste(piece_img, (x, y), piece_img)
 
 
-# ============================================================
-#  HUD 叠加层（替代旧右侧固定面板）
-# ============================================================
+#  HUD 叠加层
 
 def _draw_top_bar(img: Image.Image, info: dict):
-    """顶部信息条：残局类型 | 进度 | 当前阶段"""
+    """ 顶部信息条：残局类型 | 进度 | 当前阶段 """
     bar_h = TOP_BAR_H
     # 半透明深色背景（上实下虚）
     overlay = Image.new("RGBA", (CANVAS_W, bar_h), (0, 0, 0, 0))
@@ -251,7 +234,6 @@ def _draw_top_bar(img: Image.Image, info: dict):
     if phase:
         draw.text((CANVAS_W - 24, 8), phase,
                   fill=(160, 170, 210), font=font, anchor="ra")
-
 
 def _draw_bottom_info(img: Image.Image, info: dict):
     """棋盘下方信息：已吃子图标 + 水平评估条"""
@@ -320,24 +302,19 @@ def _draw_bottom_info(img: Image.Image, info: dict):
                 r = int(35 + t * 10)
                 g = int(35 + t * 8)
                 b = int(40 + t * 8)
-            draw.line([(bar_x + px, bar_y), (bar_x + px, bar_y + bar_h)],
-                      fill=(r, g, b))
+            draw.line([(bar_x + px, bar_y), (bar_x + px, bar_y + bar_h)], fill=(r, g, b))
 
         # 中心标记线
         mid_x = bar_x + bar_w // 2
-        draw.line([(mid_x, bar_y - 2), (mid_x, bar_y + bar_h + 2)],
-                  fill=(120, 120, 120), width=1)
+        draw.line([(mid_x, bar_y - 2), (mid_x, bar_y + bar_h + 2)], fill=(120, 120, 120), width=1)
 
         # 标签
         font_s = _get_font(9)
-        draw.text((bar_x, bar_y + bar_h + 3), "黑优", fill=(120, 120, 120),
-                  font=font_s, anchor="ma")
-        draw.text((bar_x + bar_w, bar_y + bar_h + 3), "白优", fill=(180, 180, 180),
-                  font=font_s, anchor="ma")
-
+        draw.text((bar_x, bar_y + bar_h + 3), "黑优", fill=(120, 120, 120), font=font_s, anchor="ma")
+        draw.text((bar_x + bar_w, bar_y + bar_h + 3), "白优", fill=(180, 180, 180), font=font_s, anchor="ma")
 
 def _draw_phase_label(img: Image.Image, phase_name: str, alpha: int = 200):
-    """阶段切换标记——棋盘右上角半透明标签"""
+    """ 阶段切换标记——棋盘右上角半透明标签 """
     if not phase_name or alpha <= 0:
         return
     draw = ImageDraw.Draw(img)
@@ -359,23 +336,16 @@ def _draw_phase_label(img: Image.Image, phase_name: str, alpha: int = 200):
         radius=14,
         fill=(15, 15, 25, alpha),
     )
-    draw.text((bx + px, by_ + py), phase_name,
-              fill=(255, 215, 0, alpha), font=font)
+    draw.text((bx + px, by_ + py), phase_name, fill=(255, 215, 0, alpha), font=font)
 
-
-# ============================================================
 #  帧渲染
-# ============================================================
 
-def render_frame(board: chess.Board, from_sq=None, to_sq=None,
-                 arrow_color=(255, 80, 80), is_check: bool = False,
-                 info: Optional[dict] = None,
-                 from_hl_color=None, to_hl_color=None,
-                 is_mate: bool = False,
-                 arrow_progress: Optional[float] = None,
-                 phase_label_name: str = "",
-                 phase_label_alpha: int = 0) -> Image.Image:
-    """渲染单帧棋盘。所有叠加层可选，统一走此函数。"""
+def render_frame(
+    board: chess.Board, from_sq=None, to_sq=None, arrow_color=(255, 80, 80), is_check: bool = False,
+    info: Optional[dict] = None, from_hl_color=None, to_hl_color=None, is_mate: bool = False,
+    arrow_progress: Optional[float] = None, phase_label_name: str = "", phase_label_alpha: int = 0
+    ) -> Image.Image:
+    """ 渲染单帧棋盘，所有叠加层可选，统一走此函数 """
     img = _get_background(CANVAS_W, CANVAS_H)
     draw = ImageDraw.Draw(img)
 
@@ -417,23 +387,17 @@ def render_frame(board: chess.Board, from_sq=None, to_sq=None,
 
     return img
 
-
-# ============================================================
 #  走法动画序列
-# ============================================================
 
-def _render_move_sequence(board_before: chess.Board, move: chess.Move,
-                           board_after: chess.Board, hold_sec: float,
-                           is_check: bool = False,
-                           info: Optional[dict] = None,
-                           sub_colors=None,
-                           is_mate: bool = False,
-                           phase_label_name: str = "",
-                           phase_label_fade_frames: int = 0,
-                           phase_label_start_frame: int = 0,
-                           _sub_frame_idx: int = 0) -> List[Tuple[Image.Image, float]]:
-    """为单步走法生成 (帧, 时长) 序列。
-
+def _render_move_sequence(
+    board_before: chess.Board, move: chess.Move, board_after: chess.Board,
+    hold_sec: float, is_check: bool = False, info: Optional[dict] = None,
+    sub_colors=None, is_mate: bool = False, phase_label_name: str = "",
+    phase_label_fade_frames: int = 0, phase_label_start_frame: int = 0,
+    _sub_frame_idx: int = 0
+    ) -> List[Tuple[Image.Image, float]]:
+    """
+    为单步走法生成 (帧, 时长) 序列
     三阶段：滑动(0.45s) → 落子高光脉冲(0.30s) → 定格保持(hold_sec)
     滑动阶段箭头带移动指示圆点。定格保持为单帧长时长。
     phase_label_* 参数用于在首帧叠加阶段标记。
@@ -530,7 +494,6 @@ def _render_move_sequence(board_before: chess.Board, move: chess.Move,
     out.append((hold_img, hold))
     return out
 
-
 def _phase_label_alpha(frame_rel: int, total_frames: int) -> int:
     """阶段标签 alpha 曲线：fade in → 保持 → fade out"""
     if total_frames <= 0:
@@ -543,25 +506,20 @@ def _phase_label_alpha(frame_rel: int, total_frames: int) -> int:
     else:
         return int(255 * (1 - (t - 0.8) / 0.2))  # 255 → 0
 
-
 def _step_overhead_sec() -> float:
     """单个子步「滑动+高光」的固定开销（秒），不含定格"""
     slide_n = max(2, round(SLIDE_SEC * FPS))
     glow_n = max(2, round(GLOW_SEC * FPS))
     return (slide_n + glow_n) / FPS
 
-
-# ============================================================
 #  主渲染入口
-# ============================================================
 
 def render_animated_frames(segments: List[Segment], initial_fen: str,
                             panel_info: Optional[dict] = None) -> Tuple[List[str], List[float]]:
-    """节点级动画渲染。
-
+    """
+    节点级动画渲染。
     每个 segment 在其解说音频时长内顺序播放本节点的全部子步。
     时长对齐、音画同步逻辑不变。新增阶段切换时的标签叠加。
-
     panel_info 可选: {"endgame_name": str, "scores": [...], "winner_color": ...}
     返回: (frame_paths, frame_durations)
     """
@@ -600,10 +558,12 @@ def render_animated_frames(segments: List[Segment], initial_fen: str,
         fnum += 1
 
     # 初始静态展示帧
-    init_info = _make_frame_info(panel_info, 0, total, history, 0.0,
-                                  white_captured, black_captured,
-                                  captured_white_list, captured_black_list,
-                                  current_phase="")
+    init_info = _make_frame_info(
+        panel_info, 0, total, history, 0.0,
+        white_captured, black_captured,
+        captured_white_list, captured_black_list,
+        current_phase=""
+    )
     _save(render_frame(board, info=init_info), INTRO_SEC)
     global_frame_idx += 1
 
@@ -625,10 +585,12 @@ def render_animated_frames(segments: List[Segment], initial_fen: str,
         if not node_moves:
             is_mate = board.is_checkmate()
             score = _safe_score(panel_info, move_num, total)
-            info = _make_frame_info(panel_info, move_num, total, history, score,
-                                     white_captured, black_captured,
-                                     captured_white_list, captured_black_list,
-                                     current_phase=seg_phase)
+            info = _make_frame_info(
+                panel_info, move_num, total, history, score,
+                white_captured, black_captured,
+                captured_white_list, captured_black_list,
+                current_phase=seg_phase
+            )
             # 无走法段不叠加阶段标签（开场白/总结词的 phase 为空或不变）
             img = render_frame(board, info=info, is_mate=is_mate)
             _save(img, seg_target)
@@ -694,10 +656,12 @@ def render_animated_frames(segments: List[Segment], initial_fen: str,
 
             move_num += 1
             score = _safe_score(panel_info, move_num - 1, total)
-            frame_info = _make_frame_info(panel_info, move_num, total, history, score,
-                                           white_captured, black_captured,
-                                           captured_white_list, captured_black_list,
-                                           current_phase=seg_phase)
+            frame_info = _make_frame_info(
+                panel_info, move_num, total, history, score,
+                white_captured, black_captured,
+                captured_white_list, captured_black_list,
+                current_phase=seg_phase
+            )
 
             sub_colors = _SUBSTEP_COLORS[sub_idx % len(_SUBSTEP_COLORS)]
 
@@ -734,7 +698,6 @@ def render_animated_frames(segments: List[Segment], initial_fen: str,
     Logger.success(f"动画渲染完成: {len(frame_paths)} 帧, {sum(durations):.1f}s")
     return frame_paths, durations
 
-
 # ---- 辅助函数 ----
 
 def _safe_score(panel_info, idx, total) -> Optional[float]:
@@ -747,13 +710,14 @@ def _safe_score(panel_info, idx, total) -> Optional[float]:
         return scores[idx]
     return None
 
-
-def _make_frame_info(panel_info: Optional[dict], move_num: int, total: int,
-                      history: list, score: Optional[float],
-                      white_captured: int = 0, black_captured: int = 0,
-                      captured_white: Optional[list] = None,
-                      captured_black: Optional[list] = None,
-                      current_phase: str = "") -> Optional[dict]:
+def _make_frame_info(
+    panel_info: Optional[dict], move_num: int, total: int,
+    history: list, score: Optional[float],
+    white_captured: int = 0, black_captured: int = 0,
+    captured_white: Optional[list] = None,
+    captured_black: Optional[list] = None,
+    current_phase: str = ""
+    ) -> Optional[dict]:
     """构建帧级信息字典（供 HUD 叠加层使用）"""
     if panel_info is None:
         return None

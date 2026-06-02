@@ -28,6 +28,15 @@ PIECE_VALUES = {
     chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
 }
 
+# 棋子类型 → 中文名
+PIECE_CN = {
+    chess.KING: "王", chess.QUEEN: "后", chess.ROOK: "车",
+    chess.BISHOP: "象", chess.KNIGHT: "马", chess.PAWN: "兵",
+}
+
+ALLOWED_PACING = {"fast", "normal", "slow", "pause_before", "pause_after"}
+ALLOWED_ARROW_COLORS = {"red", "green", "blue", "yellow"}
+
 class Logger:
     @staticmethod
     def _ts():
@@ -125,9 +134,6 @@ class GeneratedCommentary:
     retries_total: int = 0
     fallback_used: bool = False
 
-ALLOWED_PACING = {"fast", "normal", "slow", "pause_before", "pause_after"}
-ALLOWED_ARROW_COLORS = {"red", "green", "blue", "yellow"}
-
 def is_valid_square_name(square: str) -> bool:
     if not isinstance(square, str) or len(square) != 2:
         return False
@@ -141,3 +147,6 @@ def resolve_path(path: str) -> str:
     if not path or os.path.isabs(path):
         return path
     return os.path.normpath(os.path.join(PROJECT_ROOT, path))
+
+def piece_cn(piece_type) -> str:
+    return PIECE_CN.get(piece_type, "子")

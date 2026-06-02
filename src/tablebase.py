@@ -92,13 +92,6 @@ class TablebaseSolver:
         self._gaviota_available = False
         self._opened = False
 
-    def is_available(self, board: chess.Board) -> bool:
-        if not self._opened:
-            return False
-        if self._gaviota_available and len(board.piece_map()) <= 5:
-            return self._try_probe_any(board) is not None
-        return False
-
     def probe_wdl(self, board: chess.Board) -> Optional[int]:
         if not self._opened:
             return None
@@ -114,32 +107,6 @@ class TablebaseSolver:
                     return 2 if result > 0 else (-2 if result < 0 else 0)
             except Exception:
                 pass
-        return None
-
-    def probe_dtm(self, board: chess.Board) -> Optional[int]:
-        if not self._opened:
-            return None
-        if self._gaviota_available:
-            try:
-                return self._gaviota.probe_dtm(board)
-            except Exception:
-                pass
-        return None
-
-    def probe_dtz(self, board: chess.Board) -> Optional[int]:
-        if not self._opened:
-            return None
-        if self._syzygy_available:
-            try:
-                return self._syzygy.probe_dtz(board)
-            except (KeyError, chess.syzygy.MissingTableError):
-                pass
-        return None
-
-    def _try_probe_any(self, board: chess.Board) -> Optional[int]:
-        result = self.probe_wdl(board)
-        if result is not None:
-            return result
         return None
 
     def _best_move_syzygy(self, board: chess.Board) -> Optional[Tuple[chess.Move, int, int]]:
@@ -244,19 +211,6 @@ class TablebaseSolver:
                 continue
         if best_move is not None:
             return (best_move, best_wdl, -best_dtm)
-        return None
-
-    def best_move(self, board: chess.Board) -> Optional[chess.Move]:
-        if not self._opened:
-            return None
-        if self._gaviota_available and len(board.piece_map()) <= 5:
-            result = self._best_move_gaviota(board)
-            if result:
-                return result[0]
-        if self._syzygy_available:
-            result = self._best_move_syzygy(board)
-            if result:
-                return result[0]
         return None
 
     def solve(self, board: chess.Board) -> List[AnalyzedMove]:

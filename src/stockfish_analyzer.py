@@ -164,7 +164,6 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
         # ---- 阶段 2：逐步求解（阶段化时间 + 将杀进度追踪） ----
         fast_moves: List[AnalyzedMove] = []
         fast_boards: List[chess.Board] = []
-        fast_piece_counts: List[int] = []
         engine_died = False
 
         current_mate: Optional[int] = None
@@ -175,7 +174,6 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
             if temp.is_game_over():
                 break
             fast_boards.append(temp.copy())
-            fast_piece_counts.append(current_piece_count)
 
             board_hash = (
                 temp.board_fen(),

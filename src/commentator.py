@@ -667,66 +667,14 @@ def _validate_storyboard_chunk(data: dict, chunk_nodes: list) -> tuple:
     if len(segments) != len(chunk_nodes):
         return False, f"segments数量{len(segments)}与节点数{len(chunk_nodes)}不一致"
 
+    # 逐段校验复用 _validate_single_segment（单一事实来源），整块通过才算通过。
+    # 错误信息加 segment[i] 前缀，保留 _build_retry_prompt 依赖的关键词（宣称/过短等）。
     for i, seg in enumerate(segments):
         if not isinstance(seg, dict):
             return False, f"第{i+1}个segment不是对象"
-        node = chunk_nodes[i]
-
-        seg_id = seg.get("id")
-        if not isinstance(seg_id, int):
-            return False, f"segment[{i}]的id无效"
-        if seg_id != node["id"]:
-            seg["id"] = node["id"]  # 自动修正，不阻塞
-
-        voiceover = seg.get("voiceover")
-        if not isinstance(voiceover, str) or not voiceover.strip():
-            return False, f"segment[{i}]的voiceover为空"
-        min_len = 28 if node.get("summary_only") else MIN_VOICEOVER_LEN
-        if len(voiceover.strip()) < min_len:
-            return False, f"segment[{i}]的voiceover过短({len(voiceover.strip())}<{min_len})"
-
-        pacing = seg.get("pacing", "normal")
-        pacing = str(pacing).strip().lower()
-        if pacing not in ALLOWED_PACING:
-            return False, f"segment[{i}]的pacing='{pacing}'不合法"
-
-        sub_endgame = seg.get("sub_endgame")
-        if not isinstance(sub_endgame, str) or not sub_endgame.strip():
-            return False, f"segment[{i}]的sub_endgame为空"
-
-        text = voiceover.strip()
-        _CHECKMATE_BANNED = ("将杀", "绝杀", "杀王", "无路可走", "无路可逃",
-                             "死局", "终局已定", "锁定胜局")
-        if node.get("is_checkmate_after") is False and any(word in text for word in _CHECKMATE_BANNED):
-            return False, f"segment[{i}]错误宣称将杀"
-
-        allows_check_word = node.get("is_check_after") or node.get("has_check_in_node")
-        if not allows_check_word and "将军" in text:
-            return False, f"segment[{i}]错误宣称将军"
-
-        king_moved = node.get("king_moved", False)
-        checking_types = node.get("checking_piece_types", [])
-        king_claims_check = king_moved and chess.KING not in checking_types
-        if king_claims_check and any(word in text for word in ("王将军", "王形成杀", "王绝杀", "王直接", "致命将军")):
-            return False, f"segment[{i}]错误宣称王将军——国际象棋中王不能直接将军"
-
-        if not node.get("is_capture_node") and any(word in text for word in ("吃掉", "兑掉", "吞掉")):
-            return False, f"segment[{i}]错误宣称吃子"
-        if node.get("is_game_over_after") and node.get("legal_reply_count_after", 1) == 0:
-            if any(word in text for word in ("黑方应", "白方应", "下一步", "随后再")):
-                return False, f"segment[{i}]在终局后继续虚构后续走法"
-
-        _NEUTRALITY_BANNED = ("双方等待", "局势平衡", "互相试探", "积蓄力量", "均势", "双方都在")
-        if any(word in text for word in _NEUTRALITY_BANNED):
-            return False, f"segment[{i}]含有均势叙事词——这是必胜残局变现，必须从强方主导推进角度写"
-
-        if node.get("claim_level", "positioning") != "terminal" and node.get("is_last_node"):
-            if not any(word in text for word in ("胜负已定", "将杀", "形成将杀", "完成转化", "胜势兑现", "终局形成")):
-                pass
-
-        if node.get("summary_only"):
-            if len(text) > 120:
-                return False, f"segment[{i}]概括模式节点过长({len(text)}>120)，应只用1句话"
+        ok, err = _validate_single_segment(seg, chunk_nodes[i])
+        if not ok:
+            return False, f"segment[{i}]{err}"
 
     return True, ""
 
@@ -983,13 +931,12 @@ def _generate_chunk_fallback(prompt: str) -> str:
     try:
         backend = create_backend_from_env()
         return _strip_thinking(backend.generate(prompt))
-    except Exception as e:
+    except Exception:
         pass
     return ""
 
 
 def _repair_failed_segments(backend, segments: list, chunk_nodes: list) -> Optional[dict]:
-    node_by_id = {node["id"]: node for node in chunk_nodes}
     repaired_any = False
     for i, seg in enumerate(segments):
         node = chunk_nodes[i]
@@ -1008,7 +955,6 @@ def _repair_failed_segments(backend, segments: list, chunk_nodes: list) -> Optio
         prompt = _build_segment_repair_prompt(node, err)
         raw = backend.generate(prompt, grammar=_SEGMENT_GRAMMAR)
         if not raw:
-            pass
             continue
         repaired_seg = _parse_single_segment(raw)
         if repaired_seg is None:
@@ -1560,7 +1506,7 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
             if isinstance(segments, list) and len(segments) == len(chunk_nodes):
                 repaired = _repair_failed_segments(backend, segments, chunk_nodes)
                 if repaired is not None:
-                    repaired_ok, repaired_err = _validate_storyboard_chunk(repaired, chunk_nodes)
+                    repaired_ok, _ = _validate_storyboard_chunk(repaired, chunk_nodes)
                     if repaired_ok:
                         chunk_segments = _finalize_chunk_segments(repaired, chunk_nodes)
                         all_segments.extend(chunk_segments)

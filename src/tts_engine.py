@@ -1,46 +1,35 @@
-import os
-import re
-import time
+from src.common import Segment, Logger
 from typing import List, Optional
 from pydub import AudioSegment
-from src.common import Segment, Logger
+import torch
+import time
+import os
+import re
+import gc
 
 AUDIO_DIR = os.path.join("output", "audio")
-DEFAULT_VOICE = os.path.join("assets", "voices", "ref_male_pro.wav")
-# 持久化的 ChatTTS 说话人向量，保证跨运行音色一致（首次随机采样后写盘复用）
+# 持久化的ChatTTS说话人向量，保证跨运行音色一致
 SPEAKER_FILE = os.path.join("assets", "voices", "chattts_speaker.txt")
-# 全片统一目标响度（dBFS），消除 ChatTTS 逐段幅度不一致导致的忽轻忽响
+# 全片统一目标响度，消除ChatTTS逐段幅度不一致导致的忽轻忽响
 TARGET_DBFS = -20.0
-
-PACING_MAP = {
-    "slow":          ("calm", 0.85),
-    "normal":        ("default", 1.0),
-    "fast":          ("default", 1.15),
-    "pause_before":  ("excited", 0.9),
-    "pause_after":   ("calm", 0.9),
-}
 
 # ChatTTS 模型缓存
 _chattts: Optional[object] = None
 _chattts_spk_emb: Optional[str] = None
 _CHATTTS_SAMPLE_RATE = 24000
 
-
 def _free_gpu_before_tts():
-    """ChatTTS 按"加载时空闲显存"选设备(阈值约2GB)，加载前主动清一次 torch 缓存，
-    避免上游 LLM 残留显存导致 ChatTTS 静默回退 CPU（变慢且音质不稳）。"""
-    try:
-        import torch
-        import gc
-        if torch.cuda.is_available():
-            gc.collect()
-            torch.cuda.empty_cache()
-            free, total = torch.cuda.mem_get_info()
-            free_mb = free / (1024 * 1024)
-            if free_mb < 2200:
-                Logger.warn("GPU 显存不足，ChatTTS 可能回退 CPU")
-    except Exception:
-        pass
+    """
+    ChatTTS按"加载时空闲显存"选设备(阈值约2GB)，加载前主动清一次torch缓存
+    避免上游LLM残留显存导致ChatTTS静默回退CPU
+    """
+    if torch.cuda.is_available():
+        gc.collect()
+        torch.cuda.empty_cache()
+        free, total = torch.cuda.mem_get_info()
+        free_mb = free / (1024 * 1024)
+        if free_mb < 2200:
+            Logger.warn("GPU显存不足，ChatTTS回退CPU")
 
 
 def _init_chattts():
@@ -67,17 +56,6 @@ def _init_chattts():
         return False
 
 
-def _log_chattts_device(chat):
-    """打印 ChatTTS 实际运行设备，便于确认是否在 GPU。"""
-    try:
-        dev = getattr(chat, "device", None)
-        Logger.info(f"ChatTTS 运行设备: {dev}")
-        if dev is not None and "cuda" not in str(dev):
-            Logger.warn("ChatTTS 未运行在 GPU 上，合成会较慢。检查 torch 是否为 CUDA 版及显存占用。")
-    except Exception:
-        pass
-
-
 def _load_or_create_speaker(chat) -> str:
     """加载持久化的说话人向量；不存在则随机采样一次并写盘，保证跨运行音色稳定。"""
     try:
@@ -94,7 +72,6 @@ def _load_or_create_speaker(chat) -> str:
         os.makedirs(os.path.dirname(SPEAKER_FILE), exist_ok=True)
         with open(SPEAKER_FILE, "w", encoding="utf-8") as f:
             f.write(spk)
-        pass
     except Exception:
         pass
     return spk
@@ -291,7 +268,6 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
     if _init_chattts():
         chattts_ok = _synthesize_chattts(segments, speed)
         # 回填时间戳并检查是否有失败的段
-        all_good = chattts_ok
         if chattts_ok:
             time_cursor = 0.0
             fallback_needed = []
