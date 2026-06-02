@@ -56,20 +56,23 @@ class TablebaseSolver:
     def open(self):
         if self._opened:
             return
+        loaded = []
         if self.syzygy_dir:
             try:
                 self._syzygy = chess.syzygy.open_tablebase(self.syzygy_dir)
-                Logger.info(f"Syzygy 表库已加载: {self.syzygy_dir}")
                 self._syzygy_available = True
-            except Exception as e:
-                Logger.warn(f"Syzygy 加载失败: {e}")
+                loaded.append("Syzygy")
+            except Exception:
+                pass
         if self.gaviota_dir:
             try:
                 self._gaviota = chess.gaviota.open_tablebase(self.gaviota_dir)
-                Logger.info(f"Gaviota 表库已加载: {self.gaviota_dir}")
                 self._gaviota_available = True
-            except Exception as e:
-                Logger.warn(f"Gaviota 加载失败: {e}")
+                loaded.append("Gaviota")
+            except Exception:
+                pass
+        if loaded:
+            Logger.info(f"表库已加载: {'+'.join(loaded)}")
         self._opened = True
 
     def close(self):

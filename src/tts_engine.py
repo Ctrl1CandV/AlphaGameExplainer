@@ -37,9 +37,8 @@ def _free_gpu_before_tts():
             torch.cuda.empty_cache()
             free, total = torch.cuda.mem_get_info()
             free_mb = free / (1024 * 1024)
-            Logger.info(f"TTS 前 GPU 空闲显存: {free_mb:.0f} MB / {total/1024/1024:.0f} MB")
             if free_mb < 2200:
-                Logger.warn("GPU 空闲显存不足约2GB，ChatTTS 可能回退 CPU（慢）。")
+                Logger.warn("GPU 显存不足，ChatTTS 可能回退 CPU")
     except Exception:
         pass
 
@@ -61,7 +60,6 @@ def _init_chattts():
             return False
         _chattts = chat
         _chattts_spk_emb = _load_or_create_speaker(chat)
-        _log_chattts_device(chat)
         Logger.success("ChatTTS 模型就绪")
         return True
     except Exception as e:
@@ -87,19 +85,18 @@ def _load_or_create_speaker(chat) -> str:
             with open(SPEAKER_FILE, "r", encoding="utf-8") as f:
                 spk = f.read().strip()
             if spk:
-                Logger.info("复用已保存的 ChatTTS 说话人音色")
                 return spk
-    except Exception as e:
-        Logger.warn(f"读取说话人文件失败，将重新采样: {e}")
+    except Exception:
+        pass
 
     spk = chat.sample_random_speaker()
     try:
         os.makedirs(os.path.dirname(SPEAKER_FILE), exist_ok=True)
         with open(SPEAKER_FILE, "w", encoding="utf-8") as f:
             f.write(spk)
-        Logger.info(f"已保存 ChatTTS 说话人音色到 {SPEAKER_FILE}")
-    except Exception as e:
-        Logger.warn(f"保存说话人文件失败（本次仍可用）: {e}")
+        pass
+    except Exception:
+        pass
     return spk
 
 
@@ -220,7 +217,7 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
     if not batch_texts:
         return True
 
-    Logger.info(f"ChatTTS 合成 ({len(batch_texts)} 段)...")
+    Logger.info(f"语音合成中 ({len(batch_texts)} 段)...")
     t_start = time.time()
 
     success_count = 0
@@ -228,7 +225,6 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
         path = os.path.abspath(os.path.join(AUDIO_DIR, f"seg_{seg.move_idx:03d}.wav"))
         seg.audio_path = path
 
-        # pacing → 参数映射（收紧 temperature/top_K，降低发糊与方差）
         pacing_params = {
             "slow":     {"temperature": 0.1, "top_P": 0.5, "top_K": 15},
             "normal":   {"temperature": 0.2, "top_P": 0.6, "top_K": 18},
@@ -238,8 +234,6 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
         }
         pp = pacing_params.get(seg.pacing, pacing_params["normal"])
         
-        # 先把棋盘坐标/棋谱记号转中文或剔除（ChatTTS 念不出 a-h/0-9，会夹音碎读），
-        # 再加语速/停顿标记。只影响喂 TTS 的文本，seg.text(字幕)保持原样。
         speech_text = _clean_text_for_speech(text)
         processed_text = _preprocess_text_for_chattts(speech_text, seg.pacing)
 
@@ -252,29 +246,21 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
             )
             wavs = chat.infer([processed_text], params_infer_code=params, skip_refine_text=True)
             if not wavs or len(wavs) == 0 or len(wavs[0]) == 0:
-                Logger.warn(f"  ChatTTS seg_{seg.move_idx:03d}: 空输出")
                 continue
 
             wav = np.array(wavs[0])
             sf.write(path, wav, _CHATTTS_SAMPLE_RATE)
-
-            # 音量归一化到统一响度，消除逐段忽轻忽响
             _normalize_audio(path)
 
-            # 回填时长
             audio = AudioSegment.from_wav(path)
             seg.duration_s = audio.duration_seconds + 0.3
             success_count += 1
-            if (i + 1) <= 2 or (i + 1) % 5 == 0:
-                Logger.info(f"  ChatTTS [{i+1}/{len(batch_texts)}] seg_{seg.move_idx:03d} ({seg.duration_s:.1f}s)")
 
-        except Exception as e:
-            Logger.warn(f"  ChatTTS seg_{seg.move_idx:03d} 失败: {e}")
-            # 标记此段需要回退
+        except Exception:
             seg.audio_path = ""
 
     elapsed = time.time() - t_start
-    Logger.success(f"ChatTTS 完成: {success_count}/{len(batch_texts)} 段, {elapsed:.1f}s")
+    Logger.success(f"语音合成完成: {success_count}/{len(batch_texts)} 段, {elapsed:.1f}s")
     return success_count > 0
 
 
@@ -315,11 +301,7 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
                     fallback_needed.append(seg)
 
             if not fallback_needed:
-                Logger.success(f"语音合成完成: {len(segments)} 段 (ChatTTS), 总时长 {time_cursor:.1f}s")
                 return segments
-
-            # 有部分段失败，回退处理失败的段
-            Logger.info(f"ChatTTS 部分失败，回退 {len(fallback_needed)} 段到 pyttsx3...")
             fb_engine = _init_fallback_engine()
             if fb_engine:
                 for seg in fallback_needed:
@@ -335,10 +317,7 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
             for seg in segments:
                 seg.start_time = time_cursor
                 time_cursor += seg.duration_s
-            Logger.success(f"语音合成完成: {len(segments)} 段 (ChatTTS+pyttsx3), 总时长 {time_cursor:.1f}s")
             return segments
-
-    Logger.info("ChatTTS 不可用，回退到 pyttsx3...")
 
     fallback_engine = _init_fallback_engine()
 
@@ -360,7 +339,6 @@ def synthesize(segments: List[Segment], voice_prompt: str = None,
         seg.start_time = time_cursor
         time_cursor += seg.duration_s
 
-    Logger.success(f"语音合成完成: {len(segments)} 段 (pyttsx3), 总时长 {time_cursor:.1f}s")
     return segments
 
 

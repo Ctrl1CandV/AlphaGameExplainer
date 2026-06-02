@@ -7,85 +7,201 @@ from moviepy import (
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from src.common import Logger
-from src.board_renderer import IMG_W, IMG_H, COLOR_BG, INTRO_SEC, FPS as RENDER_FPS, render_frame, MARGIN_LEFT, MARGIN_TOP, BOARD_SIZE
+from src.board_renderer import (
+    CANVAS_W, CANVAS_H, BOARD_LEFT, BOARD_TOP, BOARD_SIZE,
+    COLOR_BG, INTRO_SEC, FPS as RENDER_FPS, render_frame,
+)
 import chess
 
-TITLE_SEC = 2.5
-FPS = RENDER_FPS              # 与渲染帧率统一，避免重采样导致的卡顿
+TITLE_SEC = 3.5                 # 片头动画总时长
+FPS = RENDER_FPS                # 与渲染帧率统一
 SUBTITLE_HEIGHT = 84
 SUBTITLE_MARGIN = 18
-# 视频开头静音 = 片头标题卡 + 初始局面静态展示，二者都没有解说音频
+# 视频开头静音 = 片头标题卡 + 初始局面静态展示
 LEAD_SILENCE = TITLE_SEC + INTRO_SEC
 
 
-def _make_title_card(endgame_name: str, width: int, height: int, initial_fen: str = "") -> str:
-    """生成片头标题卡，可附带棋盘缩略图"""
-    img = Image.new("RGB", (width, height), COLOR_BG)
-    draw = ImageDraw.Draw(img)
+# ============================================================
+#  片头动画
+# ============================================================
 
-    # 渐变背景
-    for y in range(height):
-        r = int(30 + (y / height) * 20)
-        g = int(30 + (y / height) * 15)
-        b = int(30 + (y / height) * 25)
-        draw.line([(0, y), (width, y)], fill=(r, g, b))
+def _make_title_frames(endgame_name: str, width: int, height: int,
+                        initial_fen: str = "") -> List[Image.Image]:
+    """生成片头动画帧序列（~3.5s × FPS 帧）。
 
+    动画时间轴：
+      0.0-0.8s:  背景从纯黑渐变显现
+      0.5-1.2s:  棋盘缩略图 105% → 100%（微小 Ken Burns 效果）
+      1.0-2.0s:  标题从下方 30px 滑入
+      1.5-2.5s:  副标题从下方 20px 滑入
+      2.0-3.0s:  装饰线从左到右画出
+      3.0-3.5s:  底部文字 fade in
+    """
+    total = round(TITLE_SEC * FPS)
+    frames: List[Image.Image] = []
+
+    # 预渲染棋盘缩略图
+    thumb = None
+    thumb_size = 0
+    if initial_fen:
+        try:
+            b = chess.Board(initial_fen)
+            raw = render_frame(b)
+            cropped = raw.crop(
+                (BOARD_LEFT, BOARD_TOP, BOARD_LEFT + BOARD_SIZE, BOARD_TOP + BOARD_SIZE))
+            thumb_size = min(height - 80, 280)
+            thumb = cropped.resize((thumb_size, thumb_size))
+        except Exception:
+            pass
+
+    # 预加载字体
     try:
         font_big = ImageFont.truetype("simhei.ttf", 48)
         font_small = ImageFont.truetype("simhei.ttf", 24)
         font_tiny = ImageFont.truetype("simhei.ttf", 16)
     except Exception:
         font_big = ImageFont.load_default()
-        font_small = ImageFont.load_default()
-        font_tiny = ImageFont.load_default()
+        font_small = font_big
+        font_tiny = font_big
 
-    # 左侧棋盘缩略图
+    # 静态布局计算
     text_x = width // 2
-    if initial_fen:
-        try:
-            b = chess.Board(initial_fen)
-            thumb = render_frame(b)
-            # 裁剪到纯棋盘区域
-            thumb = thumb.crop((
-                MARGIN_LEFT, MARGIN_TOP,
-                MARGIN_LEFT + BOARD_SIZE, MARGIN_TOP + BOARD_SIZE,
-            ))
-            thumb_size = min(height - 80, 300)
-            thumb = thumb.resize((thumb_size, thumb_size))
-            thumb_x = (width // 2 - thumb_size) // 2
-            thumb_y = (height - thumb_size) // 2
-            # 缩略图投影
-            shadow = Image.new("RGBA", (thumb_size + 12, thumb_size + 12), (0, 0, 0, 80))
-            img.paste(shadow, (thumb_x + 5, thumb_y + 5), shadow)
-            img.paste(thumb.convert("RGB"), (thumb_x, thumb_y))
-            text_x = width // 2 + thumb_size // 2
-        except Exception:
-            pass
+    if thumb:
+        text_x = width // 2 + thumb_size // 2
 
-    # 标题
-    title_y = height // 2 - 50
-    draw.text((text_x, title_y), "AI 讲棋",
-              fill=(255, 215, 0), font=font_big, anchor="mm")
+    for i in range(total):
+        t = i / (total - 1) if total > 1 else 0.0
+        img = Image.new("RGB", (width, height), (10, 10, 10))
+        draw = ImageDraw.Draw(img)
 
-    # 副标题
-    draw.text((text_x, title_y + 50), endgame_name,
-              fill=(220, 220, 220), font=font_small, anchor="mm")
+        # 背景渐变（0.0-0.8s fade in）
+        bg_alpha = min(1.0, t / 0.25)
+        for y in range(height):
+            r = int(30 * bg_alpha + (y / height) * 15 * bg_alpha)
+            g = int(30 * bg_alpha + (y / height) * 10 * bg_alpha)
+            b = int(30 * bg_alpha + (y / height) * 20 * bg_alpha)
+            draw.line([(0, y), (width, y)], fill=(r, g, b))
 
-    # 装饰线
-    line_y = title_y + 80
-    line_width = 200
-    draw.line([(text_x - line_width // 2, line_y),
-               (text_x + line_width // 2, line_y)],
-              fill=(100, 100, 100), width=2)
+        # 棋盘缩略图（0.5-1.2s: 105% → 100%）
+        if thumb:
+            thumb_t_start = 0.15
+            thumb_t_end = 0.35
+            if t >= thumb_t_start:
+                tt = min(1.0, (t - thumb_t_start) / (thumb_t_end - thumb_t_start))
+                scale = 1.05 - 0.05 * tt  # 105% → 100%
+                sw = int(thumb_size * scale)
+                sh = int(thumb_size * scale)
+                scaled_thumb = thumb.resize((sw, sh))
+                tx = (width // 2 - thumb_size) // 2 + (thumb_size - sw) // 2
+                ty = (height - thumb_size) // 2 + (thumb_size - sh) // 2
+                # 缩略图投影
+                shadow = Image.new("RGBA", (sw + 10, sh + 10), (0, 0, 0, 80))
+                img.paste(shadow, (tx + 4, ty + 4), shadow)
+                img.paste(scaled_thumb.convert("RGB"), (tx, ty))
 
-    # 底部信息
-    draw.text((width // 2, height - 40), "国际象棋残局教学",
-              fill=(150, 150, 150), font=font_tiny, anchor="mm")
+        # 标题（1.0-2.0s: 从下方滑入）
+        title_t = (t - 0.28) / 0.28
+        title_y_base = height // 2 - 50
+        if title_t < 0:
+            title_y = title_y_base + 40
+            title_alpha = 0
+        elif title_t < 1.0:
+            title_y = title_y_base + int(40 * (1 - title_t))
+            title_alpha = min(255, int(255 * title_t))
+        else:
+            title_y = title_y_base
+            title_alpha = 255
 
-    path = os.path.join("output", "frames", "title_card.png")
-    img.save(path)
-    return path
+        if title_alpha > 0:
+            # 文字阴影
+            draw.text((text_x + 1, title_y + 1), "AI 讲棋",
+                      fill=(0, 0, 0, title_alpha), font=font_big, anchor="mm")
+            draw.text((text_x, title_y), "AI 讲棋",
+                      fill=(255, 215, 0, title_alpha), font=font_big, anchor="mm")
 
+        # 副标题（1.5-2.5s: 从下方滑入）
+        sub_t = (t - 0.42) / 0.28
+        sub_y_base = height // 2 + 6
+        if sub_t < 0:
+            sub_y = sub_y_base + 30
+            sub_alpha = 0
+        elif sub_t < 1.0:
+            sub_y = sub_y_base + int(30 * (1 - sub_t))
+            sub_alpha = min(255, int(255 * sub_t))
+        else:
+            sub_y = sub_y_base
+            sub_alpha = 255
+
+        if sub_alpha > 0:
+            draw.text((text_x, sub_y), endgame_name,
+                      fill=(220, 220, 220, sub_alpha), font=font_small, anchor="mm")
+
+        # 装饰线（2.0-3.0s: 从左到右画出）
+        line_t = (t - 0.57) / 0.28
+        if 0 < line_t <= 1.0:
+            line_y = height // 2 + 36
+            line_w = 200
+            line_x0 = text_x - line_w // 2
+            line_x1 = int(line_x0 + line_w * line_t)
+            draw.line([(line_x0, line_y), (line_x1, line_y)],
+                      fill=(100, 100, 100), width=2)
+
+        # 底部文字（3.0-3.5s: fade in）
+        foot_t = (t - 0.85) / 0.15
+        foot_alpha = max(0, min(255, int(255 * foot_t)))
+        if foot_alpha > 0:
+            draw.text((width // 2, height - 40), "国际象棋残局教学",
+                      fill=(150, 150, 150, foot_alpha), font=font_tiny, anchor="mm")
+
+        frames.append(img)
+
+    return frames
+
+
+# ============================================================
+#  片尾画面
+# ============================================================
+
+def _make_outro_frames(last_frame: Image.Image, width: int, height: int) -> List[Image.Image]:
+    """生成片尾帧序列（~2.5s）：画面渐暗 + "感谢观看" fade in"""
+    outro_sec = 2.5
+    total = round(outro_sec * FPS)
+    frames: List[Image.Image] = []
+
+    try:
+        font = ImageFont.truetype("simhei.ttf", 36)
+    except Exception:
+        font = ImageFont.load_default()
+
+    for i in range(total):
+        t = i / (total - 1) if total > 1 else 0.0
+        frame = last_frame.copy()
+
+        # 画面渐暗（0 → 0.85 半透明黑叠加，模拟暗角效果）
+        dark_alpha = min(0.85, t * 2.0)
+        if dark_alpha > 0.01:
+            overlay = Image.new("RGBA", (width, height),
+                                (0, 0, 0, int(255 * dark_alpha)))
+            frame.paste(overlay, (0, 0), overlay)
+
+        # "感谢观看"（1.0-2.0s fade in）
+        text_t = (t - 0.35) / 0.25
+        text_alpha = max(0, min(255, int(255 * text_t)))
+        if text_alpha > 0:
+            draw = ImageDraw.Draw(frame)
+            draw.text((width // 2 + 1, height // 2 + 1), "感谢观看",
+                      fill=(0, 0, 0, text_alpha), font=font, anchor="mm")
+            draw.text((width // 2, height // 2), "感谢观看",
+                      fill=(255, 255, 255, text_alpha), font=font, anchor="mm")
+
+        frames.append(frame)
+
+    return frames
+
+
+# ============================================================
+#  音频 & 字幕 辅助
+# ============================================================
 
 def _make_silence(duration: float, output_path: str) -> str:
     """生成静音片段"""
@@ -96,46 +212,73 @@ def _make_silence(duration: float, output_path: str) -> str:
 
 
 def _create_subtitle_background(width: int, height: int) -> str:
-    """创建半透明字幕背景"""
-    img = Image.new("RGBA", (width, height), (0, 0, 0, 180))
+    """创建渐变字幕背景——从底部全黑向上渐隐"""
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    for y in range(height):
+        alpha = int(190 * max(0, 1 - y / height * 1.3))
+        if alpha > 0:
+            draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
     path = os.path.join("output", "frames", "subtitle_bg.png")
     img.save(path)
     return path
 
 
+# ============================================================
+#  主合成函数
+# ============================================================
+
 def compose(frame_paths: List[str], frame_durations: List[float],
             segments, srt_path: str, endgame_name: str = "",
             fps: int = FPS, cues=None, initial_fen: str = "") -> str:
-    """
-    合成最终视频。
-    initial_fen: 初始局面FEN，用于片头棋盘缩略图
+    """合成最终视频。包含片头动画 → 渲染帧 → 片尾，并叠加字幕。
+
+    initial_fen: 初始局面 FEN，用于片头棋盘缩略图
     """
     Logger.info("合成视频...")
 
     frames_dir = os.path.join("output", "frames")
     os.makedirs(frames_dir, exist_ok=True)
 
-    # 检测帧尺寸
-    frame_w, frame_h = IMG_W, IMG_H
+    frame_w, frame_h = CANVAS_W, CANVAS_H
+
+    # ---- 片头动画帧 ----
+    title_frames = _make_title_frames(
+        endgame_name or "残局讲解", frame_w, frame_h, initial_fen)
+    title_durations = [1.0 / fps] * len(title_frames)
+    Logger.info(f"片头动画: {len(title_frames)} 帧, {TITLE_SEC:.1f}s")
+
+    # ---- 片尾帧 ----
+    outro_frames: List[Image.Image] = []
     if frame_paths:
         try:
-            with Image.open(frame_paths[0]) as test:
-                frame_w, frame_h = test.size
-        except Exception:
-            pass
+            last_frame = Image.open(frame_paths[-1]).convert("RGB")
+            outro_frames = _make_outro_frames(last_frame, frame_w, frame_h)
+        except Exception as e:
+            Logger.warn(f"片尾生成失败: {e}")
+    outro_durations = [1.0 / fps] * len(outro_frames)
+    if outro_frames:
+        Logger.info(f"片尾: {len(outro_frames)} 帧, {len(outro_frames)/fps:.1f}s")
 
-    # 片头
-    title_path = _make_title_card(endgame_name or "残局讲解", frame_w, frame_h, initial_fen)
+    # ---- 组装帧序列 ----
+    title_paths = []
+    for idx, f in enumerate(title_frames):
+        p = os.path.join(frames_dir, f"_title_{idx:04d}.png")
+        f.save(p)
+        title_paths.append(p)
 
-    # 组装帧序列：片头标题卡 + 渲染帧
-    all_frames = [title_path] + frame_paths
-    all_durations = [TITLE_SEC] + frame_durations
+    outro_paths = []
+    for idx, f in enumerate(outro_frames):
+        p = os.path.join(frames_dir, f"_outro_{idx:04d}.png")
+        f.save(p)
+        outro_paths.append(p)
+
+    all_frames = title_paths + frame_paths + outro_paths
+    all_durations = title_durations + frame_durations + outro_durations
 
     video = ImageSequenceClip(all_frames, durations=all_durations)
 
-    # 组装音频: 开头静音(标题卡+初始局面，无解说) + 逐段 TTS 音频
-    # 关键: 每段音频后补足静音，使该段音频块时长精确等于 seg.duration_s，
-    # 与帧/字幕时间轴对齐（否则 concat 无间隙会逐段累积漂移，字幕落后于音频）。
+    # ---- 组装音频 ----
     silence_path = os.path.join(frames_dir, "_silence.wav")
     _make_silence(LEAD_SILENCE, silence_path)
     audio_clips = [AudioFileClip(silence_path)]
@@ -148,7 +291,6 @@ def compose(frame_paths: List[str], frame_durations: List[float],
                 audio_clips.append(clip)
             except Exception as e:
                 Logger.warn(f"跳过音频 {seg.audio_path}: {e}")
-        # 该段目标时长（与帧/字幕一致）减去音频实际时长，差额补静音
         target = max(0.0, float(getattr(seg, "duration_s", 0.0)))
         played = clip.duration if clip is not None else 0.0
         gap = target - played
@@ -160,10 +302,10 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     if len(audio_clips) > 1:
         video = video.with_audio(concatenate_audioclips(audio_clips))
 
-    # 字幕带：固定在底部留白区（棋盘下方，不覆盖棋盘）
+    # ---- 字幕 ----
     band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
 
-    # 字体查找（回退链：simhei → msyh → 系统默认）
+    # 字体查找
     _FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
     if not os.path.exists(_FONT_PATH):
         _FONT_PATH = "C:/Windows/Fonts/msyh.ttf"
@@ -172,14 +314,12 @@ def compose(frame_paths: List[str], frame_durations: List[float],
 
     def _mk_sub(txt):
         return TextClip(
-            text=txt, font=_FONT_PATH, font_size=22, color="white",
-            stroke_color="black", stroke_width=1,
-            method="caption", size=(frame_w - 40, SUBTITLE_HEIGHT),
+            text=txt, font=_FONT_PATH, font_size=26, color="#F0EDE5",
+            stroke_color="#1a1a1a", stroke_width=1.5,
+            method="caption", size=(frame_w - 80, SUBTITLE_HEIGHT),
             text_align="center",
         )
 
-    # 优先用 cue 列表构造字幕，绕开 moviepy 脆弱的 SRT 文件解析；
-    # 列表为空（无任何字幕）时跳过字幕层，避免 SubtitlesClip 对空列表崩溃。
     if cues is None:
         try:
             from moviepy.video.tools.subtitles import file_to_subtitles
@@ -201,13 +341,19 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     else:
         Logger.warn("无有效字幕，跳过字幕层")
 
-    # 合成：视频 + 字幕背景 + 字幕
     final = CompositeVideoClip(layers)
 
     output = os.path.join("output", "analysis.mp4")
     final.write_videofile(output, codec="libx264", audio_codec="aac", fps=fps)
     final.close()
     video.close()
+
+    # 清理临时帧文件
+    for p in title_paths + outro_paths:
+        try:
+            os.remove(p)
+        except Exception:
+            pass
 
     Logger.success(f"视频已生成: {output}")
     return output

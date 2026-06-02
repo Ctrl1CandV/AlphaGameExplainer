@@ -47,8 +47,7 @@ class LlamaCppBackend(LLMBackend):
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"模型文件不存在: {self.model_path}")
 
-        Logger.info(f"加载 LlamaCpp 模型: {os.path.basename(self.model_path)}")
-        Logger.info(f"  n_gpu_layers={self.n_gpu_layers}, n_ctx={self.n_ctx}, n_batch={self.n_batch}")
+        Logger.info(f"加载 LLM 模型: {os.path.basename(self.model_path)}")
 
         from llama_cpp import Llama
 
@@ -59,7 +58,7 @@ class LlamaCppBackend(LLMBackend):
             n_batch=self.n_batch,
             verbose=self.verbose,
         )
-        Logger.success(f"LlamaCpp 模型加载完成")
+        Logger.success(f"LLM 模型就绪")
 
     def generate(self, prompt: str, grammar: str = None) -> str:
         try:
@@ -79,9 +78,10 @@ class LlamaCppBackend(LLMBackend):
             result = self._llm.create_chat_completion(
                 messages=[
                     {"role": "system", "content": (
-                        "你是国际象棋赛事解说员。解说基于节点信息的「状态」字段中的真值。"
-                        "只有「已将杀」的节点才能说将杀/绝杀。其他节点用推进性描述（压缩空间、控制关键格、驱赶对方王）。"
-                        "如果要求JSON，只输出指定字段，不自行增加字段。"
+                        "你是一位会自己看棋的国际象棋教练。你不需要被告知哪一步重要——"
+                        "你会从节点信息中的棋理事实自己判断。"
+                        "解说基于节点「状态」字段中的真值：只有「已将杀」的节点才能说将杀/绝杀，"
+                        "其他节点用推进性描述。如果要求JSON，只输出指定字段，不自行增加字段。"
                         "多个segment之间要有承接关系。不要复述提示词。"
                     )},
                     {"role": "user", "content": prompt},
@@ -93,8 +93,7 @@ class LlamaCppBackend(LLMBackend):
             )
             text = result.get("choices", [{}])[0].get("message", {}).get("content", "")
             return text.strip()
-        except Exception as e:
-            Logger.warn(f"  llama.cpp generate 异常: {type(e).__name__}: {e}")
+        except Exception:
             return ""
 
     def close(self):
@@ -105,7 +104,6 @@ class LlamaCppBackend(LLMBackend):
                 pass
             self._llm = None
             self._grammar_cache.clear()
-            Logger.info("LlamaCpp 模型已释放")
 
     def __del__(self):
         try:
@@ -125,7 +123,6 @@ def create_backend_from_env() -> LLMBackend:
 
     backend = LlamaCppBackend()
     LLM_BACKEND_CACHE[cache_key] = backend
-    Logger.info(f"LLM 后端: {backend.name}")
     return backend
 
 def release_backend():

@@ -218,6 +218,174 @@ def _compose_must_mention(facts: dict) -> List[str]:
     return out[:3]
 
 
+# ============================================================
+#  战术叙述提取器（纯 chess.Board，零引擎依赖）
+#  原则：只描述"发生了什么"和"为什么对方无法两全"，
+#  不判断"重要/不重要"，不输出坐标，全部棋理中文。
+# ============================================================
+
+
+def _material_signature(board: chess.Board, color: chess.Color) -> tuple:
+    """返回 color 方除王外的子力组成（排序后的 tuple）。"""
+    counts = {}
+    for piece in board.piece_map().values():
+        if piece.color == color and piece.piece_type != chess.KING:
+            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
+    return tuple(sorted(counts.items()))
+
+
+def _sig_name(sig: tuple) -> str:
+    """子力签名 → 中文简称，如 ((ROOK,1),) → '单后'"""
+    if not sig:
+        return "单王"
+    parts = []
+    for pt, cnt in sig:
+        name = _PIECE_CN.get(pt, "?")
+        parts.append(f"{cnt}{name}" if cnt > 1 else name)
+    return "".join(parts)
+
+
+def _extract_tactical_narrative(cs, board_before, board_after, role_meta) -> List[str]:
+    """检测本节点中需要棋理推理才能理解的战术关系。
+
+    只产出 1-3 句纯棋理中文叙述（无坐标、无评判词）。
+    失败安全：任何异常返回空列表。
+    """
+    try:
+        narratives = []
+        weak_color = role_meta.get("weak_color") if role_meta else None
+        strong_color = role_meta.get("strong_color") if role_meta else None
+
+        if not strong_color or not weak_color:
+            return []
+
+        # ---- 1. 逐着检测双重攻击 + 被迫丢子 ----
+        temp = board_before.copy()
+        for san in cs.sans:
+            try:
+                move = temp.parse_san(san)
+            except ValueError:
+                continue
+
+            mover_color = temp.turn
+            gives_check = temp.gives_check(move)
+
+            # 只有强方的着才需要分析战术结构
+            if gives_check and mover_color == strong_color:
+                # 推演后局面
+                temp2 = temp.copy()
+                temp2.push(move)
+
+                # 走子的位置是否同时攻击对方无保护的大子？
+                moved_sq = move.to_square
+                for attacked_sq in temp2.attacks(moved_sq):
+                    target = temp2.piece_at(attacked_sq)
+                    if (target is None or target.color != weak_color
+                            or target.piece_type == chess.KING
+                            or target.piece_type == chess.PAWN):
+                        continue
+
+                    # 检查这个大子是否被保护
+                    defenders = temp2.attackers(target.color, attacked_sq)
+                    if defenders:
+                        continue  # 有保护，不算双重攻击
+
+                    # 双重攻击成立。现在检查弱方的应将是否能保住它。
+                    # "保住"定义：应将后强方是否仍能无代价吃掉该子
+                    # （子仍在盘上 ∧ 仍被强方攻击 ∧ 无足够保护）。
+                    # 旧逻辑只查"子是否还在原格"，不识别子已逃走/王吃掉将军子。
+                    weak_name = "白" if weak_color == chess.WHITE else "黑"
+                    target_name = _PIECE_CN.get(target.piece_type, "子")
+                    can_save = False
+                    for reply in temp2.legal_moves:
+                        temp3 = temp2.copy()
+                        temp3.push(reply)
+                        target_piece = temp3.piece_at(attacked_sq)
+                        if target_piece is None:
+                            # 子已不在原格（逃走或被吃）→ 检查它是否在新格安全
+                            continue
+                        # 子还在原格：强方是否仍能攻击它？
+                        strong_attackers = temp3.attackers(strong_color, attacked_sq)
+                        weak_defenders = temp3.attackers(weak_color, attacked_sq)
+                        if not strong_attackers:
+                            # 强方已无法攻击该子 → 保住
+                            can_save = True
+                            break
+                        # 强方仍能攻击：检查弱方保护是否足够（子交换不亏）
+                        if len(weak_defenders) >= len(strong_attackers):
+                            can_save = True
+                            break
+
+                    if not can_save:
+                        narratives.append(
+                            f"这一着同时做了两件事：给{weak_name}王将军，同时直接攻击{weak_name}{target_name}。"
+                            f"{weak_name}方必须应将，但在所有合法的应将走法中，"
+                            f"没有一步能同时保住{weak_name}{target_name}——"
+                            f"这意味着{weak_name}{target_name}必定在下一步被吃掉。"
+                        )
+                    else:
+                        narratives.append(
+                            f"这一着同时将军并攻击{weak_name}{target_name}——一子两用，"
+                            f"对方必须应将的同时还要处理{target_name}的威胁。"
+                        )
+                    break  # 一个节点只报告一次双重攻击
+
+            temp.push(move)
+
+        # ---- 2. 检测残局类型质变 ----
+        if cs.fen_before and cs.fen_after:
+            try:
+                bf = chess.Board(cs.fen_before)
+                af = chess.Board(cs.fen_after)
+                strong_before = _material_signature(bf, strong_color)
+                strong_after = _material_signature(af, strong_color)
+                weak_before = _material_signature(bf, weak_color)
+                weak_after = _material_signature(af, weak_color)
+
+                # 子力组成变了 → 残局类型变了
+                if strong_before != strong_after or weak_before != weak_after:
+                    before_full = f"{_sig_name(strong_before)}对{_sig_name(weak_before)}"
+                    after_full = f"{_sig_name(strong_after)}对{_sig_name(weak_after)}"
+                    if before_full != after_full:
+                        # 判断是否"简化到已知必胜残局"
+                        # 只有当强方仍保留至少一车或一后时才断言必胜；
+                        # 单马/单象/双马对单王是理论和棋（不能逼杀），不能断言必胜。
+                        strong_has_heavy = any(
+                            pt in (chess.QUEEN, chess.ROOK)
+                            for pt, _ in strong_after
+                        )
+                        if not weak_after and strong_has_heavy:
+                            narratives.append(
+                                f"这一步之后，局面从「{before_full}」变为「{after_full}」——"
+                                f"残局类型发生了质变。{_sig_name(strong_after)}对单王是已知的必胜残局，"
+                                f"后续推进只是时间问题。"
+                            )
+                        elif not weak_after:
+                            narratives.append(
+                                f"这一步之后，局面从「{before_full}」变为「{after_full}」——"
+                                f"残局类型发生了质变。"
+                            )
+                        else:
+                            narratives.append(
+                                f"这一步之后，局面从「{before_full}」变为「{after_full}」——"
+                                f"残局类型发生了改变。"
+                            )
+            except Exception:
+                pass
+
+        # 去重限长
+        seen = set()
+        out = []
+        for n in narratives:
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out[:3]
+
+    except Exception:
+        return []
+
+
 def _compute_importance(facts: dict, cs_is_critical: bool) -> tuple:
     """语义重要性评分 → (level, reasons)。比旧的纯标签判定更贴近棋理。"""
     score = 0
@@ -342,6 +510,10 @@ def extract_for_node(cs, root_winner_strong: Optional[chess.Color],
         must = _compose_must_mention(facts)
         importance, reasons = _compute_importance(facts, getattr(cs, "is_critical", False))
 
+        # 战术叙述（新）：纯棋理中文，不给结论只给前提
+        tactical_narratives = _extract_tactical_narrative(
+            cs, board_before, board_after, role_meta)
+
         spatial = {}
         if facts.get("role_known") and facts.get("weak_before") is not None:
             wb, wa = facts["weak_before"], facts["weak_after"]
@@ -359,6 +531,7 @@ def extract_for_node(cs, root_winner_strong: Optional[chess.Color],
             "importance": importance,
             "importance_reasons": reasons,
             "spatial_change": spatial,
+            "tactical_narratives": tactical_narratives,
         }
     except Exception:
         # 失败安全：返回空洞察，调用方按"无洞察"处理，行为退回旧链路
@@ -368,6 +541,7 @@ def extract_for_node(cs, root_winner_strong: Optional[chess.Color],
             "importance": "medium",
             "importance_reasons": [],
             "spatial_change": {},
+            "tactical_narratives": [],
         }
 
 

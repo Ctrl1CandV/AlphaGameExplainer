@@ -45,20 +45,37 @@ def _sf_mate_try(engine, board: chess.Board) -> Optional[List[AnalyzedMove]]:
         temp.push(move)
     return result if result else None
 
-def _sf_step_fast(engine, board: chess.Board, step_time: float = PER_STEP_FAST) -> Optional[AnalyzedMove]:
+def _extract_mate_score(info: dict) -> Optional[int]:
+    """从 SF 分析结果中提取将杀步数（全着），返回正数=距将杀的全着数，None=非将杀局面"""
+    score_obj = info.get("score")
+    if score_obj is None:
+        return None
+    try:
+        relative = score_obj.relative
+        mate = relative.mate()
+        if mate is None or mate <= 0:
+            return None
+        return mate
+    except Exception:
+        return None
+
+
+def _sf_step_fast(engine, board: chess.Board, step_time: float = PER_STEP_FAST) -> tuple:
+    """返回 (AnalyzedMove, mate_score_or_None)"""
     try:
         info = engine.analyse(board, chess.engine.Limit(time=step_time))
         pv = info.get("pv", [])
+        mate_score = _extract_mate_score(info)
         if pv and pv[0] in board.legal_moves:
             return AnalyzedMove(
                 move=pv[0], score=None, candidates=[],
                 is_only_move=False, trap_san=None, source="sf",
-            )
+            ), mate_score
     except chess.engine.EngineTerminatedError:
         raise
     except Exception:
         pass
-    return None
+    return None, None
 
 def _sf_step_heavy(engine, board: chess.Board) -> Optional[AnalyzedMove]:
     try:
@@ -106,7 +123,7 @@ def _sf_fallback_move(board: chess.Board) -> AnalyzedMove:
     )
 
 def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
-              piece_count: int = 0, max_steps: int = 60,
+              piece_count: int = 0, max_steps: int = 80,
               tablebase_solver=None) -> List[AnalyzedMove]:
     max_restarts = 2
 
@@ -115,8 +132,6 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
         cfg = {"Hash": 128, "Threads": 1}
         if syzygy_path and os.path.isdir(syzygy_path):
             cfg["SyzygyPath"] = os.path.abspath(syzygy_path)
-            # 让 SF 在搜索中主动查表库（≤6子局面），把表库的精确胜负/DTZ
-            # 灌进搜索，减少逐步贪心选出的次优着、缩短拖沓的解法线。
             cfg["SyzygyProbeLimit"] = 6
         engine.configure(cfg)
         return engine
@@ -127,9 +142,7 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
         Logger.error(f"无法启动Stockfish引擎: {e}")
         return []
 
-    Logger.info(f"SF 自主搜索 (子力{piece_count})")
     restart_count = 0
-    step_log_count = 0
     tablebase_hit = tablebase_solver is not None and tablebase_solver.is_hit(board)
     if piece_count >= 6:
         fast_step_time = PER_STEP_FAST_6P
@@ -148,25 +161,42 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
             Logger.success(f"SF mate搜索命中: {len(mate_result)} 步")
             return mate_result
 
-        # ---- 阶段 2：快速求解 ----
+        # ---- 阶段 2：逐步求解（阶段化时间 + 将杀进度追踪） ----
         fast_moves: List[AnalyzedMove] = []
         fast_boards: List[chess.Board] = []
         fast_piece_counts: List[int] = []
         engine_died = False
+
+        current_mate: Optional[int] = None
+        mate_stagnation = 0
+        position_hashes: set = set()
+
         for _step in range(max_steps):
             if temp.is_game_over():
                 break
             fast_boards.append(temp.copy())
             fast_piece_counts.append(current_piece_count)
+
+            board_hash = (
+                temp.board_fen(),
+                temp.turn,
+                temp.castling_xfen(),
+                temp.ep_square,
+            )
+            if board_hash in position_hashes:
+                step_time = max(fast_step_time, PER_STEP_HEAVY)
+            else:
+                position_hashes.add(board_hash)
+                step_time = fast_step_time
+
             try:
-                am = _sf_step_fast(engine, temp, step_time=fast_step_time)
+                am, mate_score = _sf_step_fast(engine, temp, step_time=step_time)
             except chess.engine.EngineTerminatedError:
                 if restart_count >= max_restarts:
                     Logger.warn("  SF 引擎多次崩溃，搜索中止，结果标记为不完整")
                     engine_died = True
                     break
                 restart_count += 1
-                Logger.warn(f"  SF 引擎崩溃，重启中... ({restart_count}/{max_restarts})")
                 try:
                     engine.quit()
                 except Exception:
@@ -179,11 +209,11 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
                     engine_died = True
                     break
                 try:
-                    am = _sf_step_fast(engine, temp, step_time=fast_step_time)
+                    am, mate_score = _sf_step_fast(engine, temp, step_time=step_time)
                 except Exception:
-                    am = None
+                    am, mate_score = None, None
             except Exception:
-                am = None
+                am, mate_score = None, None
 
             if am is None:
                 am = _sf_fallback_move(temp)
@@ -193,13 +223,25 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
                 break
             fast_moves.append(am)
             temp.push(am.move)
-            step_log_count += 1
-            if step_log_count <= 2 or step_log_count % 10 == 0:
-                Logger.info(f"  SF 第{_step + 1}步: {am.move.uci()}")
+
+            # 将杀进度追踪与时间自适应
+            if mate_score is not None:
+                if current_mate is None:
+                    fast_step_time = max(fast_step_time, 2.0)
+                    current_mate = mate_score + 1
+                    mate_stagnation = 0
+                if mate_score < current_mate:
+                    current_mate = mate_score
+                    mate_stagnation = 0
+                else:
+                    mate_stagnation += 1
+                    if mate_stagnation >= 6:
+                        fast_step_time = max(fast_step_time, 2.5)
+                        mate_stagnation = 0
+
             current_piece_count = len(temp.piece_map())
             if current_piece_count < piece_count and current_piece_count <= 5 and tablebase_solver is not None:
                 if tablebase_solver.is_hit(temp):
-                    Logger.info(f"  SF 吃到子，已进入{tablebase_solver.syzygy_path or '表库'}覆盖范围，后续切换表库求解")
                     remaining = _sf_continue_with_tablebase(
                         temp, tablebase_solver, max_steps - _step - 1)
                     fast_moves.extend(remaining)
@@ -230,7 +272,6 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
                 key_indices.add(i)
 
         if key_indices and not engine_died:
-            Logger.info(f"SF 精标注 {len(key_indices)}/{total} 个关键位置 ...")
             replay = board.copy()
             for i in range(total):
                 if i >= len(fast_boards):
@@ -239,7 +280,6 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
                     try:
                         heavy = _sf_step_heavy(engine, replay)
                     except chess.engine.EngineTerminatedError:
-                        Logger.warn(f"  精标注第{i + 1}步引擎崩溃，跳过此步精标注")
                         try:
                             engine.quit()
                         except Exception:
@@ -249,8 +289,8 @@ def _sf_solve(board: chess.Board, stockfish_path: str, syzygy_path: str = "",
                             engine = _open_engine()
                         except Exception:
                             pass
-                    except Exception as e:
-                        Logger.warn(f"  精标注第{i + 1}步异常: {e}")
+                    except Exception:
+                        pass
                     else:
                         if heavy is not None and heavy.move != chess.Move.null():
                             fast_moves[i] = AnalyzedMove(
@@ -314,6 +354,7 @@ def get_solution(board: chess.Board, stockfish_path: str,
         Logger.info("局面已结束，无需分析")
         return []
 
+    has_tablebase_moves = False
     if tablebase_solver is not None:
         try:
             tablebase_solver.open()
@@ -321,40 +362,48 @@ def get_solution(board: chess.Board, stockfish_path: str,
             Logger.warn(f"表库打开失败: {e}")
 
         if tablebase_solver.is_hit(temp):
-            Logger.info("从本地表库查询最优解法...")
+            Logger.info("表库命中，查询最优解法...")
             tb_result = tablebase_solver.solve(temp)
             if tb_result:
                 for am in tb_result:
                     if temp.is_game_over():
                         break
                     if am.move not in temp.legal_moves:
-                        Logger.warn(f"表库返回非法走法 {am.move.uci()}，回退到SF")
+                        Logger.warn(f"表库返回非法走法 {am.move.uci()}，回退SF")
                         break
                     result.append(am)
                     temp.push(am.move)
+                    has_tablebase_moves = True
                 if temp.is_game_over():
-                    Logger.success(f"本地表库完整解法: {len(result)} 步 (来源:{tb_result[0].source})")
+                    Logger.success(f"表库完整解法: {len(result)} 步")
                     return result
-                if result:
-                    Logger.info(f"本地表库部分数据 ({len(result)}步)，继续 Stockfish...")
+                if has_tablebase_moves:
+                    Logger.info(f"表库部分解法 ({len(result)} 步)，残余交SF续解...")
+            else:
+                Logger.info("表库命中但无法求解完整路线，交SF处理")
+        else:
+            Logger.info("表库未命中，交SF搜索")
 
     if not temp.is_game_over() and use_stockfish:
-        Logger.info("Stockfish 搜索解法...")
-        sf_max_steps = 60
         current_pc = len(temp.piece_map())
-        if current_pc <= 5 and tablebase_solver is not None and not tablebase_solver.is_hit(temp):
-            sf_max_steps = 100
-            Logger.info(f"  表库未命中但子力≤5（如KBNvK），增加搜索步数至{sf_max_steps}")
+        sf_max_steps = 80
+        if current_pc <= 5 and not has_tablebase_moves:
+            sf_max_steps = 120
+        Logger.info(f"SF 搜索 (剩余{current_pc}子, 上限{sf_max_steps}步)...")
         sf_result = _sf_solve(temp, stockfish_path, syzygy_path, current_pc,
                               max_steps=sf_max_steps, tablebase_solver=tablebase_solver)
         for am in sf_result:
             if temp.is_game_over():
                 break
             if am.move not in temp.legal_moves:
-                Logger.warn(f"SF 返回非法走法 {am.move.uci()}，跳过")
                 break
             result.append(am)
             temp.push(am.move)
 
-    Logger.success(f"解法: {len(result)} 步")
+    if (not temp.is_game_over()) and result and (not has_tablebase_moves) and len(result) >= 80:
+        Logger.warn(f"SF 在 {len(result)} 步内未完成收官，解法质量不足，跳过本次解说。")
+        return []
+
+    if result:
+        Logger.success(f"解法就绪: {len(result)} 步")
     return result

@@ -109,7 +109,7 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
     """ 语义压缩：按将军/吃子/升变/转折等边 界切分节点，单节点≤4步 """
     temp = board.copy()
     kb = match_endgame(board)
-    endgame_name = kb["name"] if kb else "残局"
+    endgame_name = kb["name"] if kb else describe_endgame(board)["name"]
     role_meta = _role_meta(board, endgame_name)
     kbnk_mode = endgame_name == "象马杀王" and len(analyzed_moves) >= LONG_MOVE_THRESHOLD
     long_line_mode = len(analyzed_moves) >= LONG_MOVE_THRESHOLD
@@ -222,14 +222,15 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
             fen_before=first["fen_before"],
             fen_after=last["fen_after"],
             is_critical=is_critical,
+            is_only_move=any(g.get("only") for g in grp),
             trap=trap,
             tags=all_tags,
             eval_delta=total_delta,
             candidates=list(set(c for g in grp for c in g.get("candidates", []))),
         ))
 
-    compressed = _merge_repetitive(compressed)
     compressed = _merge_check_sequences(compressed)
+    compressed = _merge_repetitive(compressed)
 
     # 自适应节点预算：节点数随解法长度次线性增长（越长压得越狠），只减不增。
     # 取代旧的「固定阈值 / max_span 上限被语义边界压制」导致的压缩比反相关问题。
@@ -276,24 +277,28 @@ def _merge_to_budget(steps: List[CompressedStep], target: int) -> List[Compresse
 
     work = list(steps)
     total_sans = sum(len(s.sans) for s in work)
-    soft_cap = max(8, total_sans // max(target, 1) + 4)
+    # soft_cap 限制合并后单节点的着数，避免一个画面播太久。
+    # 旧实现是"软上限"：都超时仍会 fallback 合并，导致节点可以膨胀到 14+ 步。
+    # 新实现收紧为真上限：只有在总量可控时才允许合并，否则跳过该 victim。
+    soft_cap = max(6, total_sans // max(target, 1) + 2)
     guard = 0
+    skipped_victims = set()  # 本轮因超 soft_cap 而跳过的 victim 索引，不污染 is_critical
 
     while len(work) > target and guard < 2000:
         guard += 1
-        # 选 victim：排除首尾与硬保护节点；非关键优先，再按着数少优先
+        # 选 victim：排除首尾、硬保护节点、以及已被标记跳过的节点
         victim_idx = None
         best_key = None
         for i in range(1, len(work) - 1):
             s = work[i]
-            if _node_is_hard_keep(s):
+            if _node_is_hard_keep(s) or i in skipped_victims:
                 continue
             key = (0 if not s.is_critical else 1, len(s.sans))
             if best_key is None or key < best_key:
                 best_key = key
                 victim_idx = i
         if victim_idx is None:
-            break  # 没有可牺牲的节点（全是硬保护/首尾），停在当前节点数
+            break
 
         i = victim_idx
         v = work[i]
@@ -303,29 +308,31 @@ def _merge_to_budget(steps: List[CompressedStep], target: int) -> List[Compresse
         def fits(t):
             return t is not None and len(t.sans) + len(v.sans) <= soft_cap
 
-        # 优先并入不超软上限的、较短的一侧；都超则仍并入较短一侧（有界放宽）
+        # 只在不超 soft_cap 时合并；都超则标记为不可合并，继续尝试下一个 victim
         if fits(left) and fits(right):
             into_left = len(left.sans) <= len(right.sans)
         elif fits(left):
             into_left = True
         elif fits(right):
             into_left = False
-        elif left is not None and right is not None:
-            into_left = len(left.sans) <= len(right.sans)
         else:
-            into_left = left is not None
+            # 都超 soft_cap，标记跳过（不污染 is_critical）
+            skipped_victims.add(i)
+            continue
 
         if into_left and left is not None:
             left.sans = left.sans + v.sans
             left.fen_after = v.fen_after
             left.tags = list(set(left.tags + v.tags))
             left.is_critical = left.is_critical or v.is_critical
+            left.is_only_move = left.is_only_move or v.is_only_move
             left.eval_delta = (left.eval_delta or 0) + (v.eval_delta or 0)
         elif right is not None:
             right.sans = v.sans + right.sans
             right.fen_before = v.fen_before
             right.tags = list(set(right.tags + v.tags))
             right.is_critical = right.is_critical or v.is_critical
+            right.is_only_move = right.is_only_move or v.is_only_move
             right.eval_delta = (right.eval_delta or 0) + (v.eval_delta or 0)
         else:
             break
@@ -367,9 +374,12 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
         j = i + 1
         check_count = 1
         quiet_count = 0
+        total_sans = len(steps[i].sans)
         while j < n and (j - i) < 8:
             cs_j = steps[j]
             if "吃子" in cs_j.tags:
+                break
+            if total_sans + len(cs_j.sans) > 12:
                 break
             has_check = "将军" in cs_j.tags
             had_check = "将军" in steps[j - 1].tags
@@ -381,6 +391,7 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
                 if (j - i) >= 4:
                     j += 0
                 break
+            total_sans += len(cs_j.sans)
             j += 1
 
         run_len = j - i
@@ -427,6 +438,7 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
             fen_before=first.fen_before,
             fen_after=last.fen_after,
             is_critical=True,
+            is_only_move=any(steps[k].is_only_move for k in range(i, j)),
             trap=first.trap or "",
             tags=[maneuver_pattern],
             eval_delta=sum((steps[k].eval_delta or 0) for k in range(i, j)),
@@ -444,15 +456,21 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
 def _merge_repetitive(steps: List[CompressedStep]) -> List[CompressedStep]:
     if len(steps) < 3:
         return steps
+    # 合并后单节点子步数硬上限：防止 KQvKR 等全程子力不变的残局被压成巨块。
+    # 旧逻辑用 len(prev.sans) < 10 做吸收前检查，吸收后可超过 10（如 14 步），
+    # 导致 LLM 拿到一个「14 步驱赶」的节点写不出贴合画面的解说。
+    # 新逻辑检查吸收后总量，保证每节点最多 8 步。
+    _MERGE_REPETITIVE_CAP = 8
     merged = [steps[0]]
     for cur in steps[1:]:
         prev = merged[-1]
         if (not prev.is_critical and not cur.is_critical
                 and _same_pieces(prev.fen_before, cur.fen_before)
-                and len(prev.sans) < 10):
+                and len(prev.sans) + len(cur.sans) <= _MERGE_REPETITIVE_CAP):
             prev.sans.extend(cur.sans)
             prev.fen_after = cur.fen_after
             prev.tags = list(set(prev.tags + cur.tags))
+            prev.is_only_move = prev.is_only_move or cur.is_only_move
             if len(prev.sans) >= 6:
                 prev.tags.append("对王调整")
         else:
@@ -774,8 +792,12 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
     任何异常都会被吞掉退回"无洞察"，保证不破坏原有链路。
     """
     kb = match_endgame(board)
+    if kb is not None:
+        endgame_name = kb["name"]
+    else:
+        endgame_name = describe_endgame(board)["name"]
     phases = kb["phases"] if kb else []
-    role_meta = _role_meta(board, kb["name"] if kb else "残局", winner_color=winner_color)
+    role_meta = _role_meta(board, endgame_name, winner_color=winner_color)
     n = len(compressed)
 
     # 棋理洞察：失败安全地提取，下面按节点注入。提取失败/禁用时为空 dict 列表。
@@ -785,7 +807,7 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             from src.insight_extractor import extract_for_compressed
             insights = extract_for_compressed(
                 compressed, board, role_meta if role_meta else None,
-                kb["name"] if kb else "残局")
+                endgame_name)
         except Exception as e:
             Logger.warn(f"棋理洞察提取失败，退回无洞察模式: {e}")
             insights = []
@@ -808,7 +830,7 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         board_after = chess.Board(cs.fen_after)
 
         move_info = _collect_node_move_info(board_before, cs)
-        contains_rep, rep_count, rep_pattern = _detect_repetition_maneuver(compressed, idx_cs, kb["name"] if kb else "")
+        contains_rep, rep_count, rep_pattern = _detect_repetition_maneuver(compressed, idx_cs, endgame_name)
         goal = _classify_goal(board_before, board_after, cs, role_meta if role_meta else {})
         is_last_node = idx_cs == n_compressed - 1
 
@@ -817,8 +839,6 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         sub_type = sub_endgame.get("type", "unknown")
         endgame_changed = (sub_type != prev_endgame_type) and prev_endgame_type != "" and sub_type != "unknown"
         if sub_name != prev_endgame_name:
-            if prev_endgame_name:
-                Logger.info(f"  子残局切换: {prev_endgame_name} → {sub_name}")
             prev_endgame_name = sub_name
             prev_endgame_type = sub_type
 
@@ -835,7 +855,7 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         if kb and kb.get("name") == "车兵对车":
             cs.phase, phase_hint = _krpkr_phase_hint(board_before, board_after, role_meta, same_position)
         elif same_position and len(cs.sans) >= 2:
-            Logger.warn(f"节点{cs.idx}起止局面相同，按反复试探处理")
+            pass
             cs.phase = "反复试探"
             phase_hint = "这段变化的起止局面相同，属于反复调车试探与等招，并未形成实质突破"
 
@@ -913,15 +933,38 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             sc = insight.get("spatial_change", {})
             if sc:
                 node["spatial_change"] = sc
-            imp = insight.get("importance", "")
-            if imp:
-                node["importance"] = imp
-                node["importance_reasons"] = insight.get("importance_reasons", [])
-                # importance 只上调详略/关键性，绝不下调——避免削弱已有的关键判定
-                if imp == "high":
-                    node["detail_level"] = "high"
-                    if not node["is_critical"]:
-                        node["is_critical"] = True
+
+            # 战术叙述（新）：纯棋理中文，不给结论只给前提
+            tn = insight.get("tactical_narratives", [])
+            if tn:
+                node["tactical_narratives"] = tn
+
+            # importance 不再注入为"结论标签"（旧行为：注入 importance=high/low
+            # 并据此上调 is_critical）。改为仅用于内部参考，不写入 node，
+            # 让 LLM 自己从 tactical_narratives / teaching_point / spatial_change
+            # 中判断哪一步是关键手。
+            # 旧逻辑保留但不再向 prompt 注入 importance 标签。
+
+        # 引擎信号（中性观察，不给结论）：
+        # 利用节点已有的 eval_delta / is_only_move 生成量化参考句。
+        eval_signals = []
+        ed = getattr(cs, "eval_delta", None)
+        # 排除终局哨兵 9999 和极端值，只对合理的评估变化生成信号。
+        # 不断言"扩大/缩小"方向：eval_delta 是逐着按走子方视角算、再跨多着
+        # 求和得到的，多着合并节点里符号可能反号，断言方向会把增大优势的一步
+        # 说成"优势缩小"。这里只陈述"显著变化"的量级，方向交给画面与其他信号。
+        if ed is not None and 200 < abs(ed) < 9000:
+            eval_signals.append(
+                f"局面评估值在这一步后发生了显著变化（约{abs(int(ed))}厘兵）。")
+
+        # 唯一好着（用真实信号，不用 candidates 代理量）
+        if cs.is_only_move:
+            eval_signals.append(
+                "除正解外，其他候选走法都会让胜势大幅缩水——"
+                "这是当前局面下唯一能保住胜利果实的选择。")
+
+        if eval_signals:
+            node["eval_signals"] = eval_signals
 
         nodes_out.append(node)
         prev_phase = cs.phase
@@ -935,14 +978,15 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
     narrative_mode = "winning_conversion" if role_meta else "balanced"
 
     return {
-        "endgame_name": kb["name"] if kb else "残局",
+        "endgame_name": endgame_name,
         "context": kb["theory"] if kb else "残局局面分析",
         "phases": phases,
         "motifs": kb.get("motifs", []) if kb else [],
         "mistakes": kb.get("mistakes", []) if kb else [],
+        "opening": kb.get("opening", {}) if kb else {},
         "role_summary": role_meta.get("role_summary", ""),
         "concept_binding": role_meta.get("concept_binding", []),
-        "hard_constraints": _hard_constraints(board, kb["name"] if kb else "残局", role_meta),
+        "hard_constraints": _hard_constraints(board, endgame_name, role_meta),
         "winning_side": winning_side,
         "losing_side": losing_side,
         "narrative_mode": narrative_mode,

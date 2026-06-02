@@ -62,8 +62,9 @@ def _build_header(storyboard: dict) -> str:
     node_count = len(storyboard.get("nodes", []))
 
     parts = [
-        "你是专业的国际象棋残局教练。请输出专业、严谨、以棋理为核心的中文解说，纯文本输出。",
-        "要求：只依据给定走法和局面信息解说，禁止虚构剧情，禁止空泛比喻。你的任务是解释局面变化，而不是自由创作。",
+        "你是会自己看棋的国际象棋教练。你不需要被告知哪一步重要——你会从棋理事实中自己判断。"
+        "请输出专业、以棋理为核心的中文解说，纯文本输出。",
+        "只依据给定走法和局面信息解说，禁止虚构剧情，禁止空泛比喻。",
         "",
         f"【起始残局类型】{endgame_name}",
     ]
@@ -99,6 +100,48 @@ def _build_header(storyboard: dict) -> str:
     return "\n".join(parts)
 
 
+def _extract_terminology(storyboard: dict) -> list:
+    """从知识库 motifs 提取本残局的规范专业术语名（冒号前的部分）。
+
+    motifs 形如「盒子法：用车画线限制对方王的活动范围」，冒号前即术语名。
+    把这些作为「可用术语」正向注入 prompt——激发模型用对行话，而不只是
+    黑名单禁止。术语来自知识库，天然与当前残局类型匹配，不会张冠李戴。
+    去重保序，最多取 6 个，避免 prompt 过长。
+    """
+    terms = []
+    for motif in storyboard.get("motifs", []) or []:
+        if not isinstance(motif, str):
+            continue
+        name = motif.split("：")[0].split(":")[0].strip()
+        if name and name not in terms:
+            terms.append(name)
+    return terms[:6]
+
+
+def _rate_difficulty(endgame_name: str) -> str:
+    """按残局类型的公认难度分级，用于调整解说调性。
+
+    只影响人设语气，不影响内容深度与校验——基础残局也要讲透。
+    仅对知识库已知类型断言难度；未匹配类型返回 unknown（中性调性），
+    避免把实际很难的非常见残局误标成「基础残局」而让模型欠讲解。
+    """
+    if endgame_name in ("象马杀王", "车兵对车"):
+        return "hard"
+    if endgame_name in ("双象杀王", "单兵残局"):
+        return "medium"
+    if endgame_name in ("单车杀王", "单后杀王"):
+        return "basic"
+    return "unknown"
+
+
+_DIFFICULTY_TONE = {
+    "hard": "这是公认很难的残局，很多人学多年都掌握不好。请把每一步的「为什么」讲透，让人真正理解棋理而不是死记走法。",
+    "medium": "这类残局有一定难度。请言简意赅、直击要点，把每步背后的棋理逻辑讲清楚。",
+    "basic": "这是基础残局。请把看似简单的走法讲出层次感，让人理解每一步都是取胜链条上必不可少的一环。",
+    "unknown": "请把每一步的取胜逻辑讲清楚，让人理解每一步在整个取胜过程中的作用。",
+}
+
+
 def _build_json_header(storyboard: dict) -> str:
     endgame_name = storyboard.get("endgame_name", "残局")
     role_summary = storyboard.get("role_summary", "")
@@ -109,11 +152,18 @@ def _build_json_header(storyboard: dict) -> str:
     node_count = len(storyboard.get("nodes", []))
 
     parts = [
-        "你是国际象棋赛事解说员，负责为残局教学视频配解说词。只输出合法JSON，不加任何解释或markdown标记。",
-        "风格要求：像专业赛事解说员那样——讲得生动、有推进感，但每一句都必须落在一个具体的棋理事实上。",
-        "把每段残局讲成一个有逻辑的推进故事：先讲清这一步做了什么、局面因此发生了什么变化，再讲它为什么有用。",
-        "关键步骤（转折、吃子、将军、收官）可以多写两句、写出张力；过渡和重复试探的步骤一笔带过，让整段解说有起伏、不平淡。",
-        "底线：宁可朴素也不要空洞——没有事实支撑的形容词（精妙、默契、天衣无缝之类）一个都不要用。",
+        "你是一位会自己看棋的国际象棋教练。你不是在复述走法，而是在分析每一步背后的棋理。"
+        "只输出合法JSON，不加任何解释或markdown标记。",
+        "",
+        "你的讲解信条：",
+        "- 你不需要被告知哪一步重要——你会从节点信息中提供的棋理事实自己判断。",
+        "- 当你在「棋理分析」或「引擎数据」中看到一着同时做了多件事、让对方无法两全、"
+        "或改变了残局结构时，你会自然地讲出它为什么是全局的胜负手。",
+        "- 你的判断来自对棋局结构的理解，而不是对指令的服从。",
+        "- 把每段残局讲成一个有逻辑的推进故事：先讲清这一步做了什么、局面因此发生了什么变化，再讲它为什么有用。",
+        "- 关键步骤自己判断、自己写出张力；过渡步骤一笔带过。",
+        "- 你没有事实支撑时宁可朴素也不要空洞——没有事实支撑的形容词一个都不要用。",
+        _DIFFICULTY_TONE[_rate_difficulty(endgame_name)],
         "",
         f"【残局类型】{endgame_name}",
     ]
@@ -128,6 +178,14 @@ def _build_json_header(storyboard: dict) -> str:
     if hard_constraints:
         parts.append(f"【全局约束】{'；'.join(hard_constraints)}")
 
+    terminology = _extract_terminology(storyboard)
+    if terminology:
+        parts.extend([
+            "",
+            f"【可用术语】这类残局的规范术语：{'、'.join(terminology)}。",
+            "讲到相关棋理时优先用这些行话（用对地方即可，不必硬凑），但不要解释术语本身的定义。",
+        ])
+
     parts.extend([
         "",
         "每个节点有 claim_level 控制可用的结论深度：",
@@ -135,7 +193,17 @@ def _build_json_header(storyboard: dict) -> str:
         "forcing→可以讲强制/被迫  terminal→才能说将杀/绝杀",
         "",
         "节点可能标注「将军驱赶」或「反复试探等待」→ 这种节点是多着合并的叙事块，你要用流畅的段落描述这段过程，而不是逐步数着。",
-        "节点可能带「教学点」「关键变化」「必须讲到」字段→ 这是用代码从棋盘算出的真实棋理事实，请把它们用自己的话融进解说，这是让解说有内容、不空洞的关键。",
+        "节点可能带「棋理事实」「棋理观察」「棋理分析」「引擎数据」→ 这些都是从棋盘或引擎算出的真实事实，不是判决。请你阅读后自己形成判断，用自己的话融进解说。",
+        "",
+        "【关键：解说要贴合画面的推进过程，不要一上来就报终点】",
+        "每段解说在视频里是和这个节点的多步走子「同步播放」的——你写第一句时，画面才刚走第一步；",
+        "你写到后半段时，画面才走到这段的最后一步。所以请按「过程」来组织，而不是按「结果总结」：",
+        "- 先描述这段开头在做什么（哪个子力先动、想达到什么），再讲随着几步推进局面怎样一点点变化，",
+        "  最后才落到这段结束时形成的结果（对方王被逼到哪、空间被压到多小）。",
+        "- 不要在开头第一句就直接宣布整段的最终结果（如「对方王已无处可走」），那会和此刻画面里对方王还没动相矛盾；",
+        "  把这种终态结论放到这一段的末尾，作为「经过这几步之后」的小结。",
+        "- 多着节点里若是某一方的子力在连续调整、而对方王这段几乎没动，就如实讲成「主动方在调整站位、对方暂时只能原地等待」，",
+        "  不要凭空说成对方王在被驱赶或四处逃窜。",
         "",
         "【JSON格式】",
         '{"segments":[{"id":int,"sub_endgame":"string","voiceover":"string","pacing":"slow|normal|fast|pause_before|pause_after"},...]}',
@@ -230,10 +298,9 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         parts.append(f"目标: {goal} | 权限: {claim}{' (禁止将杀/绝杀)' if claim != 'terminal' else ' (可宣告胜负)'}")
 
         # 棋理洞察（由 insight_extractor 用棋盘算出的真实事实，关系化、无坐标）。
-        # 这是让解说有内容、摆脱空洞比喻的核心信息，优先放在显眼位置。
         teaching_point = node.get("teaching_point", "")
         if teaching_point:
-            parts.append(f"棋理事实（务必融进解说，用自己的话讲）: {teaching_point}")
+            parts.append(f"棋理事实: {teaching_point}")
         spatial = node.get("spatial_change", {})
         if spatial and spatial.get("weak_before") is not None:
             wb = spatial.get("weak_before")
@@ -243,17 +310,38 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
             parts.append(f"空间数据: 对方王可走的安全格 {wb}→{wa}{extra}")
         must_mention = node.get("must_mention", [])
         if must_mention:
-            parts.append(f"必须讲到: {'；'.join(must_mention)}")
+            parts.append(f"棋理观察: {'；'.join(must_mention)}")
+
+        # 战术叙述（新）：纯棋理中文前提，不给结论。LLM 从中自己判断关键手。
+        tactical_narratives = node.get("tactical_narratives", [])
+        if tactical_narratives:
+            parts.append("棋理分析（由棋盘直接算出的战术事实，供你独立判断）:")
+            for tn in tactical_narratives:
+                parts.append(f"  · {tn}")
+
+        # 引擎信号（新）：量化参考，不是判决。LLM 自己决定是否引用。
+        eval_signals = node.get("eval_signals", [])
+        if eval_signals:
+            parts.append("引擎数据（量化参考，不是判决——是否提及由你判断）:")
+            for es in eval_signals:
+                parts.append(f"  · {es}")
 
         drive_tag = next((t for t in tags if t in ("将军驱赶", "连续将军驱赶", "反复试探等待")), "")
         if drive_tag:
             parts.append(f"类型: 「{drive_tag}」叙事块 — 这是多着合并，描述整体过程，不要逐步数着")
 
-        # 温和增强：重点节点写出张力，过渡节点一笔带过
+        # 详略提示：不注入"重要/不重要"的判决，只给事实性提示
         if summary_only or node.get("video_density") == "low":
             parts.append("详略: 过渡/重复节点 — 一句话带过即可，不要展开")
+            if not node.get("is_capture_node") and not node.get("has_check_in_node"):
+                if node_id % 2 == 0:
+                    parts.append("视角提示: 这一句请落在空间变化上（对方王少了哪个方向的去路、活动范围怎么变），别只说「推进」")
+                else:
+                    parts.append("视角提示: 这一句请落在整体计划上（这步在为哪个目标铺路、和上一步什么关系），别只说「推进」")
         elif node.get("is_critical"):
-            parts.append("详略: 重点节点 — 这是关键转折，请写得更有张力，点出它为什么重要")
+            # 旧："这是关键转折，请写得更有张力，点出它为什么重要"（结论注入）
+            # 新：仅给事实依据，模型自己判断张力级别
+            parts.append("详略: 此节点含吃子/将军/评估显著变化等事件")
 
         if summary_only:
             parts.append("概括模式: 只1句话概括（≤80字）")
@@ -494,6 +582,16 @@ def _auto_fix_voiceover(text: str, node: dict) -> str:
             fixed = fixed.replace("积蓄力量", "蓄势待发")
             fixed = fixed.replace("均势", "局面向好")
             fixed = fixed.replace("双方都在", "双方")
+
+    # 必胜残局术语纠错：断言「和棋已成」是结果误判（本工具只处理必胜局）。
+    # 仅纠正明确宣告和棋结果的多字短语；裸词「逼和/和棋」不动，避免误伤
+    # 合法的教学提醒（如「避免逼和」「谨防和棋」）与弱方失败的谋和尝试。
+    _DRAW_RESULT_WORDS = (
+        "成功逼和", "逼和成功", "守和成功", "成功守和",
+        "顺利成和", "已经成和", "和棋已定", "和棋收场", "谋和成功",
+    )
+    for w in _DRAW_RESULT_WORDS:
+        fixed = fixed.replace(w, "优势在握")
 
     if not node.get("is_capture_node"):
         fixed = fixed.replace("吃掉", "控制")
@@ -848,7 +946,7 @@ def _generate_chunk_fallback(prompt: str) -> str:
         backend = create_backend_from_env()
         return _strip_thinking(backend.generate(prompt))
     except Exception as e:
-        Logger.warn(f"  fallback generate 异常: {type(e).__name__}: {e}")
+        pass
     return ""
 
 
@@ -872,7 +970,7 @@ def _repair_failed_segments(backend, segments: list, chunk_nodes: list) -> Optio
         prompt = _build_segment_repair_prompt(node, err)
         raw = backend.generate(prompt, grammar=_SEGMENT_GRAMMAR)
         if not raw:
-            Logger.warn(f"    单段修复 id={node['id']} 生成空结果")
+            pass
             continue
         repaired_seg = _parse_single_segment(raw)
         if repaired_seg is None:
@@ -1027,6 +1125,43 @@ def _build_recap_from_segments(segments, max_parts: int = 5, per_len: int = 46) 
     return "；".join(parts)
 
 
+def _compose_opening(storyboard: dict) -> str:
+    """拼装开场白：残局类型 + 子力对比 + 理论判定 + 取胜思路一句话。
+
+    策略：纯模板拼装，不调用 LLM。开场白短而结构化，模板比自由生成更可靠，
+    且天然不会泄漏棋盘坐标、引擎术语或思维链。素材取自知识库的 opening 字段
+    （describe_endgame/build 已透传）；知识库未命中时退回通用句式。
+    末尾统一过 _clean_summary_text 做白名单清洗，保证喂 TTS 的是干净中文。
+    返回 ≤80 字开场白；任何异常或素材缺失时返回空串（管线据此跳过开场白）。
+    """
+    try:
+        endgame_name = storyboard.get("endgame_name", "") or ""
+        winning_side = storyboard.get("winning_side", "") or ""
+        opening = storyboard.get("opening", {}) or {}
+        material_desc = opening.get("material_desc", "") or ""
+        winning_principle = opening.get("winning_principle", "") or ""
+
+        # 残局名是开场白的最小必要素材；缺失（未匹配知识库）则不强行编造
+        if not endgame_name or endgame_name in ("残局", "单王残局"):
+            return ""
+
+        parts = [f"这是一个{endgame_name}残局。"]
+        if material_desc:
+            parts.append(material_desc + "。")
+        if winning_side:
+            parts.append(f"理论上{winning_side}必胜。")
+        if winning_principle:
+            parts.append("核心思路是" + winning_principle + "。")
+        parts.append("下面来看具体的推进过程。")
+
+        text = _clean_summary_text("".join(parts))
+        if not text or len(text) < 10:
+            return ""
+        return text
+    except Exception:
+        return ""
+
+
 def _fallback_summary(storyboard: dict) -> str:
     """LLM 总结失败时的纯中文兜底总结。
 
@@ -1179,7 +1314,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
 
     node_count = len(nodes)
     total_chunks = max(1, (node_count + CHUNK_SIZE - 1) // CHUNK_SIZE)
-    Logger.info(f"结构化生成: {node_count} 节点 → {total_chunks} 块 (后端:{backend.name})")
 
     json_header = _build_json_header(storyboard)
     text_header = _build_header(storyboard)
@@ -1200,8 +1334,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
             prev_context=prev_context,
         )
         chunk_grammar = _build_chunk_grammar(len(chunk_nodes))
-        Logger.info(f"  [{chunk_idx + 1}/{total_chunks}] 节点{chunk_nodes[0]['id']}-{chunk_nodes[-1]['id']}"
-                    f"{' [grammar]' if chunk_grammar else ''}")
 
         success = False
         err_msg = "首次尝试失败"
@@ -1215,13 +1347,11 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
             raw_text = _strip_thinking(backend.generate(prompt, grammar=chunk_grammar))
             if not raw_text:
                 err_msg = "生成空结果"
-                Logger.warn(f"  块{chunk_idx + 1}生成空结果")
                 continue
 
             data = _parse_storyboard_json(raw_text)
             if data is _INVALID_JSON_SENTINEL:
                 err_msg = "输出不是合法JSON"
-                Logger.warn(f"  块{chunk_idx + 1}尝试{attempt} JSON解析失败")
                 continue
 
             # 校验前预处理：对所有 segment 先做 auto-fix 清洗，避免黑名单词导致的硬失败
@@ -1235,11 +1365,8 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                 chunk_segments = _finalize_chunk_segments(data, chunk_nodes)
                 all_segments.extend(chunk_segments)
                 commentary.chunks_succeeded += 1
-                Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段")
                 success = True
                 break
-
-            Logger.warn(f"  块{chunk_idx + 1}尝试{attempt} 校验失败: {err_msg}")
 
             if isinstance(segments, list) and len(segments) == len(chunk_nodes):
                 repaired = _repair_failed_segments(backend, segments, chunk_nodes)
@@ -1249,10 +1376,8 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                         chunk_segments = _finalize_chunk_segments(repaired, chunk_nodes)
                         all_segments.extend(chunk_segments)
                         commentary.chunks_succeeded += 1
-                        Logger.info(f"  块{chunk_idx + 1}: {len(chunk_segments)} 段 (单段修复)")
                         success = True
                         break
-                    Logger.warn(f"  块{chunk_idx + 1}单段修复仍失败: {repaired_err}")
 
         if not success:
             Logger.warn(f"  块{chunk_idx + 1}结构化生成失败，回退文本模式")
@@ -1299,8 +1424,8 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
     if all_segments and not commentary.fallback_used:
         try:
             _dedupe_across_segments(all_segments)
-        except Exception as e:
-            Logger.warn(f"跨段去重跳过: {e}")
+        except Exception:
+            pass
 
     commentary.raw_text = "\n".join(
         f"第{seg.id}步：{seg.voiceover}" for seg in all_segments
@@ -1314,8 +1439,11 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
             Logger.warn(f"总结词生成异常，使用模板兜底: {e}")
             commentary.summary = _fallback_summary(storyboard)
 
-    status = "结构化完成" if not commentary.fallback_used else f"部分回退(成功{commentary.chunks_succeeded}/{total_chunks})"
-    Logger.success(f"解说生成: {len(all_segments)} 段 ({status}, 重试{commentary.retries_total}次)")
+    # 开场白（残局类型+子力对比+取胜思路），插在解说最前。纯模板拼装，失败返回空串
+    commentary.opening = _compose_opening(storyboard)
+
+    status = "正常" if not commentary.fallback_used else f"部分回退({commentary.chunks_succeeded}/{total_chunks})"
+    Logger.success(f"解说生成完成: {len(all_segments)} 段, {status}")
     return commentary
 
 
@@ -1336,7 +1464,6 @@ def generate(board: chess.Board, storyboard: dict) -> str:
     node_count = len(nodes)
     total_chunks = max(1, (node_count + CHUNK_SIZE - 1) // CHUNK_SIZE)
     backend = create_backend_from_env()
-    Logger.info(f"生成解说: {node_count} 节点 → {total_chunks} 块 (后端:{backend.name})")
 
     header = _build_header(storyboard)
     example = _get_example(storyboard.get("endgame_name", "残局"))
@@ -1348,15 +1475,12 @@ def generate(board: chess.Board, storyboard: dict) -> str:
         chunk_nodes = nodes[start:end]
 
         prompt = _build_chunk_prompt(header, chunk_nodes, chunk_idx, total_chunks, example if chunk_idx == 0 else "")
-        Logger.info(f"  [{chunk_idx + 1}/{total_chunks}] 节点{chunk_nodes[0]['id']}-{chunk_nodes[-1]['id']} (提示词{len(prompt)}字)")
 
         result = _generate_chunk_fallback(prompt)
         if not result:
-            Logger.warn(f"  块{chunk_idx + 1}失败，跳过")
             continue
 
         if len(result) > MAX_CHARS:
-            Logger.warn(f"  块{chunk_idx + 1}过长({len(result)}>{MAX_CHARS})，限长重试")
             prompt_short = prompt + f"\n\n每步尽量写成2-4句，但总共不超过{MAX_CHARS//2}字。重新输出。"
             retry = _generate_chunk_fallback(prompt_short)
             if retry:
@@ -1365,12 +1489,9 @@ def generate(board: chess.Board, storyboard: dict) -> str:
                 result = result[:MAX_CHARS]
 
         all_parts.append(result)
-        Logger.info(f"  块{chunk_idx + 1}: {len(result)} 字")
 
     if not all_parts:
-        Logger.error("所有块生成均失败")
         return ""
 
     final = "\n".join(all_parts).strip()
-    Logger.success(f"解说生成完成 ({len(final)} 字符)")
     return final

@@ -19,6 +19,8 @@ def run(input_text: str) -> str:
     if result is None:
         return ""
     commentary, _board, _game_data, _analyzed_moves, _storyboard, _compressed, _winner = result
+    if commentary.opening:
+        print(commentary.opening + "\n")
     print(commentary.raw_text)
     if commentary.summary:
         print("\n" + commentary.summary)
@@ -60,13 +62,23 @@ def run_video(input_text: str, voice_prompt: str = "",
     Logger.info("[6/7] TTS 语音合成...")
     from src.tts_engine import synthesize as tts_synthesize
 
-    segments = _build_move_segments(commentary, moves, board, compressed)
-    # 追加结尾总结段：挂到最终局面上播放（技法/经验总结）
+    segments = _build_node_segments(commentary, moves, compressed)
+    # 开场白段：插在最前，挂初始局面静态展示（moves 为空，渲染器按静态定格处理），
+    # 与视频开头的棋盘展示同步——声音介绍局面，画面停在初始局面。
+    if commentary.opening:
+        segments.insert(0, Segment(
+            move_idx=0,
+            text=commentary.opening,
+            pacing="slow",
+            moves=[],
+        ))
+    # 追加结尾总结段：挂到最终局面上播放（技法/经验总结）。moves 为空，渲染器按静态定格处理。
     if commentary.summary:
         segments.append(Segment(
-            move_idx=len(moves) + 1,
+            move_idx=(len(compressed) if compressed else len(moves)) + 1,
             text=commentary.summary,
             pacing="slow",
+            moves=[],
         ))
     segments = tts_synthesize(segments, voice_prompt=voice_prompt)
 
@@ -83,17 +95,11 @@ def run_video(input_text: str, voice_prompt: str = "",
         panel_info["winner_color"] = winner_color
 
     # 构建子步索引映射 {move_idx: (sub_idx, total)} 用于颜色轮换
-    sub_step_indices = {}
-    if compressed:
-        move_idx = 0
-        for cs in compressed:
-            for sub_idx in range(len(cs.sans)):
-                sub_step_indices[move_idx + sub_idx] = (sub_idx, len(cs.sans))
-            move_idx += len(cs.sans)
-
+    # 节点级渲染：每个 segment 在其音频时长内顺序播放本节点的全部子步，
+    # 并把「实际渲染时长」回填到 seg.duration_s / seg.start_time，
+    # 供下方字幕与 composer 严格对齐（彻底消除 MIN_HOLD 地板导致的累积漂移）。
     frame_paths, frame_durations = render_animated_frames(
-        moves, board.fen(), segments, panel_info=panel_info,
-        sub_step_indices=sub_step_indices)
+        segments, board.fen(), panel_info=panel_info)
     # 字幕起始偏移 = 视频开头静音(标题卡+初始局面)，与音频严格对齐
     from src.subtitle_gen import build_cues
     srt_path = gen_subtitles(segments, offset_s=LEAD_SILENCE)
@@ -150,50 +156,58 @@ def _cleanup_temp_files(frame_paths: list, srt_path: str, segments: list):
                 pass
 
 
-def _build_move_segments(commentary: GeneratedCommentary, moves: List[chess.Move],
-                          board: chess.Board,
-                          compressed: List[CompressedStep] = None) -> List[Segment]:
-    """将解说词按 compressed step 映射到每步走法，继承 pacing"""
-    # 构建 compressed step → voiceover + pacing 查找表
+def _build_node_segments(commentary: GeneratedCommentary, moves: List[chess.Move],
+                         compressed: List[CompressedStep] = None) -> List[Segment]:
+    """按压缩节点分段：一个节点 = 一段解说 + 该节点的全部子步走法。
+
+    这是「解决音画粒度错位」的核心改动。旧实现把节点整段解说塞给第一个子步、
+    其余子步置空文本（导致首步静止十几秒念完、后续子步无声飞闪、解说视角与
+    画面错位）。现在改为节点级分段：
+
+      - 每段携带本节点的全部 moves，由 board_renderer 在该段音频时长内
+        顺序播放这些子步并均摊定格，解说推进时棋子也在持续走；
+      - 一段一段音频，不再有空文本段，从根上消除空段累积漂移。
+
+    无压缩信息时退化为逐步分段（每段一个走法），保持鲁棒。
+    """
+    # 节点 id → (voiceover, pacing) 查找表
     voice_map: dict = {}
     if commentary.segments:
         for seg in commentary.segments:
             voice_map[seg.id] = (seg.voiceover, seg.pacing)
 
-    # 构建 compressed step → [move indices] 映射
-    step_moves: dict = {}
+    result: List[Segment] = []
+
     if compressed:
-        move_idx = 0
+        move_cursor = 0
         for cs in compressed:
             n = len(cs.sans)
-            step_moves[cs.idx] = list(range(move_idx, move_idx + n))
-            move_idx += n
+            node_moves = moves[move_cursor:move_cursor + n]
+            move_cursor += n
+            if not node_moves:
+                continue
+            vo, pac = voice_map.get(cs.idx, (None, "normal"))
+            text = vo if vo else ""
+            result.append(Segment(
+                move_idx=cs.idx,
+                text=text,
+                pacing=pac or "normal",
+                moves=list(node_moves),
+                phase=getattr(cs, "phase", ""),
+            ))
+        # 解法被截断、moves 比 compressed 覆盖的还多时，剩余走法兜底成一段静默节点
+        if move_cursor < len(moves):
+            result.append(Segment(
+                move_idx=(compressed[-1].idx if compressed else 0) + 1,
+                text="",
+                pacing="normal",
+                moves=list(moves[move_cursor:]),
+            ))
+        return result
 
-    result = []
-    temp = board.copy()
+    # 无压缩信息：逐步分段
     for i, move in enumerate(moves):
-        san = temp.san(move)
-
-        # 查找该 move 属于哪个 compressed step
-        text = f"第{i + 1}步: {san}"
-        pacing = "normal"
-        if step_moves:
-            for step_id, move_indices in step_moves.items():
-                if i in move_indices:
-                    vo, pac = voice_map.get(step_id, (None, "normal"))
-                    if vo:
-                        # 若一步含多着，只取第一着展示完整解说；
-                        # 其余跟随步置空文本——静默快速走子，避免 TTS 念
-                        # "SAN（续前）"造成中英混读、碎读、含糊。
-                        if i == move_indices[0]:
-                            text = vo
-                        else:
-                            text = ""
-                    pacing = pac
-                    break
-
-        result.append(Segment(move_idx=i + 1, text=text, pacing=pacing))
-        temp.push(move)
+        result.append(Segment(move_idx=i + 1, text="", pacing="normal", moves=[move]))
     return result
 
 
@@ -211,7 +225,6 @@ def _run_pipeline(input_text: str):
             syzygy_dir=syzygy_path,
             gaviota_dir=gaviota_path,
         )
-        Logger.info(f"表库配置: Syzygy={syzygy_path or '未设置'}, Gaviota={gaviota_path or '未设置'}")
 
     Logger.info("[1/5] 解析对局...")
     game_data = parse(input_text)
@@ -251,12 +264,6 @@ def _run_pipeline(input_text: str):
     if not commentary.summary:
         from src.commentator import _fallback_summary
         commentary.summary = _fallback_summary(storyboard)
-
-    if commentary.segments:
-        Logger.info(f"  {len(commentary.segments)} 段 - pacing分布: " +
-                    ", ".join(f"{p}={sum(1 for s in commentary.segments if s.pacing == p)}"
-                              for p in ["slow", "normal", "fast", "pause_before", "pause_after"]
-                              if any(s.pacing == p for s in commentary.segments)))
 
     try:
         release_backend()

@@ -68,12 +68,14 @@ class AnalyzedMove:
 
 @dataclass
 class Segment:
-    move_idx: int               # 对应第几步棋
-    text: str                   # 该步的解说文本
+    move_idx: int               # 对应第几个讲解节点（节点级分段；旧语义为第几步棋）
+    text: str                   # 该节点的解说文本
     pacing: str = "normal"      # 解说节奏: slow/normal/fast/pause_before/pause_after
     audio_path: str = ""        # TTS生成的音频文件路径
     duration_s: float = 0.0     # 音频时长
-    start_time: float = 0.0     # 在最终视频中的起始时间
+    start_time: float = 0.0     # 在最终视频中的起始时间（不含片头静音，由渲染器按实际帧时长回填）
+    moves: List[chess.Move] = field(default_factory=list)  # 本节点包含的子步走法，按顺序在节点时长内依次播放
+    phase: str = ""             # 当前节点所属残局阶段名（如"建立控制线"），渲染器用于阶段过渡提示
 
 @dataclass
 class CompressedStep:
@@ -83,6 +85,7 @@ class CompressedStep:
     fen_before: str = ""
     fen_after: str = ""
     is_critical: bool = False
+    is_only_move: bool = False
     phase: str = ""
     candidates: List[str] = field(default_factory=list)
     trap: str = ""
@@ -114,6 +117,7 @@ class StoryboardSegment:
 class GeneratedCommentary:
     segments: List[StoryboardSegment] = field(default_factory=list)
     raw_text: str = ""
+    opening: str = ""                                       # 开场白（残局类型+子力对比+取胜思路），插在解说最前
     summary: str = ""                                       # 结尾总结词（技法/经验），独立于分步解说
     backend: str = ""
     chunks_total: int = 0

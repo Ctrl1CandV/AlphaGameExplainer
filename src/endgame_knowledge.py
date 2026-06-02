@@ -29,6 +29,10 @@ ENDGAME_KB = [
             "车失去对关键列/排的控制",
             "形成无子可动局面（逼和）",
         ],
+        "opening": {
+            "material_desc": "强方有一车一王，弱方只剩单王",
+            "winning_principle": "用车画出控制线限制对方王，再用己方王配合驱赶，把对方王逼到边线将杀",
+        },
     },
     {
         "type": "KQvK",
@@ -45,6 +49,10 @@ ENDGAME_KB = [
         ],
         "motifs": ["后用骑士距离控制对方王的逃跑路线", "己方王始终向对方王靠拢"],
         "mistakes": ["后贴脸将军被吃掉", "逼和：对方无子可动但未被将军"],
+        "opening": {
+            "material_desc": "强方有一后一王，弱方只剩单王",
+            "winning_principle": "用后从远处控制对方王的活动空间，己方王逐步靠拢，把对方王逼到边线将杀，全程注意避免逼和",
+        },
     },
     {
         "type": "KBBvK",
@@ -60,6 +68,10 @@ ENDGAME_KB = [
         ],
         "motifs": ["双象形成V字封锁线", "王填补象之间的空隙"],
         "mistakes": ["双象分开太远形成漏洞", "忽略了逼和的可能性"],
+        "opening": {
+            "material_desc": "强方有两象一王，弱方只剩单王",
+            "winning_principle": "让两象在相邻斜线上结成封锁网，己方王填补空隙，把对方王逐步逼向角落将杀",
+        },
     },
     {
         "type": "KBNvK",
@@ -75,6 +87,10 @@ ENDGAME_KB = [
         ],
         "motifs": ["W形驱赶：马控制对方王的关键逃跑格", "象控制与自身同色的斜线", "王始终靠近对方王施加压力"],
         "mistakes": ["将对方王逼到错误颜色的角落（无法将杀）", "让马失去对关键格的控制"],
+        "opening": {
+            "material_desc": "强方有一象一马一王，弱方只剩单王",
+            "winning_principle": "用王象马协同把对方王逼向与象同色的角落，这是唯一能完成将杀的角落",
+        },
     },
     {
         "type": "KPvK",
@@ -91,6 +107,10 @@ ENDGAME_KB = [
         ],
         "motifs": ["对王：主动方利用对王将对方王挤离关键路线", "关键格：兵前方两排的三格为关键格", "三角迂回：王绕到兵的另一侧来保持对王"],
         "mistakes": ["兵推进过快失去王保护", "不掌握对王概念被对方王逼和"],
+        "opening": {
+            "material_desc": "强方有一兵一王，弱方只剩单王",
+            "winning_principle": "靠对王抢占兵前的关键格，让己方王护送兵安全推进到底线升变",
+        },
     },
     {
         "type": "KRPvKR",
@@ -106,6 +126,10 @@ ENDGAME_KB = [
         ],
         "motifs": ["菲利多防线：弱方王在兵前方，车在第六排骚扰", "卢塞纳桥位：强方王在兵前，用车搭桥掩护升变"],
         "mistakes": ["弱方王被压在兵前方无法动弹", "强方过早用车保护兵放弃灵活性"],
+        "opening": {
+            "material_desc": "强方有一车一兵，弱方有一车",
+            "winning_principle": "强方用车切断对方王、护送兵推进，靠卢塞纳桥位掩护兵升变；弱方则力争菲利多防线守和",
+        },
     },
 ]
 
@@ -174,6 +198,7 @@ def describe_endgame(board: chess.Board) -> dict:
             "phases": kb["phases"],
             "motifs": kb["motifs"],
             "mistakes": kb["mistakes"],
+            "opening": kb.get("opening", {}),
             "matched": True,
         }
     w_sig = _piece_signature(board, chess.WHITE)
@@ -191,6 +216,7 @@ def describe_endgame(board: chess.Board) -> dict:
         "phases": [],
         "motifs": [],
         "mistakes": [],
+        "opening": {},
         "matched": False,
     }
 

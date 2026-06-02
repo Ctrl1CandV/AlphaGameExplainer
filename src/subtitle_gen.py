@@ -3,10 +3,10 @@ import re
 from typing import List
 from src.common import Segment
 
-MAX_CHARS_PER_LINE = 15   # 每行最多字符（中文）
+MAX_CHARS_PER_LINE = 18   # 每行最多字符（中文），适配 1280 宽画布
 MAX_LINES = 2             # 单条字幕最多行数
 MIN_CUE_SEC = 1.0         # 单句字幕最短停留
-MAX_CUE_CHARS = 30        # 单条字幕（≤2行）承载的最多字符，超过则继续切句
+MAX_CUE_CHARS = 32        # 单条字幕（≤2行）承载的最多字符，超过则继续切句
 
 
 def _split_sentences(text: str) -> List[str]:
