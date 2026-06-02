@@ -156,7 +156,8 @@ def _build_json_header(storyboard: dict) -> str:
         "只输出合法JSON，不加任何解释或markdown标记。",
         "",
         "你的讲解信条：",
-        "- 你不需要被告知哪一步重要——你会从节点信息中提供的棋理事实自己判断。",
+        "- 当节点标注了「关键手判定」时，请围绕判定依据把这一步为什么关键讲深讲透；"
+        "未标注时，从棋理事实中自己判断重要程度。",
         "- 当你在「棋理分析」或「引擎数据」中看到一着同时做了多件事、让对方无法两全、"
         "或改变了残局结构时，你会自然地讲出它为什么是全局的胜负手。",
         "- 你的判断来自对棋局结构的理解，而不是对指令的服从。",
@@ -184,6 +185,18 @@ def _build_json_header(storyboard: dict) -> str:
             "",
             f"【可用术语】这类残局的规范术语：{'、'.join(terminology)}。",
             "讲到相关棋理时优先用这些行话（用对地方即可，不必硬凑），但不要解释术语本身的定义。",
+        ])
+
+    # 取胜计划骨架：把整盘的阶段次序作为全局锚点交给模型，让每段解说都能挂到
+    # 「这是取胜计划的第几步」上，形成贯穿全局的博弈逻辑，而不是各段孤立讲走法。
+    phases = storyboard.get("phases", []) or []
+    phase_names = [p[0] for p in phases if isinstance(p, (list, tuple)) and p]
+    if phase_names:
+        parts.extend([
+            "",
+            "【取胜计划骨架】这类残局的标准取胜次序是：" + " → ".join(phase_names) + "。",
+            "每个节点都标了「所处阶段」。讲解时请扣住当前阶段在整个计划里的作用，"
+            "让观众明白这一步是为了推进到下一阶段，而不是孤立地描述棋子移动。",
         ])
 
     parts.extend([
@@ -297,6 +310,15 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
                      f" | {'含吃子' if node.get('is_capture_node') else '未吃子'}")
         parts.append(f"目标: {goal} | 权限: {claim}{' (禁止将杀/绝杀)' if claim != 'terminal' else ' (可宣告胜负)'}")
 
+        # 当前所处的取胜阶段（让每段解说能挂到全局取胜计划上，而不是各讲各的）。
+        phase = node.get("phase", "")
+        phase_hint = node.get("phase_hint", "")
+        if phase:
+            stage_line = f"所处阶段: {phase}"
+            if phase_hint:
+                stage_line += f"（{phase_hint}）"
+            parts.append(stage_line)
+
         # 棋理洞察（由 insight_extractor 用棋盘算出的真实事实，关系化、无坐标）。
         teaching_point = node.get("teaching_point", "")
         if teaching_point:
@@ -325,6 +347,18 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
             parts.append("引擎数据（量化参考，不是判决——是否提及由你判断）:")
             for es in eval_signals:
                 parts.append(f"  · {es}")
+
+        # 关键手判定（已由棋盘事实算出，不是要你猜）：把「这步有多关键、为什么关键」
+        # 直接交给模型，让它把给定结论讲透，而不是自己去推断后只能堆套话。
+        move_importance = node.get("move_importance", "")
+        importance_reasons = node.get("importance_reasons", []) or []
+        if move_importance == "high":
+            parts.append("关键手判定: 这是本残局的关键节点，请重点讲深、讲出张力与必要性。判定依据如下：")
+            for r in importance_reasons:
+                parts.append(f"  · {r}")
+            parts.append("  请围绕这些依据说清「这一步在解决什么问题、为什么非这样走不可」，不要用空泛的赞美词。")
+        elif move_importance == "medium" and importance_reasons:
+            parts.append("要点提示: 本节点的实质进展在于——" + "；".join(importance_reasons) + "。请落在这些进展上讲，不要泛泛而谈。")
 
         drive_tag = next((t for t in tags if t in ("将军驱赶", "连续将军驱赶", "反复试探等待")), "")
         if drive_tag:
@@ -369,6 +403,10 @@ def _strip_thinking(text: str) -> str:
 # 删除类用空串，会在 _auto_fix_voiceover 末尾的标点收敛里清掉留下的多余标点。
 _CLICHE_PATTERNS = [
     # (正则, 替换) —— 顺序敏感：先长后短
+    # 「看似平淡，实则…」家族：AI 最爱的伪悬念开头，不承载任何棋理事实。
+    # 删掉前半截后，后半截的实质内容仍能独立成句。
+    (r"看似(?:平淡无奇|平平无奇|平淡|不起眼|普通|简单)[，,]?(?:实则|却|其实)?", ""),
+    (r"别看这一步[^，。]{0,6}[，,]", ""),
     (r"如同?利剑出鞘", ""),
     (r"如洪水般(不可阻挡)?", "持续"),
     (r"天罗地网", "严密的控制"),
@@ -1002,25 +1040,28 @@ def _parse_single_segment(raw_text: str) -> Optional[dict]:
     return None
 
 
-def _clean_summary_text(text: str) -> str:
-    """清洗总结词：白名单方式，只保留中文与少量中文标点，其余一律剔除。
+def _clean_cjk_text(text: str) -> str:
+    """白名单清洗：只保留中文字符 + 常用中文标点，其余一律剔除。
 
-    旧实现用黑名单（列举要删的字符），漏掉了 . : ' " ? & ; 和全角标点，
-    一旦 LLM 泄漏英文思维链/复读提示词，删掉字母数字后会剩一大坨标点汤，
-    喂 ChatTTS 直接崩成咿呀。改为白名单后，无论上游来什么都只剩干净中文。
+    总结词、开场白等所有喂 TTS 的文本共用此清洗，避免白名单逻辑重复。
     """
-    t = text.strip().strip("「」\"'`").strip()
-    # 去掉可能的前缀（整段剥离，避免旧正则把"总结一下，"切成残体"一下，"）。
-    # 这里统一去前缀做标准化，由 generate_summary 末尾统一补回，保证不重复也不残缺。
-    t = re.sub(r"^总结(一下)?[，,：:]?", "", t).strip()
-    # 白名单：仅保留中文字符 + 常用中文标点（逗号/句号/顿号/叹问号）
+    t = text.strip()
     t = re.sub(r"[^一-鿿，。、！？]", "", t)
-    # 清理因删除产生的连续标点与开头标点
     t = re.sub(r"[，、]{2,}", "，", t)
     t = re.sub(r"。{2,}", "。", t)
     t = re.sub(r"[，、！？]+。", "。", t)
     t = re.sub(r"^[，、！？。]+", "", t)
     return t.strip()
+
+
+def _clean_summary_text(text: str) -> str:
+    """清洗总结词：先去引号与「总结」前缀，再走公共 CJK 白名单清洗。
+
+    前缀统一由 generate_summary 末尾补回，保证不重复也不残缺。
+    """
+    t = text.strip().strip("「」\"'`").strip()
+    t = re.sub(r"^总结(一下)?[，,：:]?", "", t).strip()
+    return _clean_cjk_text(t)
 
 
 def _has_forbidden_chars(text: str) -> bool:
@@ -1039,6 +1080,10 @@ _SUMMARY_META_MARKERS = (
     "用户要求", "需要扮演", "你是国际象棋", "请写", "要求写",
     "字总结", "对着镜头", "对镜头", "收尾总结", "做收尾", "镜头做",
     "纯口语", "不要标题", "不要逐步", "禁止出现", "禁止引擎", "绝对禁止",
+    # Qwen 思维链泄漏特征（无 GBNF 语法时 <think> 已被 _strip_thinking 删掉，
+    # 这里是兜底：万一 <think> 以变体形式泄漏或被改写成中文描述）：
+    "思考过程", "思维链", "思考如下", "指令要求", "根据指令",
+    "根据要求", "不会包含", "直接输出", "按照指令", "我理解",
 )
 
 
@@ -1125,41 +1170,187 @@ def _build_recap_from_segments(segments, max_parts: int = 5, per_len: int = 46) 
     return "；".join(parts)
 
 
-def _compose_opening(storyboard: dict) -> str:
-    """拼装开场白：残局类型 + 子力对比 + 理论判定 + 取胜思路一句话。
+def _derive_strategy(storyboard: dict) -> str:
+    """KB 未命中时，从子力构成推导一句简洁的取胜策略。
 
-    策略：纯模板拼装，不调用 LLM。开场白短而结构化，模板比自由生成更可靠，
-    且天然不会泄漏棋盘坐标、引擎术语或思维链。素材取自知识库的 opening 字段
-    （describe_endgame/build 已透传）；知识库未命中时退回通用句式。
-    末尾统一过 _clean_summary_text 做白名单清洗，保证喂 TTS 的是干净中文。
-    返回 ≤80 字开场白；任何异常或素材缺失时返回空串（管线据此跳过开场白）。
+    只根据强方拥有的后/车/兵类型给出通用原则，不追求穷举组合——
+    覆盖不到的退空字符串，由调用方兜底。
+    """
+    strong = storyboard.get("strong_material", "") or ""
+    weak = storyboard.get("weak_material", "") or ""
+
+    if not strong:
+        return ""
+
+    has_queen = "后" in strong
+    has_rook = "车" in strong
+    has_pawn = "兵" in strong
+    weak_solo_king = weak == "单王"
+    weak_has_rook = "车" in weak
+
+    # 后有压倒性优势
+    if has_queen:
+        if weak_solo_king:
+            return ("后的活动范围极广，核心是用己方王配合后逐步把对方王逼向边线，"
+                    "全程保持安全距离避免逼和")
+        if weak_has_rook:
+            return ("后对车的优势是全方位的——活动范围和威胁方向都远超单车，"
+                    "关键是连续将军配合王的推进，逐步压缩对方王的空间")
+        return ("后对轻子的优势是全方位的，"
+                "核心是避免被对方兑掉后，用后和王配合逐步压缩对方空间")
+
+    # 车兵残局
+    if has_rook and has_pawn:
+        return "取胜的关键是用车护送兵推进到底线升变，同时切断对方王的回防路线"
+
+    # 单车优势
+    if has_rook:
+        if weak_solo_king:
+            return ""  # 单车杀王已被 KB 覆盖
+        if weak_has_rook:
+            return "多一车等于多一条控制线，避免兑车简化、用多出来的车收紧包围"
+        return "车对轻子的优势在于控制力更强，用车封住关键线路，配合王步步紧逼"
+
+    # 有兵优势
+    if has_pawn:
+        return ("有兵方要利用兵的通路优势，在王保护下稳步推进，"
+                "迫使对方做出让步后兑现升变")
+
+    return ""
+
+
+def _compose_opening(storyboard: dict) -> str:
+    """开场白纯中文模板：残局概况 + 子力对比 + 取胜策略 + 过渡。
+
+    这是 generate_opening（LLM 生成）失败时的兜底，保证每个视频都有开场白。
+    KB 命中时用知识库的 winning_principle；未命中时通过 _derive_strategy
+    从子力类型推导具体策略，避免「把优势转化为胜势」这类说了等于没说的空话。
+    纯模板，天然无坐标/无术语泄漏。
     """
     try:
         endgame_name = storyboard.get("endgame_name", "") or ""
+        matched = storyboard.get("endgame_matched", False)
         winning_side = storyboard.get("winning_side", "") or ""
+        losing_side = storyboard.get("losing_side", "") or ""
+        strong_material = storyboard.get("strong_material", "") or ""
+        weak_material = storyboard.get("weak_material", "") or ""
+        white_material = storyboard.get("white_material", "") or ""
+        black_material = storyboard.get("black_material", "") or ""
         opening = storyboard.get("opening", {}) or {}
-        material_desc = opening.get("material_desc", "") or ""
         winning_principle = opening.get("winning_principle", "") or ""
 
-        # 残局名是开场白的最小必要素材；缺失（未匹配知识库）则不强行编造
-        if not endgame_name or endgame_name in ("残局", "单王残局"):
-            return ""
+        parts = []
 
-        parts = [f"这是一个{endgame_name}残局。"]
-        if material_desc:
-            parts.append(material_desc + "。")
-        if winning_side:
-            parts.append(f"理论上{winning_side}必胜。")
+        # 1) 残局引入 + 子力说明
+        if matched and endgame_name and endgame_name not in ("残局", "单王残局"):
+            parts.append(f"这是一个{endgame_name}残局")
+            if strong_material and weak_material:
+                parts.append(
+                    f"——{winning_side}有{strong_material}，{losing_side}只有{weak_material}。")
+            else:
+                parts.append("。")
+        elif strong_material and weak_material:
+            parts.append(
+                f"这个残局，{winning_side}有{strong_material}，"
+                f"{losing_side}仅有{weak_material}防守。")
+        elif white_material and black_material:
+            parts.append(
+                f"白方有{white_material}，黑方有{black_material}。")
+        else:
+            parts.append("我们来看这个残局。")
+
+        # 2) 取胜策略：优先 KB → 推导兜底 → 最简兜底
         if winning_principle:
             parts.append("核心思路是" + winning_principle + "。")
+        else:
+            derived = _derive_strategy(storyboard)
+            if derived:
+                parts.append("取胜的关键在于——" + derived + "。")
+            elif winning_side:
+                parts.append(
+                    f"由{winning_side}主导进攻，需要逐步把子力优势兑现为胜势。")
+
+        # 3) 过渡句
         parts.append("下面来看具体的推进过程。")
 
-        text = _clean_summary_text("".join(parts))
+        text = _clean_cjk_text("".join(parts))
         if not text or len(text) < 10:
-            return ""
+            return "下面来分析这个残局的取胜过程。"
         return text
     except Exception:
-        return ""
+        return "下面来分析这个残局的取胜过程。"
+
+
+def generate_opening(storyboard: dict, backend) -> str:
+    """生成开场白：与 generate_summary 同机制，由 LLM 生成 2-3 句中文导语。
+
+    内容聚焦：残局概况 + 双方子力对比 + 攻守方介绍，自然过渡到正式解说。
+    残局名仅在知识库命中时提供给模型，未命中则不给（不强行编造类型名）。
+    与总结词一致：纯中文 grammar 锁死、强清洗、校验失败回退 _compose_opening 模板。
+    """
+    endgame_name = storyboard.get("endgame_name", "") or ""
+    matched = storyboard.get("endgame_matched", False)
+    winning_side = storyboard.get("winning_side", "") or ""
+    losing_side = storyboard.get("losing_side", "") or ""
+    strong_material = storyboard.get("strong_material", "") or ""
+    weak_material = storyboard.get("weak_material", "") or ""
+    white_material = storyboard.get("white_material", "") or ""
+    black_material = storyboard.get("black_material", "") or ""
+    role_summary = storyboard.get("role_summary", "") or ""
+    opening = storyboard.get("opening", {}) or {}
+    winning_principle = opening.get("winning_principle", "") or ""
+
+    lines = [
+        "你是国际象棋残局教练，正要开始讲解一盘残局，现在对着镜头说开场导语。",
+        "请写一段2到3句的中文开场白：先点出这是个什么样的残局、双方各有哪些子力，",
+        "再说清哪一方占优、由谁主导进攻，最后自然过渡到接下来的讲解。",
+        "要求：① 纯口语中文，像讲课开场；② 不要逐步复述任何走法；",
+        "③ 绝对禁止出现任何英文字母、数字、棋盘坐标、格子名、棋谱记号或特殊符号；",
+        "④ 不要标题、序号、引号、markdown；⑤ 禁止引擎术语（评估值、距杀步数等）。",
+        "",
+    ]
+    # 残局名仅在 KB 命中时提供（未命中不给，避免模型编造类型名）
+    if matched and endgame_name and endgame_name not in ("残局", "单王残局"):
+        lines.append(f"残局类型：{endgame_name}")
+    if winning_side and strong_material and weak_material:
+        lines.append(f"子力对比：{winning_side}有{strong_material}，{losing_side}只有{weak_material}")
+    elif white_material and black_material:
+        lines.append(f"子力对比：白方有{white_material}，黑方有{black_material}")
+    if winning_side:
+        lines.append(f"占优并主导进攻的一方：{winning_side}")
+    if role_summary:
+        lines.append(f"攻守角色：{role_summary}")
+    if winning_principle:
+        lines.append(f"取胜思路：{winning_principle}")
+    else:
+        derived = _derive_strategy(storyboard)
+        if derived:
+            lines.append(f"取胜策略参考：{derived}")
+
+    # instruction-only 骨架：仅含「对模型说话」的指令行，用于 echo 检测
+    instruction_only = "\n".join(lines[:7])
+
+    prompt = "\n".join(lines)
+    prompt = prompt + "\n\n现在直接输出开场白正文（不要复述以上要求）："
+    # 不加 GBNF 语法：_SUMMARY_GRAMMAR 会阻止 Qwen 输出 <think> 标签，
+    # 导致思维链被挤成中文直接泄漏到输出中（"思考过程如下…"）。
+    # 不用语法时 Qwen 正常输出 <think>...</think> + 正文，
+    # _strip_thinking 删掉标签即可拿到干净的开场白。
+    raw = backend.generate(prompt, grammar=None)
+    raw = _strip_thinking(raw)
+    text = _clean_opening_text(raw)
+
+    # 校验：硬特征判废 或 整段复述指令 → 回退纯模板开场白
+    if _summary_is_bad(text) or _looks_like_prompt_echo(text, instruction_only):
+        return _compose_opening(storyboard)
+    return text
+
+
+def _clean_opening_text(text: str) -> str:
+    """清洗开场白：先去引号与「开场」前缀，再走公共 CJK 白名单清洗。"""
+    t = text.strip().strip("「」\"'`").strip()
+    t = re.sub(r"^开场[白]?[，,：:]?", "", t).strip()
+    return _clean_cjk_text(t)
 
 
 def _fallback_summary(storyboard: dict) -> str:
@@ -1277,13 +1468,11 @@ def generate_summary(storyboard: dict, backend, segments: list = None) -> str:
     instruction_only = "\n".join(lines[:7])
 
     prompt = "\n".join(lines)
-    # 根上减少泄漏：给模型一个明确的「该你输出了」落点。没有落点时，模型容易
-    # 把指令段当成要续写的上文、原样复述回来（线上见过的「需要扮演…用户要求写…」
-    # 就是这么来的）。结尾用「总结：」起头，让它直接从这里续写正文。
-    prompt = prompt + "\n\n现在直接输出总结正文（不要复述以上要求）：\n总结："
-    # /no_think 关闭 Qwen 思维链（总结只需稳定，不需要推理过程，且能避免
-    # 思维链以纯文本泄漏到输出）；_SUMMARY_GRAMMAR 从 token 级锁死只能吐中文。
-    raw = _strip_thinking(backend.generate("/no_think\n" + prompt, grammar=_SUMMARY_GRAMMAR))
+    prompt = prompt + "\n\n现在直接输出总结正文（不要复述以上要求）："
+    # 不加 GBNF 语法：与 generate_opening 同理 —— _SUMMARY_GRAMMAR
+    # 会与 Qwen 思维链冲突导致中文泄漏。不用语法 + _strip_thinking 即可。
+    raw = backend.generate(prompt, grammar=None)
+    raw = _strip_thinking(raw)
     text = _clean_summary_text(raw)
 
     # 校验兜底：硬特征判废（过短/过长/中文占比低/含元指令碎片/残留字母数字），
@@ -1439,8 +1628,13 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
             Logger.warn(f"总结词生成异常，使用模板兜底: {e}")
             commentary.summary = _fallback_summary(storyboard)
 
-    # 开场白（残局类型+子力对比+取胜思路），插在解说最前。纯模板拼装，失败返回空串
-    commentary.opening = _compose_opening(storyboard)
+    # 开场白（残局概况+子力对比+攻守方），插在解说最前。与总结词同机制由 LLM 生成，
+    # 失败回退纯模板（_compose_opening 保证非空），因此每个视频都有开场白。
+    try:
+        commentary.opening = generate_opening(storyboard, backend)
+    except Exception as e:
+        Logger.warn(f"开场白生成异常，使用模板兜底: {e}")
+        commentary.opening = _compose_opening(storyboard)
 
     status = "正常" if not commentary.fallback_used else f"部分回退({commentary.chunks_succeeded}/{total_chunks})"
     Logger.success(f"解说生成完成: {len(all_segments)} 段, {status}")

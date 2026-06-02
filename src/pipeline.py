@@ -231,8 +231,14 @@ def _run_pipeline(input_text: str):
     board = chess.Board(game_data.initial_fen)
 
     if not board.is_valid():
-        Logger.error(f"非法初始局面: FEN不合法 (status={board.status()})，无法生成解说")
-        return None
+        # STATUS_OPPOSITE_CHECK (1024) 表示"轮到走棋的一方正在将军对方"，
+        # 这在国际象棋中完全合法（白方刚走了一步将军，轮到白方继续走）。
+        # python-chess 的 is_valid() 对此返回 False 是出于 FEN 一致性检查，
+        # 但在残局分析场景中这种局面是合理的，不应拒绝。
+        status = board.status()
+        if status != chess.STATUS_OPPOSITE_CHECK:
+            Logger.error(f"非法初始局面: FEN不合法 (status={status})，无法生成解说")
+            return None
 
     Logger.info("[2/5] 查询最优解法...")
     analyzed_moves = get_solution(board, stockfish_path, tablebase_solver, syzygy_path)
@@ -264,6 +270,12 @@ def _run_pipeline(input_text: str):
     if not commentary.summary:
         from src.commentator import _fallback_summary
         commentary.summary = _fallback_summary(storyboard)
+
+    # 开场白兜底：结构化生成异常回退纯文本时 commentary 不带开场白，
+    # 这里用纯模板补上，保证每个视频都有开场白。
+    if not commentary.opening:
+        from src.commentator import _compose_opening
+        commentary.opening = _compose_opening(storyboard)
 
     try:
         release_backend()

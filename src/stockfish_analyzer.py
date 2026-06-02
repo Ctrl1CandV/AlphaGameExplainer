@@ -348,8 +348,12 @@ def get_solution(board: chess.Board, stockfish_path: str,
         Logger.error("非法局面：缺少白王或黑王，无法分析")
         return []
     if not board.is_valid():
-        Logger.error(f"非法局面: FEN不合法 (status={board.status()})，拒绝分析")
-        return []
+        # STATUS_OPPOSITE_CHECK (1024) 表示"轮到走棋的一方正在将军对方"，
+        # 在国际象棋中完全合法（白方刚走了一步将军），不应拒绝。
+        status = board.status()
+        if status != chess.STATUS_OPPOSITE_CHECK:
+            Logger.error(f"非法局面: FEN不合法 (status={status})，拒绝分析")
+            return []
     if board.is_game_over():
         Logger.info("局面已结束，无需分析")
         return []

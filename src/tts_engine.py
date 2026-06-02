@@ -169,17 +169,20 @@ def _preprocess_text_for_chattts(text: str, pacing: str) -> str:
     }
     speed_tag = speed_map.get(pacing, "[speed_5]")
 
-    # 句中韵律：句末标点必停；逗号/顿号/冒号仅在距上次停顿已积累足够内容时才停，避免碎读
+    # 句中韵律：句末标点仅在本句已积累足够内容时才插停顿；逗号/顿号/冒号同理。
+    # 短句（如开场白「这是一个X残局。」）不再每句都插 [uv_break]——过密的停顿
+    # 叠加低温采样会让 ChatTTS 在停顿处坍缩出「嗯/呃」衬词（开头几段尤甚）。
+    # 短句靠标点本身的自然停顿即可，不强行加 break。
     body = text.strip()
     out = []
     since_break = 0
     for ch in body:
         out.append(ch)
         since_break += 1
-        if ch in "。！？；":
+        if ch in "。！？；" and since_break >= 6:
             out.append("[uv_break]")
             since_break = 0
-        elif ch in "，、：" and since_break >= 8:
+        elif ch in "，、：" and since_break >= 10:
             out.append("[uv_break]")
             since_break = 0
     body = "".join(out)
@@ -225,12 +228,15 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
         path = os.path.abspath(os.path.join(AUDIO_DIR, f"seg_{seg.move_idx:03d}.wav"))
         seg.audio_path = path
 
+        # slow/pause 不再用 0.1 极低温：低温会让自回归 TTS 在停顿边界坍缩到
+        # 训练分布里概率最高的衬词 token（嗯/呃），开头慢节奏段尤其明显。
+        # 提到与 normal 接近的温度，韵律仍平稳但不再固定吐衬词。
         pacing_params = {
-            "slow":     {"temperature": 0.1, "top_P": 0.5, "top_K": 15},
+            "slow":     {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
             "normal":   {"temperature": 0.2, "top_P": 0.6, "top_K": 18},
             "fast":     {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
-            "pause_before": {"temperature": 0.1, "top_P": 0.5, "top_K": 15},
-            "pause_after":  {"temperature": 0.15, "top_P": 0.5, "top_K": 15},
+            "pause_before": {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
+            "pause_after":  {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
         }
         pp = pacing_params.get(seg.pacing, pacing_params["normal"])
         

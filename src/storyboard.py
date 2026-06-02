@@ -490,6 +490,27 @@ def _material_score(board: chess.Board, color: chess.Color) -> int:
 def _color_name(color: chess.Color) -> str:
     return "白方" if color == chess.WHITE else "黑方"
 
+def _side_material_desc(board: chess.Board, color: chess.Color) -> str:
+    """某一方除王外的子力中文描述（如「一车一兵」「单王」）。
+
+    永远可得，不依赖知识库匹配。用于开场白介绍双方子力对比，
+    在 KB 未命中的残局（双车、后兵等）下仍能产出准确的子力说明。
+    """
+    order = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN]
+    names = {chess.QUEEN: "后", chess.ROOK: "车", chess.BISHOP: "象",
+             chess.KNIGHT: "马", chess.PAWN: "兵"}
+    cn_num = {1: "一", 2: "两", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八"}
+    counts = {}
+    for piece in board.piece_map().values():
+        if piece.color == color and piece.piece_type != chess.KING:
+            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
+    parts = []
+    for pt in order:
+        c = counts.get(pt, 0)
+        if c > 0:
+            parts.append(f"{cn_num.get(c, str(c))}{names[pt]}")
+    return "".join(parts) if parts else "单王"
+
 def _piece_square(board: chess.Board, color: chess.Color, piece_type: chess.PieceType):
     for sq, piece in board.piece_map().items():
         if piece.color == color and piece.piece_type == piece_type:
@@ -939,11 +960,18 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             if tn:
                 node["tactical_narratives"] = tn
 
-            # importance 不再注入为"结论标签"（旧行为：注入 importance=high/low
-            # 并据此上调 is_critical）。改为仅用于内部参考，不写入 node，
-            # 让 LLM 自己从 tactical_narratives / teaching_point / spatial_change
-            # 中判断哪一步是关键手。
-            # 旧逻辑保留但不再向 prompt 注入 importance 标签。
+            # 关键手判定回灌：insight_extractor._compute_importance 已用棋盘事实
+            # （活动空间锐减/逼到边角/双重攻击/对王等）算出本节点的重要级别与理由。
+            # 本地小模型缺乏独立棋理推理力，拿不出「哪步关键、为什么关键」的综合判断，
+            # 只能堆套话填空。这里把已算好的结论+理由回灌给 prompt，让模型从「自己判断」
+            # 降级为「把给定结论讲透」——这是小模型能胜任的任务。
+            # 注意：仅作为「供讲解的判定依据」注入，不再据此上调 is_critical（避免污染压缩）。
+            importance = insight.get("importance", "")
+            reasons = insight.get("importance_reasons", []) or []
+            if importance:
+                node["move_importance"] = importance
+            if reasons:
+                node["importance_reasons"] = reasons
 
         # 引擎信号（中性观察，不给结论）：
         # 利用节点已有的 eval_delta / is_only_move 生成量化参考句。
@@ -977,8 +1005,22 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
     losing_side = _color_name(weak_color) if weak_color is not None else ""
     narrative_mode = "winning_conversion" if role_meta else "balanced"
 
+    # 开场白素材（永远可得，不依赖 KB）：双方子力中文描述。
+    # 强弱方未知（材料均势且无终局信息）时按颜色给出，仍可用于子力对比介绍。
+    if strong_color is not None:
+        strong_material = _side_material_desc(board, strong_color)
+        weak_material = _side_material_desc(board, weak_color)
+    else:
+        strong_material = ""
+        weak_material = ""
+
     return {
         "endgame_name": endgame_name,
+        "endgame_matched": kb is not None,
+        "white_material": _side_material_desc(board, chess.WHITE),
+        "black_material": _side_material_desc(board, chess.BLACK),
+        "strong_material": strong_material,
+        "weak_material": weak_material,
         "context": kb["theory"] if kb else "残局局面分析",
         "phases": phases,
         "motifs": kb.get("motifs", []) if kb else [],
