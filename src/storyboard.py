@@ -1,4 +1,4 @@
-from src.common import CompressedStep, Logger, AnalyzedMove
+from src.common import CompressedStep, Logger, AnalyzedMove, PIECE_VALUES
 from src.common import piece_cn
 from src.endgame_knowledge import match as match_endgame
 from src.endgame_knowledge import describe_endgame, get_forbidden_concepts
@@ -1029,3 +1029,353 @@ def _target_length(node_count: int) -> str:
     lo = max(700, node_count * 90)
     hi = max(1000, node_count * 120)
     return f"{lo}-{hi}字"
+
+
+# ============================================================
+#  Puzzle 战术讲解分镜构建（新增，不改原有函数）
+# ============================================================
+
+def _is_fork(board_before: chess.Board, move: chess.Move,
+             board_after: chess.Board) -> bool:
+    """检测走子后该子是否同时攻击两个或以上对方高价值目标（非兵）。"""
+    moved_sq = move.to_square
+    mover_color = board_before.turn
+    enemy_color = not mover_color
+
+    targets = []
+    for atk_sq in board_after.attacks(moved_sq):
+        target = board_after.piece_at(atk_sq)
+        if target is None or target.color != enemy_color:
+            continue
+        if target.piece_type == chess.PAWN:
+            continue
+        targets.append(target)
+    return len(targets) >= 2
+
+
+def _is_pin(board_before: chess.Board, move: chess.Move,
+            board_after: chess.Board) -> bool:
+    """检测走子后是否建立了牵制：己方远射子→对方被牵子→对方更高价值子共线。"""
+    mover_color = board_before.turn
+    enemy_color = not mover_color
+    enemy_king = board_after.king(enemy_color)
+
+    # 检查走子后，己方远射子（后/车/象）攻击线上是否有对方两子（前低后高）
+    for sq, piece in board_after.piece_map().items():
+        if piece.color != mover_color:
+            continue
+        if piece.piece_type not in (chess.QUEEN, chess.ROOK, chess.BISHOP):
+            continue
+        for atk_sq in board_after.attacks(sq):
+            target = board_after.piece_at(atk_sq)
+            if target is None or target.color != enemy_color:
+                continue
+            # 沿着同一方向继续查
+            ray_dir = (chess.square_file(atk_sq) - chess.square_file(sq),
+                       chess.square_rank(atk_sq) - chess.square_rank(sq))
+            if ray_dir == (0, 0):
+                continue
+            df = 1 if ray_dir[0] > 0 else (-1 if ray_dir[0] < 0 else 0)
+            dr = 1 if ray_dir[1] > 0 else (-1 if ray_dir[1] < 0 else 0)
+            next_sq = chess.square(chess.square_file(atk_sq) + df,
+                                   chess.square_rank(atk_sq) + dr)
+            if next_sq is None:
+                continue
+            behind = board_after.piece_at(next_sq)
+            if behind is None or behind.color != enemy_color:
+                continue
+            # 前子价值 ≤ 后子价值 → 牵制成立
+            if PIECE_VALUES.get(target.piece_type, 0) <= PIECE_VALUES.get(behind.piece_type, 0):
+                return True
+    return False
+
+
+def _is_skewer(board_before: chess.Board, move: chess.Move,
+               board_after: chess.Board) -> bool:
+    """检测走子后是否建立了串击：己方远射子→对方高价值子→对方低价值子共线。"""
+    mover_color = board_before.turn
+    enemy_color = not mover_color
+
+    for sq, piece in board_after.piece_map().items():
+        if piece.color != mover_color:
+            continue
+        if piece.piece_type not in (chess.QUEEN, chess.ROOK, chess.BISHOP):
+            continue
+        for atk_sq in board_after.attacks(sq):
+            target = board_after.piece_at(atk_sq)
+            if target is None or target.color != enemy_color:
+                continue
+            df = (1 if chess.square_file(atk_sq) > chess.square_file(sq)
+                  else (-1 if chess.square_file(atk_sq) < chess.square_file(sq) else 0))
+            dr = (1 if chess.square_rank(atk_sq) > chess.square_rank(sq)
+                  else (-1 if chess.square_rank(atk_sq) < chess.square_rank(sq) else 0))
+            if df == 0 and dr == 0:
+                continue
+            next_sq = chess.square(chess.square_file(atk_sq) + df,
+                                   chess.square_rank(atk_sq) + dr)
+            if next_sq is None:
+                continue
+            behind = board_after.piece_at(next_sq)
+            if behind is None or behind.color != enemy_color:
+                continue
+            # 前子价值 > 后子价值 → 串击成立
+            if PIECE_VALUES.get(target.piece_type, 0) > PIECE_VALUES.get(behind.piece_type, 0):
+                return True
+    return False
+
+
+def _is_discovered(board_before: chess.Board, move: chess.Move,
+                   board_after: chess.Board) -> bool:
+    """检测走子是否产生了闪击：移动的子让开了身后远射子的攻击线。"""
+    mover_color = board_before.turn
+    enemy_color = not mover_color
+
+    from_sq = move.from_square
+    to_sq = move.to_square
+
+    # 检查是否有己方远射子原本被移动子遮挡，现在露出并攻击对方子
+    for sq, piece in board_before.piece_map().items():
+        if piece.color != mover_color:
+            continue
+        if piece.piece_type not in (chess.QUEEN, chess.ROOK, chess.BISHOP):
+            continue
+        # 检查 from_sq 是否在这枚远射子到对方某子之间的线上
+        for atk_sq in board_before.attacks(sq):
+            target = board_before.piece_at(atk_sq)
+            if target is None or target.color != enemy_color:
+                continue
+            # 检查 from_sq 是否在 sq→atk_sq 之间
+            between = chess.SquareSet(chess.BB_BETWEEN[sq][atk_sq])
+            if from_sq in between:
+                return True
+    return False
+
+
+def associate_move_with_theme(board_before: chess.Board, move: chess.Move,
+                               board_after: chess.Board,
+                               effective_themes: List[str]) -> str:
+    """确定走法与哪个标签最相关（仅在 effective_themes 集合内择一，决策三）。
+
+    优先级：终局杀型 → 叉击 → 牵制 → 串击 → 闪击 → 主标签兜底。
+    """
+    # 1. 终局：从 effective_themes 反查杀型标签
+    if board_after.is_checkmate():
+        mate_in_themes = [t for t in effective_themes if t.endswith("Mate")]
+        if mate_in_themes:
+            return mate_in_themes[0]
+        if "mate" in effective_themes:
+            return "mate"
+
+    # 2. 几何可判的战术：仅在 effective_themes 内择一
+    if "fork" in effective_themes and _is_fork(board_before, move, board_after):
+        return "fork"
+    if "pin" in effective_themes and _is_pin(board_before, move, board_after):
+        return "pin"
+    if "skewer" in effective_themes and _is_skewer(board_before, move, board_after):
+        return "skewer"
+    if "discoveredAttack" in effective_themes and _is_discovered(board_before, move, board_after):
+        return "discoveredAttack"
+
+    # 3. 兜底：主标签
+    return effective_themes[0] if effective_themes else ""
+
+
+def _puzzle_target_length(node_count: int, rating: int) -> str:
+    """动态字数预算（实施决策 D）：按节点数 × 每节点字数预算，结合 Rating 分层。"""
+    if rating < 1500:
+        per_node = (90, 140)
+    elif rating < 2200:
+        per_node = (120, 190)
+    else:
+        per_node = (150, 240)
+
+    min_len = max(180, node_count * per_node[0])
+    max_len = max(320, node_count * per_node[1])
+    return f"{min(min_len, 2200)}-{min(max_len, 3200)}字"
+
+
+def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
+                     puzzle) -> dict:
+    """每个 move 直接成一个节点（跳过压缩）。逐步推演棋盘，提取每步事实，
+    关联标签，注入标签定义，返回与 build() 输出格式兼容的 storyboard dict。
+
+    puzzle: PuzzleData，含 effective_themes / rating / opening_tags 等。
+    """
+    from src.themes_kb import get_theme, primary_theme, get_theme_definitions_text
+
+    effective = puzzle.effective_themes
+    main_theme_key = primary_theme(effective)
+    main_theme = get_theme(main_theme_key) or {}
+
+    # 单步 CompressedStep 包装，供 insight_extractor 复用
+    temp = board.copy()
+    single_steps = []
+    for i, move in enumerate(moves):
+        fen_before = temp.fen()
+        san = temp.san(move)
+        is_check = temp.gives_check(move)
+        is_capture = temp.is_capture(move)
+        tags = []
+        if is_check:
+            tags.append("将军")
+        if is_capture:
+            tags.append("吃子")
+        temp.push(move)
+        fen_after = temp.fen()
+        single_steps.append(CompressedStep(
+            idx=i + 1,
+            sans=[san],
+            fen_before=fen_before,
+            fen_after=fen_after,
+            is_critical=True,  # puzzle 每步都是关键手
+            tags=tags,
+        ))
+
+    # 棋理洞察（puzzle 模式）
+    # 构造 puzzle 专用 role_meta（实施决策 C：以 board.turn 走子方为解题方/强方）
+    puzzle_role_meta = {
+        "strong_color": board.turn,
+        "weak_color": not board.turn,
+    }
+    insights = []
+    try:
+        from src.insight_extractor import extract_for_compressed
+        insights = extract_for_compressed(
+            single_steps, board, role_meta=puzzle_role_meta, endgame_name="",
+            mode="puzzle")
+    except Exception as e:
+        Logger.warn(f"Puzzle 棋理洞察提取失败: {e}")
+        insights = []
+
+    # 攻守视角（实施决策 C）
+    puzzle_side_color = board.turn
+    puzzle_side = "白方" if puzzle_side_color == chess.WHITE else "黑方"
+    defending_side = "黑方" if puzzle_side_color == chess.WHITE else "白方"
+    narrative_mode = "tactical_solution"
+    if main_theme_key == "defensiveMove":
+        narrative_mode = "defensive_resource"
+
+    # 逐节点构建
+    temp = board.copy()
+    nodes_out = []
+    for i, move in enumerate(moves):
+        board_before = temp.copy()
+        is_check = temp.gives_check(move)
+        is_capture = temp.is_capture(move)
+        is_checkmate_after = False
+        fen_before = temp.fen()
+        turn = "白方走" if temp.turn == chess.WHITE else "黑方走"
+        san = temp.san(move)
+        temp.push(move)
+        fen_after = temp.fen()
+        board_after = temp.copy()
+        if temp.is_checkmate():
+            is_checkmate_after = True
+
+        # 标签关联
+        related_theme = associate_move_with_theme(
+            board_before, move, board_after, effective)
+        theme_entry = get_theme(related_theme) or {}
+
+        # 标签上下文
+        theme_context = ""
+        if theme_entry:
+            theme_context = (
+                f"本步涉及【{theme_entry.get('cn', related_theme)}】："
+                f"{theme_entry.get('definition', '')}"
+            )
+
+        # 注入洞察
+        insight = insights[i] if i < len(insights) else {}
+        teaching_point = insight.get("teaching_point", "")
+        must_mention = insight.get("must_mention", [])
+        spatial_change = insight.get("spatial_change", {})
+        tactical_narratives = insight.get("tactical_narratives", [])
+        puzzle_tactical_facts = insight.get("puzzle_tactical_facts", [])
+
+        node = {
+            "id": i + 1,
+            "san": san,
+            "move_count": 1,
+            "turn": turn,
+            "moves": san,
+            "fen_before": fen_before,
+            "fen_after": fen_after,
+            "is_check": is_check,
+            "is_capture": is_capture,
+            "is_checkmate": is_checkmate_after,
+            "is_checkmate_after": is_checkmate_after,
+            "is_check_after": board_after.is_check(),
+            "is_game_over_after": board_after.is_game_over(),
+            "is_capture_node": is_capture,
+            "has_check_in_node": is_check,
+            "legal_reply_count_after": sum(1 for _ in board_after.legal_moves),
+            # Puzzle 专用字段
+            "related_theme": related_theme,
+            "theme_context": theme_context,
+            "prerequisite_facts": theme_entry.get("prerequisite", ""),
+            "common_mistakes": theme_entry.get("common_mistakes", []),
+            # 棋盘事实
+            "teaching_point": teaching_point,
+            "must_mention": must_mention,
+            "spatial_change": spatial_change,
+            "tactical_narratives": tactical_narratives,
+            "puzzle_tactical_facts": puzzle_tactical_facts,
+            # 兼容字段
+            "tags": single_steps[i].tags if i < len(single_steps) else [],
+            "suggested_pacing": "slow" if is_check or is_capture or is_checkmate_after else "normal",
+            "phase": "",
+            "phase_hint": "",
+            "claim_level": "terminal" if is_checkmate_after else "forcing" if is_check else "positioning",
+        }
+        nodes_out.append(node)
+
+    # 组装 storyboard
+    theme_defs_text = get_theme_definitions_text(effective)
+    tactic_name = main_theme.get("cn", "战术练习")
+    if len(effective) > 1:
+        other_names = []
+        for k in effective[1:]:
+            t = get_theme(k)
+            if t:
+                other_names.append(t["cn"])
+        if other_names:
+            tactic_name += " + " + " + ".join(other_names[:2])
+
+    return {
+        "endgame_name": tactic_name,
+        "endgame_matched": False,
+        "tactic_name": tactic_name,
+        "tactic_focus": {
+            "primary_theme": main_theme_key,
+            "theme_definitions": theme_defs_text,
+            "assertions": [main_theme.get("assertion", "")] if main_theme else [],
+            "narrative_mode": narrative_mode,
+        },
+        "difficulty_hint": puzzle.rating,
+        "difficulty_level": main_theme.get("difficulty_level", "intermediate"),
+        "rating": puzzle.rating,
+        "opening_context": puzzle.opening_tags,
+        "attacking_side": puzzle_side,
+        "defending_side": defending_side,
+        "puzzle_side": puzzle_side,
+        "narrative_mode": narrative_mode,
+        "target_length": _puzzle_target_length(len(moves), puzzle.rating),
+        "context": f"战术讲解：{tactic_name}",
+        "phases": [],
+        "motifs": [],
+        "mistakes": [],
+        "opening": {},
+        "role_summary": "",
+        "concept_binding": [],
+        "hard_constraints": [],
+        "winning_side": puzzle_side,
+        "losing_side": defending_side,
+        "white_material": _side_material_desc(board, chess.WHITE),
+        "black_material": _side_material_desc(board, chess.BLACK),
+        "strong_material": "",
+        "weak_material": "",
+        "compact_mode": False,
+        "has_sub_endgame_switch": False,
+        "nodes": nodes_out,
+    }

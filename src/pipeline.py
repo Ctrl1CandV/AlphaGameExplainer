@@ -336,3 +336,216 @@ def _check_draw(board, analyzed_moves, tablebase_solver) -> str:
         return "该残局最终局面为逼和/和棋，无法生成必胜解说。"
 
     return ""
+
+
+# ============================================================
+#  Puzzle 战术讲解管线（新增，不复用 _run_pipeline）
+# ============================================================
+
+def _run_puzzle_pipeline(input_text: str):
+    """执行 Puzzle 战术讲解管线，返回 (commentary, board, puzzle, storyboard)。"""
+    from src.parser import parse_puzzle_input
+    from src.storyboard import build_for_puzzle
+    from src.commentator import generate_puzzle_structured
+
+    Logger.info("=" * 20 + "Puzzle 战术讲解开始运行" + "=" * 20)
+
+    Logger.info("[1/4] 解析 Puzzle 输入...")
+    puzzle = parse_puzzle_input(input_text)
+    board = chess.Board(puzzle.fen)
+
+    if not board.is_valid():
+        status = board.status()
+        if status != chess.STATUS_OPPOSITE_CHECK:
+            Logger.error(f"非法初始局面: FEN不合法 (status={status})")
+            return None
+
+    Logger.info(f"  标签: {puzzle.effective_themes}, 步数: {len(puzzle.moves)}, Rating: {puzzle.rating}")
+
+    Logger.info("[2/4] 构建战术分镜...")
+    storyboard = build_for_puzzle(board, puzzle.moves, puzzle)
+
+    Logger.info("[3/4] 生成战术解说...")
+    try:
+        commentary = generate_puzzle_structured(board, storyboard)
+    except Exception as e:
+        Logger.error(f"Puzzle 解说生成失败: {e}")
+        return None
+
+    Logger.info("[4/4] 解说生成完成")
+    return commentary, board, puzzle, storyboard
+
+
+def run_puzzle(input_text: str) -> str:
+    """输出纯解说文本（对应 --puzzle --text）。"""
+    result = _run_puzzle_pipeline(input_text)
+    if result is None:
+        return ""
+    commentary, _board, _puzzle, _storyboard = result
+    print(commentary.raw_text)
+    return commentary.raw_text
+
+
+def _build_puzzle_segments(commentary, moves: list, nodes: list) -> list:
+    """按节点构造 Segment 列表（puzzle 版：无开场白/总结段，phase 为空）。"""
+    voice_map = {}
+    if commentary.segments:
+        for seg in commentary.segments:
+            voice_map[seg.id] = (seg.voiceover, seg.pacing)
+
+    result = []
+    for node in nodes:
+        nid = node["id"]
+        vo, pac = voice_map.get(nid, (None, "normal"))
+        text = vo if vo else ""
+        # 每节点一个 move（puzzle 不压缩）
+        node_moves = []
+        if nid <= len(moves):
+            node_moves = [moves[nid - 1]]
+        result.append(Segment(
+            move_idx=nid,
+            text=text,
+            pacing=pac or "normal",
+            moves=node_moves,
+            phase="",
+        ))
+    return result
+
+
+def run_puzzle_video(input_text: str, voice_prompt: str = "") -> str:
+    """输出视频（对应 --puzzle）。Phase 1 先沿用现有片头片尾保证链路跑通。"""
+    result = _run_puzzle_pipeline(input_text)
+    if result is None:
+        return ""
+
+    commentary, board, puzzle, storyboard = result
+    moves = puzzle.moves
+    nodes = storyboard.get("nodes", [])
+    if not moves:
+        Logger.error("无有效走法序列")
+        return ""
+
+    tactic_name = storyboard.get("tactic_name", "战术练习")
+
+    # TTS 语音合成
+    Logger.info("TTS 语音合成...")
+    from src.tts_engine import synthesize as tts_synthesize
+
+    segments = _build_puzzle_segments(commentary, moves, nodes)
+    segments = tts_synthesize(segments, voice_prompt=voice_prompt)
+
+    # 生成视频
+    Logger.info("生成视频...")
+    from src.board_renderer import render_animated_frames
+    from src.subtitle_gen import generate as gen_subtitles
+    from src.video_composer import compose, LEAD_SILENCE, INTRO_SEC
+
+    panel_info = {"endgame_name": tactic_name}
+
+    frame_paths, frame_durations = render_animated_frames(
+        segments, board.fen(), panel_info=panel_info)
+
+    # puzzle 链路跳过片头片尾，字幕偏移仅含初始局面展示时长
+    subtitle_offset = INTRO_SEC
+
+    from src.subtitle_gen import build_cues
+    srt_path = gen_subtitles(segments, offset_s=subtitle_offset)
+    cues = build_cues(segments, offset_s=subtitle_offset)
+
+    try:
+        output_path = compose(
+            frame_paths=frame_paths,
+            frame_durations=frame_durations,
+            segments=segments,
+            srt_path=srt_path,
+            endgame_name=tactic_name,
+            cues=cues,
+            initial_fen=board.fen(),
+            skip_title=True,
+            skip_outro=True,
+        )
+        Logger.success(f"Puzzle 视频已生成: {output_path}")
+        return output_path
+    finally:
+        _cleanup_temp_files(frame_paths, srt_path, segments)
+
+
+def run_puzzle_csv(filepath: str, limit: int = 0, text_only: bool = False) -> str:
+    """批量处理 CSV 文件（Phase 3）。
+
+    产物写入 output/puzzle_batch/{时间戳}/，单题命名 {PuzzleId}.mp4，
+    批次根目录生成 index.json。
+    """
+    from src.parser import parse_puzzle_csv
+    from datetime import datetime
+    import json as _json
+
+    Logger.info(f"批量处理 CSV: {filepath}")
+    puzzles = parse_puzzle_csv(filepath)
+    if not puzzles:
+        Logger.error("CSV 中未解析到有效 Puzzle")
+        return ""
+
+    if limit > 0:
+        puzzles = puzzles[:limit]
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    batch_dir = os.path.join("output", "puzzle_batch", timestamp)
+    os.makedirs(batch_dir, exist_ok=True)
+
+    index = []
+    total = len(puzzles)
+    for i, puzzle in enumerate(puzzles):
+        pid = puzzle.puzzle_id or f"row_{i + 1:05d}"
+        Logger.info(f"[{i + 1}/{total}] 处理 {pid}...")
+
+        status = "success"
+        error = ""
+        output_path = ""
+        try:
+            # 重新序列化为 text 格式以复用 _run_puzzle_pipeline
+            input_text = (
+                f'{{"fen":"{puzzle.fen}","moves":"{" ".join(m.uci() for m in puzzle.moves)}",'
+                f'"themes":"{" ".join(puzzle.raw_themes)}","rating":{puzzle.rating},'
+                f'"popularity":{puzzle.popularity},"openingTags":"{puzzle.opening_tags}",'
+                f'"puzzle_id":"{puzzle.puzzle_id}"}}'
+            )
+            if text_only:
+                result = _run_puzzle_pipeline(input_text)
+                if result is None:
+                    raise RuntimeError("管线返回空结果")
+                commentary, _board, _pz, _sb = result
+                output_path = os.path.join(batch_dir, f"{pid}.txt")
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(commentary.raw_text)
+            else:
+                output_path = run_puzzle_video(input_text)
+                if not output_path:
+                    raise RuntimeError("视频生成失败")
+                # 移动到批次目录
+                dest = os.path.join(batch_dir, f"{pid}.mp4")
+                import shutil
+                shutil.move(output_path, dest)
+                output_path = dest
+        except Exception as e:
+            status = "failed"
+            error = str(e)
+            Logger.error(f"  {pid} 失败: {e}")
+
+        index.append({
+            "puzzle_id": pid,
+            "rating": puzzle.rating,
+            "themes": puzzle.effective_themes,
+            "output_path": output_path,
+            "status": status,
+            "error": error,
+        })
+
+    # 写 index.json
+    index_path = os.path.join(batch_dir, "index.json")
+    with open(index_path, "w", encoding="utf-8") as f:
+        _json.dump(index, f, ensure_ascii=False, indent=2)
+
+    succeeded = sum(1 for e in index if e["status"] == "success")
+    Logger.success(f"批量处理完成: {succeeded}/{total}, 索引: {index_path}")
+    return batch_dir

@@ -230,10 +230,13 @@ def _create_subtitle_background(width: int, height: int) -> str:
 
 def compose(frame_paths: List[str], frame_durations: List[float],
             segments, srt_path: str, endgame_name: str = "",
-            fps: int = FPS, cues=None, initial_fen: str = "") -> str:
+            fps: int = FPS, cues=None, initial_fen: str = "",
+            skip_title: bool = False, skip_outro: bool = False) -> str:
     """合成最终视频。包含片头动画 → 渲染帧 → 片尾，并叠加字幕。
 
     initial_fen: 初始局面 FEN，用于片头棋盘缩略图
+    skip_title: True 时跳过片头标题卡动画（puzzle 链路使用）
+    skip_outro: True 时跳过片尾动画（puzzle 链路使用）
     """
     Logger.info("合成视频...")
 
@@ -243,14 +246,16 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     frame_w, frame_h = CANVAS_W, CANVAS_H
 
     # ---- 片头动画帧 ----
-    title_frames = _make_title_frames(
-        endgame_name or "残局讲解", frame_w, frame_h, initial_fen)
+    title_frames: List[Image.Image] = []
+    if not skip_title:
+        title_frames = _make_title_frames(
+            endgame_name or "残局讲解", frame_w, frame_h, initial_fen)
+        Logger.info(f"片头动画: {len(title_frames)} 帧, {TITLE_SEC:.1f}s")
     title_durations = [1.0 / fps] * len(title_frames)
-    Logger.info(f"片头动画: {len(title_frames)} 帧, {TITLE_SEC:.1f}s")
 
     # ---- 片尾帧 ----
     outro_frames: List[Image.Image] = []
-    if frame_paths:
+    if not skip_outro and frame_paths:
         try:
             last_frame = Image.open(frame_paths[-1]).convert("RGB")
             outro_frames = _make_outro_frames(last_frame, frame_w, frame_h)
@@ -279,8 +284,10 @@ def compose(frame_paths: List[str], frame_durations: List[float],
     video = ImageSequenceClip(all_frames, durations=all_durations)
 
     # ---- 组装音频 ----
+    # 跳过片头时前导静音仅含初始局面展示，否则含片头动画 + 初始局面展示
+    lead_silence = INTRO_SEC if skip_title else LEAD_SILENCE
     silence_path = os.path.join(frames_dir, "_silence.wav")
-    _make_silence(LEAD_SILENCE, silence_path)
+    _make_silence(lead_silence, silence_path)
     audio_clips = [AudioFileClip(silence_path)]
     pad_paths = []
     for idx, seg in enumerate(segments):

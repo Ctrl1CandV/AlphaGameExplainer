@@ -150,3 +150,17 @@ def resolve_path(path: str) -> str:
 
 def piece_cn(piece_type) -> str:
     return PIECE_CN.get(piece_type, "子")
+
+
+@dataclass
+class PuzzleData:
+    """Puzzle 战术讲解输入数据，来自 Lichess puzzle 数据库或手动输入。"""
+    fen: str                                    # 初始局面 FEN
+    moves: List[chess.Move] = field(default_factory=list)   # 正解走法序列（不校验合法性）
+    effective_themes: List[str] = field(default_factory=list)  # A 类有效标签（已过滤、保序）
+    auxiliary_themes: List[str] = field(default_factory=list)  # B 类辅助标签
+    raw_themes: List[str] = field(default_factory=list)        # 原始全量标签
+    rating: int = 0
+    popularity: int = 0
+    opening_tags: str = ""
+    puzzle_id: str = ""

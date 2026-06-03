@@ -1635,3 +1635,409 @@ def generate(board: chess.Board, storyboard: dict) -> str:
 
     final = "\n".join(all_parts).strip()
     return final
+
+
+# ============================================================
+#  Puzzle 战术讲解解说生成（新增，不改原有函数）
+# ============================================================
+
+def _get_depth_instruction(rating: int) -> str:
+    """三档分层（决策二）：<1500 / 1500-2200 / >2200。"""
+    if rating < 1500:
+        return (
+            "基础讲解，重点讲清「是什么」：\n"
+            "- 识别战术模式：这是什么类型的战术？\n"
+            "- 走法解释：这一步做了什么？\n"
+            "- 结果说明：吃掉了什么子？获得了什么优势？\n"
+            "- 语言要通俗易懂，适合初学者"
+        )
+    elif rating < 2200:
+        return (
+            "进阶讲解，重点讲清「为什么」：\n"
+            "- 战术原理：这个战术为什么能成立？\n"
+            "- 前提条件：对方的弱点是什么？我方的优势是什么？\n"
+            "- 关键手分析：这一步的精妙之处在哪里？\n"
+            "- 对方困境：对方为什么无法有效应对？\n"
+            "- 语言要专业但不晦涩"
+        )
+    else:
+        return (
+            "深度讲解，重点讲清「怎么发现」：\n"
+            "- 战术嗅觉：如何在实战中发现这类机会？\n"
+            "- 计算深度：需要看到几步之后？\n"
+            "- 关键格子/线路：哪些位置是战术焦点？\n"
+            "- 常见变体：如果走错会怎样？\n"
+            "- 相关战术：这个战术与其他战术有什么关联？\n"
+            "- 语言要深入专业，适合有一定基础的棋手"
+        )
+
+
+def _build_puzzle_json_header(storyboard: dict) -> str:
+    """战术分析专家人设 + 四层框架要求 + 标签定义注入 + depth_instruction。"""
+    tactic_name = storyboard.get("tactic_name", "战术练习")
+    tactic_focus = storyboard.get("tactic_focus", {})
+    theme_defs = tactic_focus.get("theme_definitions", "")
+    assertions = tactic_focus.get("assertions", [])
+    narrative_mode = tactic_focus.get("narrative_mode", "tactical_solution")
+    difficulty = storyboard.get("difficulty_level", "intermediate")
+    opening_context = storyboard.get("opening_context", "")
+    target_length = storyboard.get("target_length", "600-1500字")
+    rating = storyboard.get("rating", storyboard.get("difficulty_hint", 1500))
+    puzzle_side = storyboard.get("puzzle_side", "白方")
+    defending_side = storyboard.get("defending_side", "黑方")
+
+    # Rating → depth_instruction
+    depth = ""
+    try:
+        depth = _get_depth_instruction(int(rating))
+    except (ValueError, TypeError):
+        depth = _get_depth_instruction(1500)
+
+    node_count = len(storyboard.get("nodes", []))
+
+    lines = [
+        "你是一位专业的国际象棋战术分析专家。你的任务是深入拆解棋局中的战术结构，"
+        "帮助观众理解每一步背后的逻辑。",
+        "",
+        "你的讲解信条：",
+        "1. 深入浅出：用清晰的语言解释复杂的战术概念",
+        "2. 逻辑严密：每一步都要体现「前提→关键手→后果→识别信号」四层结构",
+        "3. 实战导向：帮助观众培养战术嗅觉，学会在实战中发现类似机会",
+        "4. 专业准确：使用正确的棋术术语，避免模糊表述",
+        "",
+        f"【战术主题】{tactic_name}",
+    ]
+
+    if theme_defs:
+        lines.extend([
+            "",
+            "【标签定义】以下是你应该围绕讲解的战术概念，请融入讲解中：",
+            theme_defs,
+        ])
+
+    if assertions:
+        for a in assertions:
+            if a:
+                lines.append(f"【核心约束】{a}")
+
+    if opening_context:
+        lines.append(f"【开局背景】{opening_context}")
+
+    lines.extend([
+        "",
+        f"【叙事视角】从{puzzle_side}（解题方）视角讲解。",
+    ])
+    if narrative_mode == "defensive_resource":
+        lines.append(
+            "本题是防守型战术——重点讲{puzzle_side}在劣势中如何找到唯一防守资源化解危机。"
+        )
+    else:
+        lines.append(
+            f"重点讲{puzzle_side}如何主动发现战术机会，通过强制手段获得优势或杀棋。"
+        )
+
+    lines.extend([
+        "",
+        f"【讲解深度要求】{depth}",
+        "",
+        "【四层讲解框架】每步解说要体现：",
+        "第一层·前提：这个战术为什么能成立？对方的弱点是什么？",
+        "第二层·关键手：这一步做了什么？局面发生了什么变化？",
+        "第三层·后果：对方为什么无法有效应对？强制性在哪里？",
+        "第四层·识别信号：读者以后怎么发现类似机会？典型特征是什么？",
+        "",
+        "【解说规则】",
+        f"- 正好{node_count}个segment，不增不减",
+        "- 不要开场白和总结词，直接切入战术分析",
+        "- 第一步就要进入战术讲解，不要铺垫局面背景",
+        "- 整体围绕战术标签讲，每步尽量结合相关标签解释",
+        "- 使用标签中的专业术语，但要解释清楚",
+        f"- 全局字数预算控制在{target_length}",
+        "- 每段80-200字，关键步可多写，过渡步概括",
+        "- 禁止使用引擎术语：评估值、分数、厘兵、mate in N",
+        "- 禁止虚构或假设走法",
+        "- voiceover用纯中文口播，禁止出现棋盘坐标（如h7、g5）",
+        "- 指位置时改用方位关系：「底线」「边线」「中心」「王前」「同一条斜线」等",
+        "",
+        "【JSON格式】",
+        '{"segments":[{"id":int,"sub_endgame":"","voiceover":"string","pacing":"slow|normal|fast|pause_before|pause_after"},...]}',
+        "segments数量必须等于节点数。sub_endgame字段固定输出空字符串即可。",
+    ])
+    return "\n".join(lines)
+
+
+def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
+                                total_chunks: int) -> str:
+    """构建 puzzle 分块 prompt。"""
+    is_last = (chunk_idx == total_chunks - 1)
+    lines = [header]
+
+    chunk_rule = ""
+    if total_chunks > 1:
+        if is_last:
+            chunk_rule = "本段包含最后几步，允许在最后一步做总结性收束。"
+        else:
+            chunk_rule = "本段只解说这些步骤，禁止提前总结。"
+    lines.append(f"--- 第{chunk_idx + 1}/{total_chunks}段节点 {'(最后)' if is_last else ''} ---")
+    if chunk_rule:
+        lines.append(chunk_rule)
+    lines.append("")
+
+    for node in chunk_nodes:
+        nid = node["id"]
+        lines.append(f"--- 节点{nid} ---")
+        lines.append(f"走法: {node['moves']}（{node.get('turn', '')}）")
+        lines.append(f"状态: {'将军' if node.get('is_check') else '非将军'}"
+                     f" | {'吃子' if node.get('is_capture') else '未吃子'}"
+                     f" | {'已将杀' if node.get('is_checkmate') else '未将杀'}")
+
+        # 标签上下文
+        theme_ctx = node.get("theme_context", "")
+        if theme_ctx:
+            lines.append(f"战术关联: {node.get('related_theme', '')} — {theme_ctx}")
+
+        # 前提事实
+        prereq = node.get("prerequisite_facts", "")
+        if prereq:
+            lines.append(f"战术前提: {prereq}")
+
+        # 常见错误
+        mistakes = node.get("common_mistakes", [])
+        if mistakes:
+            lines.append(f"常见误区: {'；'.join(mistakes[:2])}")
+
+        # 棋盘事实
+        teaching = node.get("teaching_point", "")
+        if teaching:
+            lines.append(f"棋理事实: {teaching}")
+
+        must = node.get("must_mention", [])
+        if must:
+            lines.append(f"应提及: {'；'.join(must)}")
+
+        tactical = node.get("tactical_narratives", [])
+        if tactical:
+            lines.append("棋理分析:")
+            for tn in tactical:
+                lines.append(f"  · {tn}")
+
+        geo = node.get("puzzle_tactical_facts", [])
+        if geo:
+            lines.append("战术几何事实:")
+            for gf in geo:
+                lines.append(f"  · {gf}")
+
+        # pacing 提示
+        pacing = node.get("suggested_pacing", "normal")
+        if pacing in ("slow", "pause_before", "pause_after"):
+            lines.append(f"节奏: {pacing} — 这是关键节点，请重点展开讲解")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _validate_puzzle_segment(seg: dict, node: dict) -> tuple:
+    """puzzle 专用校验：保留 JSON 结构/数量/长度/pacing 校验，
+    移除将杀/将军/吃子的真值禁止校验（puzzle 中这些是正常内容）。
+    不强制每段提及 related_theme（实施决策 B：只做软约束）。
+    """
+    seg_id = seg.get("id")
+    if not isinstance(seg_id, int):
+        return False, f"id={seg_id}不是有效整数"
+
+    voiceover = seg.get("voiceover")
+    if not isinstance(voiceover, str) or not voiceover.strip():
+        return False, "voiceover为空"
+
+    # 最短长度校验
+    min_len = 28 if node.get("is_checkmate_after") and len(node.get("moves", "")) <= 4 else 48
+    if len(voiceover.strip()) < min_len:
+        return False, f"voiceover过短({len(voiceover.strip())}<{min_len})"
+
+    pacing = seg.get("pacing", "normal")
+    pacing = str(pacing).strip().lower()
+    if pacing not in ALLOWED_PACING:
+        return False, f"pacing='{pacing}'不合法"
+
+    # 反套话检测：使用相同的 _reduce_cliches 逻辑但只做检测不做替换
+    # 如果清洗后长度大幅缩水，说明套话占比过高
+    cleaned = _reduce_cliches(voiceover.strip())
+    if len(cleaned) < len(voiceover.strip()) * 0.3:
+        return False, "voiceover套话占比过高"
+
+    return True, ""
+
+
+def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
+    """puzzle 专用自动修复：只做坐标清洗 + 反套话 + 标点收敛，
+    不做战术词强制替换（puzzle 中将军/吃子/将杀是正常内容）。
+    """
+    fixed = text
+
+    # 坐标兜底清洗
+    fixed = _strip_coordinates(fixed)
+
+    # 反套话
+    fixed = _reduce_cliches(fixed)
+
+    # 标点收敛
+    fixed = re.sub(r"[，,]{2,}", "，", fixed)
+    fixed = re.sub(r"。{2,}", "。", fixed)
+    fixed = re.sub(r"\s{2,}", " ", fixed)
+    fixed = re.sub(r"[，、]+。", "。", fixed)
+    fixed = re.sub(r"^[，、。]+", "", fixed)
+    fixed = fixed.strip()
+
+    return fixed
+
+
+def _validate_puzzle_chunk(data: dict, chunk_nodes: list) -> tuple:
+    """逐段校验 puzzle chunk。"""
+    segments = data.get("segments")
+    if not isinstance(segments, list):
+        return False, "顶层缺少segments数组"
+    if len(segments) != len(chunk_nodes):
+        return False, f"segments数量{len(segments)}与节点数{len(chunk_nodes)}不一致"
+
+    for i, seg in enumerate(segments):
+        if not isinstance(seg, dict):
+            return False, f"第{i+1}个segment不是对象"
+        ok, err = _validate_puzzle_segment(seg, chunk_nodes[i])
+        if not ok:
+            return False, f"segment[{i}]{err}"
+
+    return True, ""
+
+
+def generate_puzzle_structured(board: chess.Board, storyboard: dict) -> GeneratedCommentary:
+    """Puzzle 战术讲解主入口。结构与 generate_structured 同构（分块/GBNF/重试/修复），但：
+    - 用 _build_puzzle_json_header 取代 _build_json_header
+    - 用 _validate_puzzle_chunk 取代 _validate_storyboard_chunk
+    - 不生成 opening / summary
+    - 复用 _parse_storyboard_json / _auto_fix_voiceover / _strip_coordinates / _reduce_cliches
+    """
+    nodes = storyboard.get("nodes", [])
+    commentary = GeneratedCommentary()
+
+    if not nodes:
+        Logger.warn("Puzzle 分镜数据为空，无法生成解说")
+        return commentary
+
+    backend = create_backend_from_env()
+    commentary.backend = backend.name
+
+    node_count = len(nodes)
+    total_chunks = max(1, (node_count + CHUNK_SIZE - 1) // CHUNK_SIZE)
+
+    json_header = _build_puzzle_json_header(storyboard)
+    all_segments = []
+    commentary.chunks_total = total_chunks
+
+    for chunk_idx in range(total_chunks):
+        start = chunk_idx * CHUNK_SIZE
+        end = min(start + CHUNK_SIZE, node_count)
+        chunk_nodes = nodes[start:end]
+
+        json_prompt = _build_puzzle_chunk_prompt(
+            json_header, chunk_nodes, chunk_idx, total_chunks)
+        chunk_grammar = _build_chunk_grammar(len(chunk_nodes))
+
+        success = False
+        err_msg = "首次尝试失败"
+        for attempt in range(MAX_RETRIES + 1):
+            if attempt == 0:
+                prompt = json_prompt
+            else:
+                prompt = _build_retry_prompt(json_prompt, err_msg, attempt)
+                commentary.retries_total += 1
+
+            raw_text = _strip_thinking(backend.generate(prompt, grammar=chunk_grammar))
+            if not raw_text:
+                err_msg = "生成空结果"
+                continue
+
+            data = _parse_storyboard_json(raw_text)
+            if data is _INVALID_JSON_SENTINEL:
+                err_msg = "输出不是合法JSON"
+                continue
+
+            # 校验前预处理：用 puzzle 专用 auto-fix
+            segments = data.get("segments")
+            if isinstance(segments, list) and len(segments) == len(chunk_nodes):
+                for si, seg in enumerate(segments):
+                    seg["voiceover"] = _auto_fix_puzzle_voiceover(
+                        seg.get("voiceover", ""), chunk_nodes[si])
+
+            ok, err_msg = _validate_puzzle_chunk(data, chunk_nodes)
+            if ok:
+                chunk_segments = _finalize_chunk_segments(data, chunk_nodes)
+                all_segments.extend(chunk_segments)
+                commentary.chunks_succeeded += 1
+                success = True
+                break
+
+            # 逐段修复（puzzle 专用，不用残局版 _repair_failed_segments）
+            if isinstance(segments, list) and len(segments) == len(chunk_nodes):
+                for si, seg in enumerate(segments):
+                    node = chunk_nodes[si]
+                    original_vo = seg.get("voiceover", "")
+                    fixed_vo = _auto_fix_puzzle_voiceover(original_vo, node)
+                    if fixed_vo != original_vo:
+                        seg["voiceover"] = fixed_vo
+                data["segments"] = segments
+                repaired_ok, _ = _validate_puzzle_chunk(data, chunk_nodes)
+                if repaired_ok:
+                    chunk_segments = _finalize_chunk_segments(data, chunk_nodes)
+                    all_segments.extend(chunk_segments)
+                    commentary.chunks_succeeded += 1
+                    success = True
+                    break
+
+        if not success:
+            Logger.warn(f"  Puzzle块{chunk_idx + 1}结构化生成失败，回退文本模式")
+            commentary.fallback_used = True
+            text_output = _generate_chunk_fallback(json_prompt)
+            fallback_parts = _split_fallback_text(text_output, chunk_nodes) if text_output else {}
+
+            chunk_segments = []
+            for node in chunk_nodes:
+                nid = node["id"]
+                if nid in fallback_parts:
+                    voice = fallback_parts[nid]
+                elif text_output:
+                    voice = text_output[:MAX_CHARS] if nid == chunk_nodes[0]["id"] else node.get("san", f"第{nid}步")
+                else:
+                    voice = node.get("san", f"第{nid}步（解说生成失败）")
+                chunk_segments.append(StoryboardSegment(
+                    id=nid,
+                    sub_endgame="",
+                    voiceover=voice,
+                    pacing=normalize_pacing(node.get("suggested_pacing", "normal")),
+                    visuals=_build_visuals_from_node(node),
+                ))
+            all_segments.extend(chunk_segments)
+
+    commentary.segments = all_segments
+
+    # 跨段去重
+    if all_segments and not commentary.fallback_used:
+        try:
+            _dedupe_across_segments(all_segments)
+        except Exception:
+            pass
+
+    commentary.raw_text = "\n".join(
+        f"第{seg.id}步：{seg.voiceover}" for seg in all_segments
+    )
+
+    # Puzzle 不生成 opening 和 summary（留在空字符串）
+    from src.llm_backend import release_backend
+    try:
+        release_backend()
+    except Exception:
+        pass
+
+    status = "正常" if not commentary.fallback_used else f"部分回退({commentary.chunks_succeeded}/{total_chunks})"
+    Logger.success(f"Puzzle 解说生成完成: {len(all_segments)} 段, {status}")
+    return commentary

@@ -404,13 +404,85 @@ def _compute_importance(facts: dict, cs_is_critical: bool) -> tuple:
         return "medium", reasons
     return "low", reasons
 
+def _puzzle_tactical_facts(board_before: chess.Board, cs, board_after: chess.Board,
+                           role_meta: Optional[dict]) -> List[str]:
+    """E 类：puzzle 战术几何事实（Phase 1：走子后攻击目标 + 悬子检测）。
+
+    返回关系化中文叙述列表，不含坐标。
+    """
+    facts = []
+    try:
+        weak_color = role_meta.get("weak_color") if role_meta else None
+        strong_color = role_meta.get("strong_color") if role_meta else None
+        if not strong_color or not weak_color:
+            return facts
+
+        temp = board_before.copy()
+        for san in cs.sans:
+            try:
+                move = temp.parse_san(san)
+            except ValueError:
+                continue
+
+            mover = temp.turn
+            temp.push(move)
+
+            if mover != strong_color:
+                continue
+
+            # 1) 走子后该子攻击了哪些高价值目标
+            moved_sq = move.to_square
+            high_value_targets = []
+            for atk_sq in temp.attacks(moved_sq):
+                target = temp.piece_at(atk_sq)
+                if target is None or target.color != weak_color:
+                    continue
+                if target.piece_type in (chess.KING, chess.PAWN):
+                    continue
+                high_value_targets.append(_piece_cn(target.piece_type))
+            if high_value_targets:
+                targets_str = "、".join(high_value_targets)
+                facts.append(f"走子后，该子同时瞄住了对方的{targets_str}")
+
+            # 2) 检测悬子（hanging piece）：无保护或保护不足的弱方子
+            for sq, piece in temp.piece_map().items():
+                if piece.color != weak_color or piece.piece_type == chess.KING:
+                    continue
+                if piece.piece_type == chess.PAWN:
+                    continue
+                attackers = temp.attackers(strong_color, sq)
+                defenders = temp.attackers(weak_color, sq)
+                if attackers and len(defenders) < len(attackers):
+                    cn = _piece_cn(piece.piece_type)
+                    if len(defenders) == 0:
+                        facts.append(f"对方的{cn}处于悬空状态，没有任何保护")
+                    else:
+                        facts.append(f"对方的{cn}保护不足，攻方子力多于守方")
+
+        # 去重
+        seen = set()
+        out = []
+        for f in facts:
+            if f not in seen:
+                seen.add(f)
+                out.append(f)
+        return out[:4]
+    except Exception:
+        return []
+
+
 def extract_for_node(
-    cs, root_winner_strong: Optional[chess.Color], 
-    role_meta: Optional[dict], endgame_name: str, prev_state: dict
+    cs, root_winner_strong: Optional[chess.Color],
+    role_meta: Optional[dict], endgame_name: str, prev_state: dict,
+    mode: str = "endgame"
     ) -> dict:
     """
     对单个压缩节点提取洞察。prev_state 跨节点累计（已到边线/角落标记）。
     失败安全：任何异常都返回空洞察 dict，不抛出。
+
+    mode="endgame"（默认）：走现有逻辑，零影响。
+    mode="puzzle"：关闭残局专用事实（B/C 类），保留战术叙述（D 类），
+                  新增战术几何事实（E 类）。
     """
     try:
         board_before = chess.Board(cs.fen_before)
@@ -430,30 +502,34 @@ def extract_for_node(
             "last_check": replay["last_check"],
         }
 
-        # 强方最后一个动作短语
+        is_puzzle = (mode == "puzzle")
+
+        # 强方最后一个动作短语（两种模式通用）
         if replay["strong_actions"]:
             facts["last_strong_action_phrase"] = _action_phrase(
                 replay["strong_actions"][-1], endgame_name)
 
-        # 多着机动块：用 tags 里的标签作整体描述
-        maneuver_tags = {"将军驱赶", "连续将军驱赶", "反复试探等待", "对王调整"}
-        hit = [t for t in (cs.tags or []) if t in maneuver_tags]
-        if hit and len(cs.sans) >= 3:
-            label_map = {
-                "连续将军驱赶": "这是一连串将军驱赶，把对方王一路逼着退",
-                "将军驱赶": "用将军一步步把对方王往边角赶",
-                "反复试探等待": "反复调子试探、等一步，逼对方先动",
-                "对王调整": "围绕对王来回调整，争夺关键格",
-            }
-            facts["maneuver_label"] = label_map.get(hit[0], "")
+        # 多着机动块（B 类：puzzle 模式下跳过）
+        if not is_puzzle:
+            maneuver_tags = {"将军驱赶", "连续将军驱赶", "反复试探等待", "对王调整"}
+            hit = [t for t in (cs.tags or []) if t in maneuver_tags]
+            if hit and len(cs.sans) >= 3:
+                label_map = {
+                    "连续将军驱赶": "这是一连串将军驱赶，把对方王一路逼着退",
+                    "将军驱赶": "用将军一步步把对方王往边角赶",
+                    "反复试探等待": "反复调子试探、等一步，逼对方先动",
+                    "对王调整": "围绕对王来回调整，争夺关键格",
+                }
+                facts["maneuver_label"] = label_map.get(hit[0], "")
 
-        # 对王
-        opp = _detect_opposition(board_after)
-        if opp:
-            facts["opposition"] = opp
+        # 对王（B 类：puzzle 模式下跳过）
+        if not is_puzzle:
+            opp = _detect_opposition(board_after)
+            if opp:
+                facts["opposition"] = opp
 
-        # 空间变化（弱方王活动度）
-        if weak_color is not None:
+        # 空间变化（B 类：puzzle 模式下跳过弱方王活动度分析）
+        if weak_color is not None and not is_puzzle:
             safe_before = _king_safe_squares(board_before, weak_color)
             safe_after = _king_safe_squares(board_after, weak_color)
             facts["weak_before"] = len(safe_before)
@@ -466,7 +542,7 @@ def extract_for_node(
             on_edge = region in ("edge", "corner")
             in_corner = region == "corner"
 
-            # 阶段里程碑：首次到边线 / 首次到角落
+            # 阶段里程碑（B 类：puzzle 模式下跳过）
             if in_corner and not prev_state.get("in_corner"):
                 facts["milestone"] = "对方王首次被逼进角落，进入收网阶段"
                 prev_state["in_corner"] = True
@@ -477,14 +553,23 @@ def extract_for_node(
 
             facts["on_edge"] = on_edge
             facts["in_corner"] = in_corner
+        elif weak_color is not None and is_puzzle:
+            # puzzle 模式：仍记录 is_checkmate_after 供后续使用
+            facts["weak_before"] = None
+            facts["weak_after"] = None
 
         teaching = _compose_teaching(facts, endgame_name)
         must = _compose_must_mention(facts)
         importance, reasons = _compute_importance(facts, getattr(cs, "is_critical", False))
 
-        # 战术叙述（新）：纯棋理中文，不给结论只给前提
-        tactical_narratives = _extract_tactical_narrative(
-            cs, board_before, board_after, role_meta)
+        # 战术叙述（D 类：puzzle 模式下保留但关闭 C 类"必胜残局"断言）
+        if is_puzzle:
+            # 只提取双重攻击部分，跳过残局类型质变→必胜残局断言
+            tactical_narratives = _extract_tactical_narrative_puzzle(
+                cs, board_before, board_after, role_meta)
+        else:
+            tactical_narratives = _extract_tactical_narrative(
+                cs, board_before, board_after, role_meta)
 
         spatial = {}
         if facts.get("role_known") and facts.get("weak_before") is not None:
@@ -497,7 +582,7 @@ def extract_for_node(
                 "escapes_cut": facts.get("escapes_cut", 0),
             }
 
-        return {
+        result = {
             "teaching_point": teaching,
             "must_mention": must,
             "importance": importance,
@@ -505,8 +590,15 @@ def extract_for_node(
             "spatial_change": spatial,
             "tactical_narratives": tactical_narratives,
         }
+
+        # E 类：puzzle 战术几何事实（Phase 1）
+        if is_puzzle:
+            geo_facts = _puzzle_tactical_facts(board_before, cs, board_after, role_meta)
+            if geo_facts:
+                result["puzzle_tactical_facts"] = geo_facts
+
+        return result
     except Exception:
-        # 失败安全：返回空洞察，调用方按"无洞察"处理，行为退回旧链路
         return {
             "teaching_point": "",
             "must_mention": [],
@@ -516,19 +608,105 @@ def extract_for_node(
             "tactical_narratives": [],
         }
 
+
+def _extract_tactical_narrative_puzzle(cs, board_before, board_after, role_meta) -> List[str]:
+    """puzzle 模式专用战术叙述：只提取双重攻击部分，跳过残局类型质变断言（C 类关闭）。"""
+    try:
+        narratives = []
+        weak_color = role_meta.get("weak_color") if role_meta else None
+        strong_color = role_meta.get("strong_color") if role_meta else None
+
+        if not strong_color or not weak_color:
+            return []
+
+        # 逐着检测双重攻击 + 被迫丢子（与 endgame 版相同逻辑）
+        temp = board_before.copy()
+        for san in cs.sans:
+            try:
+                move = temp.parse_san(san)
+            except ValueError:
+                continue
+
+            mover_color = temp.turn
+            gives_check = temp.gives_check(move)
+
+            if gives_check and mover_color == strong_color:
+                temp2 = temp.copy()
+                temp2.push(move)
+
+                moved_sq = move.to_square
+                for attacked_sq in temp2.attacks(moved_sq):
+                    target = temp2.piece_at(attacked_sq)
+                    if (target is None or target.color != weak_color
+                            or target.piece_type == chess.KING
+                            or target.piece_type == chess.PAWN):
+                        continue
+
+                    defenders = temp2.attackers(target.color, attacked_sq)
+                    if defenders:
+                        continue
+
+                    weak_name = "白" if weak_color == chess.WHITE else "黑"
+                    target_name = _PIECE_CN.get(target.piece_type, "子")
+                    can_save = False
+                    for reply in temp2.legal_moves:
+                        temp3 = temp2.copy()
+                        temp3.push(reply)
+                        target_piece = temp3.piece_at(attacked_sq)
+                        if target_piece is None:
+                            continue
+                        strong_attackers = temp3.attackers(strong_color, attacked_sq)
+                        weak_defenders = temp3.attackers(weak_color, attacked_sq)
+                        if not strong_attackers:
+                            can_save = True
+                            break
+                        if len(weak_defenders) >= len(strong_attackers):
+                            can_save = True
+                            break
+
+                    if not can_save:
+                        narratives.append(
+                            f"这一着同时做了两件事：给{weak_name}王将军，同时直接攻击{weak_name}{target_name}。"
+                            f"{weak_name}方必须应将，但在所有合法的应将走法中，"
+                            f"没有一步能同时保住{weak_name}{target_name}——"
+                            f"这意味着{weak_name}{target_name}必定在下一步被吃掉。"
+                        )
+                    else:
+                        narratives.append(
+                            f"这一着同时将军并攻击{weak_name}{target_name}——一子两用，"
+                            f"对方必须应将的同时还要处理{target_name}的威胁。"
+                        )
+                    break
+
+            temp.push(move)
+
+        # 去重限长
+        seen = set()
+        out = []
+        for n in narratives:
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out[:3]
+
+    except Exception:
+        return []
+
 def extract_for_compressed(
     compressed: List, root_board: chess.Board,
-    role_meta: Optional[dict] = None, endgame_name: str = ""
+    role_meta: Optional[dict] = None, endgame_name: str = "",
+    mode: str = "endgame"
     ) -> List[dict]:
     """对整个压缩序列提取洞察，返回与 compressed 等长的 list。
 
     role_meta: storyboard._role_meta 的产物（含 strong_color/weak_color）。
                为空时仍可提取动作/对王等与立场无关的事实。
+    mode: "endgame"（默认，零影响）或 "puzzle"（关闭残局专用事实、启用战术几何）。
     """
     insights = []
     prev_state = {"on_edge": False, "in_corner": False}
     root_winner_strong = role_meta.get("strong_color") if role_meta else None
     for cs in compressed:
         insights.append(extract_for_node(
-            cs, root_winner_strong, role_meta, endgame_name, prev_state))
+            cs, root_winner_strong, role_meta, endgame_name, prev_state, mode=mode))
     return insights
