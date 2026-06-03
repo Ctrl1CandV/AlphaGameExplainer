@@ -360,6 +360,10 @@ def _run_puzzle_pipeline(input_text: str):
             Logger.error(f"非法初始局面: FEN不合法 (status={status})")
             return None
 
+    # Lichess 预备步：推进对方铺垫手，使棋盘到达解题起始位置
+    if puzzle.prelude_move is not None:
+        board.push(puzzle.prelude_move)
+
     Logger.info(f"  标签: {puzzle.effective_themes}, 步数: {len(puzzle.moves)}, Rating: {puzzle.rating}")
 
     Logger.info("[2/4] 构建战术分镜...")

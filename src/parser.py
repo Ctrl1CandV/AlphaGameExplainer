@@ -90,8 +90,16 @@ def _build_puzzle_data(fen: str, moves_str: str, themes_str: str,
         except ValueError as e:
             raise ValueError(f"UCI 走法格式错误: '{tok}'") from e
 
+    # Lichess 约定：Moves[0] 为对方预备步，Moves[1:] 为解答步
+    # 仅 1 步时（FEN 已为解题位置）不拆分
+    prelude_move = None
+    if len(moves) >= 2:
+        prelude_move = moves[0]
+        moves = moves[1:]
+
     return PuzzleData(
         fen=fen,
+        prelude_move=prelude_move,
         moves=moves,
         effective_themes=effective,
         auxiliary_themes=auxiliary,

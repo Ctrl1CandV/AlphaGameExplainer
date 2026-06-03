@@ -154,12 +154,19 @@ def piece_cn(piece_type) -> str:
 
 @dataclass
 class PuzzleData:
-    """Puzzle 战术讲解输入数据，来自 Lichess puzzle 数据库或手动输入。"""
-    fen: str                                    # 初始局面 FEN
-    moves: List[chess.Move] = field(default_factory=list)   # 正解走法序列（不校验合法性）
-    effective_themes: List[str] = field(default_factory=list)  # A 类有效标签（已过滤、保序）
-    auxiliary_themes: List[str] = field(default_factory=list)  # B 类辅助标签
-    raw_themes: List[str] = field(default_factory=list)        # 原始全量标签
+    """
+    Puzzle 战术讲解输入数据，来自 Lichess puzzle 数据库或手动输入。
+    Lichess 约定：Moves 中第一步为对方预备步（opponent's prep move），
+    FEN 为预备步走子前的局面。展示给解题方的局面是推完第一步之后的局面，
+    第二步才是解答的起始步。
+    - 无预备步时（手动输入等），prelude_move 为 None，moves 即为全部走法。
+    """
+    fen: str
+    prelude_move: Optional[chess.Move] = None        # 对方预备步（Lichess 第一步）
+    moves: List[chess.Move] = field(default_factory=list)  # 正解走法序列（从预备步后开始）
+    effective_themes: List[str] = field(default_factory=list)
+    auxiliary_themes: List[str] = field(default_factory=list)
+    raw_themes: List[str] = field(default_factory=list)
     rating: int = 0
     popularity: int = 0
     opening_tags: str = ""

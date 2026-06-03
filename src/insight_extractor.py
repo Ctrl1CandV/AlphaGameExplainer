@@ -1,4 +1,4 @@
-from src.common import PIECE_CN as _PIECE_CN, piece_cn as _piece_cn
+from src.common import PIECE_CN as _PIECE_CN, piece_cn as _piece_cn, PIECE_VALUES as _PIECE_VALUES
 from typing import List, Optional
 import chess
 
@@ -470,6 +470,69 @@ def _puzzle_tactical_facts(board_before: chess.Board, cs, board_after: chess.Boa
     except Exception:
         return []
 
+
+
+
+def _net_material_fact(start_board: chess.Board,
+                       moves: list,
+                       strong_color: chess.Color) -> str:
+    """计算整串走法走完后，强方相对开局的子力净值，返回一句中文叙述。
+    无净值优势时返回空串，由调用方处理杀棋判定。"""
+    try:
+        strong_captured = {}   # 强方吃掉的对方子（仅真实吃子）
+        weak_captured = {}     # 弱方吃掉的强方子（仅真实吃子）
+        has_promotion = False  # 强方是否包含升变（用于纯升变文本）
+        temp = start_board.copy()
+
+        for move in moves:
+            mover = temp.turn
+
+            # 只追踪真实吃子，不混入升变
+            captured_type = None
+            if temp.is_en_passant(move):
+                captured_type = chess.PAWN
+            else:
+                victim = temp.piece_at(move.to_square)
+                if victim is not None:
+                    captured_type = victim.piece_type
+            if captured_type is not None:
+                bucket = strong_captured if mover == strong_color else weak_captured
+                bucket[captured_type] = bucket.get(captured_type, 0) + 1
+
+            # 强方升变仅标记，不混入吃子桶（升变≠吃子，混入会污染对消逻辑的文本输出）
+            if move.promotion and mover == strong_color:
+                has_promotion = True
+
+            temp.push(move)
+
+        def _value(bucket):
+            return sum(_PIECE_VALUES.get(pt, 0) * n for pt, n in bucket.items())
+
+        net_points = _value(strong_captured) - _value(weak_captured)
+
+        # 纯升变（无吃子）：净点值为 0，但升变本身就是实质性收益
+        if net_points == 0 and has_promotion:
+            return "经过升变，强方获得了更强的子力"
+
+        if net_points <= 0:
+            return ""
+
+        # 对消双方共有的棋子类型，尽量映射到单一棋子名
+        remain = dict(strong_captured)
+        for pt, n in weak_captured.items():
+            remain[pt] = remain.get(pt, 0) - n
+        remain = {pt: n for pt, n in remain.items() if n > 0}
+
+        if len(remain) == 1:
+            pt, n = next(iter(remain.items()))
+            unit = _piece_cn(pt)
+            count_cn = "一" if n == 1 else ("两" if n == 2 else str(n))
+            return f"经过这一连串交换，强方净赢{count_cn}个{unit}"
+
+        # 无法映射到单一棋子：吃子+升变混杂时用点值
+        return f"经过这一连串交换，强方净多得约{net_points}个兵的子力价值"
+    except Exception:
+        return ""
 
 def extract_for_node(
     cs, root_winner_strong: Optional[chess.Color],

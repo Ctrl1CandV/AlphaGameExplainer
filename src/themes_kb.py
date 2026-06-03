@@ -136,6 +136,10 @@ def get_theme_definitions_text(themes: List[str]) -> str:
             lines.append(f"  识别: {t['recognition']}")
         if t.get("teaching_focus"):
             lines.append(f"  教学重点: {t['teaching_focus']}")
+        if t.get("typical_consequence"):
+            lines.append(f"  典型后果: {t['typical_consequence']}")
+        if t.get("defense_reference"):
+            lines.append(f"  防守思路: {t['defense_reference']}")
         if t.get("common_mistakes"):
             lines.append(f"  常见错误: {'；'.join(t['common_mistakes'])}")
         lines.append("")

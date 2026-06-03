@@ -821,6 +821,7 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             cs.phase_hint = phases[pi][1]
 
     nodes_out = []
+    start_board_for_material = board.copy()
     prev_phase = ""
     prev_endgame_name = ""
     prev_endgame_type = ""
@@ -1258,6 +1259,7 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
     # 逐节点构建
     temp = board.copy()
     nodes_out = []
+    start_board_for_material = board.copy()
     for i, move in enumerate(moves):
         board_before = temp.copy()
         is_check = temp.gives_check(move)
@@ -1315,6 +1317,8 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
             "theme_context": theme_context,
             "prerequisite_facts": theme_entry.get("prerequisite", ""),
             "common_mistakes": theme_entry.get("common_mistakes", []),
+            "typical_consequence": theme_entry.get("typical_consequence", ""),
+            "defense_reference": theme_entry.get("defense_reference", ""),
             # 棋盘事实
             "teaching_point": teaching_point,
             "must_mention": must_mention,
@@ -1329,6 +1333,16 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
             "claim_level": "terminal" if is_checkmate_after else "forcing" if is_check else "positioning",
         }
         nodes_out.append(node)
+
+    # 整串走法子力净值，只挂到最后一个节点（杀棋结尾不输出）
+    if nodes_out:
+        from src.insight_extractor import _net_material_fact
+        net_fact = _net_material_fact(
+            start_board_for_material, moves, puzzle_side_color)
+        last_node = nodes_out[-1]
+        if net_fact and not last_node.get("is_checkmate_after"):
+            net_fact = net_fact.replace("强方", puzzle_side)
+            last_node["puzzle_tactical_facts"].append(net_fact)
 
     # 组装 storyboard
     theme_defs_text = get_theme_definitions_text(effective)

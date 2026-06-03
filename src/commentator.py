@@ -1701,9 +1701,10 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         "",
         "你的讲解信条：",
         "1. 深入浅出：用清晰的语言解释复杂的战术概念",
-        "2. 逻辑严密：每一步都要体现「前提→关键手→后果→识别信号」四层结构",
+        "2. 焦点突出：每段优先讲清两件事——这个战术标签的本质，以及它在本步如何具体落实；其余信息点到为止",
         "3. 实战导向：帮助观众培养战术嗅觉，学会在实战中发现类似机会",
         "4. 专业准确：使用正确的棋术术语，避免模糊表述",
+        "5. 叙事自然：用连贯的段落串联信息，不要逐条罗列'第一层...第二层...'，禁止出现层号或编号词",
         "",
         f"【战术主题】{tactic_name}",
     ]
@@ -1729,7 +1730,7 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
     ])
     if narrative_mode == "defensive_resource":
         lines.append(
-            "本题是防守型战术——重点讲{puzzle_side}在劣势中如何找到唯一防守资源化解危机。"
+            f"本题是防守型战术——重点讲{puzzle_side}在劣势中如何找到唯一防守资源化解危机。"
         )
     else:
         lines.append(
@@ -1740,11 +1741,10 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         "",
         f"【讲解深度要求】{depth}",
         "",
-        "【四层讲解框架】每步解说要体现：",
-        "第一层·前提：这个战术为什么能成立？对方的弱点是什么？",
-        "第二层·关键手：这一步做了什么？局面发生了什么变化？",
-        "第三层·后果：对方为什么无法有效应对？强制性在哪里？",
-        "第四层·识别信号：读者以后怎么发现类似机会？典型特征是什么？",
+        "【讲解要点】每段围绕以下两个焦点展开，自然成段，不要逐条编号：",
+        "- 焦点一：本步用到的战术标签是什么、为什么在这里成立（对方的弱点/失误在哪）",
+        "- 焦点二：这个战术在本局如何具体落实，带来的确定结果是什么（如净赢的子力、被控的关键线路）",
+        "- 其余（强制性来源、对方为何无法应对、实战识别）可一笔带过，不必展开",
         "",
         "【解说规则】",
         f"- 正好{node_count}个segment，不增不减",
@@ -1753,10 +1753,11 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         "- 整体围绕战术标签讲，每步尽量结合相关标签解释",
         "- 使用标签中的专业术语，但要解释清楚",
         f"- 全局字数预算控制在{target_length}",
-        "- 每段80-200字，关键步可多写，过渡步概括",
+        "- 每段60-160字，关键步可多写，过渡步从简；宁可简洁精准，不要面面俱到",
         "- 禁止使用引擎术语：评估值、分数、厘兵、mate in N",
         "- 禁止虚构或假设走法",
         "- voiceover用纯中文口播，禁止出现棋盘坐标（如h7、g5）",
+        "- 禁止输出单独的大写棋子字母（N/B/R/Q/K），请用'马/象/车/后/王'",
         "- 指位置时改用方位关系：「底线」「边线」「中心」「王前」「同一条斜线」等",
         "",
         "【JSON格式】",
@@ -1764,6 +1765,21 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         "segments数量必须等于节点数。sub_endgame字段固定输出空字符串即可。",
     ])
     return "\n".join(lines)
+
+
+_SAN_PIECE_MAP = {'N': '马', 'B': '象', 'R': '车', 'Q': '后', 'K': '王'}
+
+
+def _san_piece_to_chinese(moves_str: str) -> str:
+    """将 SAN 走法中的棋子字母转为中文。如 'Nf6'→'马'，无棋子字母时（兵走法）返回'兵'。"""
+    if moves_str.startswith("O-O-O"):
+        return "后翼易位"
+    if moves_str.startswith("O-O"):
+        return "王翼易位"
+    for piece in ('N', 'B', 'R', 'Q', 'K'):
+        if moves_str.startswith(piece):
+            return _SAN_PIECE_MAP[piece]
+    return "兵"
 
 
 def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
@@ -1786,46 +1802,44 @@ def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
     for node in chunk_nodes:
         nid = node["id"]
         lines.append(f"--- 节点{nid} ---")
-        lines.append(f"走法: {node['moves']}（{node.get('turn', '')}）")
+        lines.append(f"走法: {_san_piece_to_chinese(node['moves'])}（{node.get('turn', '')}）")
         lines.append(f"状态: {'将军' if node.get('is_check') else '非将军'}"
                      f" | {'吃子' if node.get('is_capture') else '未吃子'}"
                      f" | {'已将杀' if node.get('is_checkmate') else '未将杀'}")
 
-        # 标签上下文
+        # —— 核心材料（必须讲清）——
         theme_ctx = node.get("theme_context", "")
         if theme_ctx:
-            lines.append(f"战术关联: {node.get('related_theme', '')} — {theme_ctx}")
-
-        # 前提事实
-        prereq = node.get("prerequisite_facts", "")
-        if prereq:
-            lines.append(f"战术前提: {prereq}")
-
-        # 常见错误
-        mistakes = node.get("common_mistakes", [])
-        if mistakes:
-            lines.append(f"常见误区: {'；'.join(mistakes[:2])}")
-
-        # 棋盘事实
-        teaching = node.get("teaching_point", "")
-        if teaching:
-            lines.append(f"棋理事实: {teaching}")
-
-        must = node.get("must_mention", [])
-        if must:
-            lines.append(f"应提及: {'；'.join(must)}")
-
-        tactical = node.get("tactical_narratives", [])
-        if tactical:
-            lines.append("棋理分析:")
-            for tn in tactical:
-                lines.append(f"  · {tn}")
+            lines.append(f"[核心] 战术关联: {node.get('related_theme', '')} — {theme_ctx}")
 
         geo = node.get("puzzle_tactical_facts", [])
         if geo:
-            lines.append("战术几何事实:")
+            lines.append("[核心] 本局确定事实:")
             for gf in geo:
                 lines.append(f"  · {gf}")
+
+        must = node.get("must_mention", [])
+        if must:
+            lines.append(f"[核心] 应提及: {'；'.join(must)}")
+
+        teaching = node.get("teaching_point", "")
+        if teaching:
+            lines.append(f"[核心] 棋理事实: {teaching}")
+
+        # —— 参考材料（自然时一笔带过，不展开）——
+        prereq = node.get("prerequisite_facts", "")
+        if prereq:
+            lines.append(f"[参考] 战术前提: {prereq}")
+
+        mistakes = node.get("common_mistakes", [])
+        if mistakes:
+            lines.append(f"[参考] 常见误区: {'；'.join(mistakes[:2])}")
+
+        tactical = node.get("tactical_narratives", [])
+        if tactical:
+            lines.append("[参考] 棋理分析:")
+            for tn in tactical:
+                lines.append(f"  · {tn}")
 
         # pacing 提示
         pacing = node.get("suggested_pacing", "normal")
@@ -1860,26 +1874,26 @@ def _validate_puzzle_segment(seg: dict, node: dict) -> tuple:
     if pacing not in ALLOWED_PACING:
         return False, f"pacing='{pacing}'不合法"
 
-    # 反套话检测：使用相同的 _reduce_cliches 逻辑但只做检测不做替换
-    # 如果清洗后长度大幅缩水，说明套话占比过高
-    cleaned = _reduce_cliches(voiceover.strip())
+    # 反套话检测：使用 puzzle 轻量版检测（不做形容词清洗，避免'精准/精确'等战术词被误杀）
+    cleaned = _reduce_cliches_puzzle(voiceover.strip())
     if len(cleaned) < len(voiceover.strip()) * 0.3:
         return False, "voiceover套话占比过高"
+
+    # 确保 segment id 与节点 id 对齐（多 chunk 时 LLM 可能从 1 重新编号）
+    seg["id"] = node["id"]
 
     return True, ""
 
 
 def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
-    """puzzle 专用自动修复：只做坐标清洗 + 反套话 + 标点收敛，
-    不做战术词强制替换（puzzle 中将军/吃子/将杀是正常内容）。
-    """
+    """puzzle 专用自动修复：坐标清洗 + 轻量反套话（保留战术形容词）+ 标点收敛。"""
     fixed = text
 
     # 坐标兜底清洗
     fixed = _strip_coordinates(fixed)
 
-    # 反套话
-    fixed = _reduce_cliches(fixed)
+    # 轻量反套话（不做形容词删除，保留'精准/精确'等战术语义词）
+    fixed = _reduce_cliches_puzzle(fixed)
 
     # 标点收敛
     fixed = re.sub(r"[，,]{2,}", "，", fixed)
@@ -1890,6 +1904,40 @@ def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
     fixed = fixed.strip()
 
     return fixed
+
+
+# ── Puzzle 专用轻量反套话表 ───────────────────────────────────────────
+# 与 _CLICHE_PATTERNS 的区别：跳过形容词类清洗（精准/精确/精妙 等在战术讲解中承载实际语义）。
+_PUZZLE_CLICHE_PATTERNS = [
+    (r"看似(?:平淡无奇|平平无奇|平淡|不起眼|普通|简单)[，,]?(?:实则|却|其实)?", ""),
+    (r"别看这一步[^，。]{0,6}[，,]", ""),
+    (r"如同?利剑出鞘", ""),
+    (r"如洪水般(不可阻挡)?", "持续"),
+    (r"天罗地网", "严密的控制"),
+    (r"天衣无缝", "完整"),
+    (r"密不透风", "严密"),
+    (r"无形的牢笼", "包围"),
+    (r"胜利的天平(开始|彻底)?(倾斜)?", "优势"),
+    (r"(已如)?囊中之物", "胜势已成"),
+    (r"不可阻挡", ""),
+    (r"暗藏杀机", ""),
+    (r"耐心的围猎", "稳步驱赶"),
+    (r"致命一击", "最后一击"),
+    (r"愈发默契", "更协调"),
+    (r"(配合|协调)(愈发|越来越)默契", "配合更协调"),
+    (r"默契(的)?配合", "配合"),
+    (r"步步为营", "稳步推进"),
+    (r"[，,]?\s*为(?:后续|接下来|下一步|最终|后面|最后)(?:的)?[^，。、！]{0,16}"
+     r"(?:做准备|做好准备|奠定[了]?(?:坚实)?基础|创造[了]?[^，。]{0,8}条件|铺平[了]?道路|埋下伏笔)", ""),
+]
+
+
+def _reduce_cliches_puzzle(text: str) -> str:
+    """Puzzle 轻量反套话：只删废话模板，保留战术形容词。"""
+    out = text
+    for pat, repl in _PUZZLE_CLICHE_PATTERNS:
+        out = re.sub(pat, repl, out)
+    return out
 
 
 def _validate_puzzle_chunk(data: dict, chunk_nodes: list) -> tuple:

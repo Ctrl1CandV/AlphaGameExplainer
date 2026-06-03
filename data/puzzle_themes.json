@@ -26,7 +26,9 @@
         "clearance",
         "sacrifice"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方被迫投入子力看防通路兵，己方趁机在其他区域获得子力优势或制造威胁。",
+      "defense_reference": "防守方应在升变前调动子力封锁兵的推进路线，或趁对方推进时发动反击牵制。"
     },
     {
       "key": "attackingF2F7",
@@ -55,7 +57,9 @@
         "exposedKing",
         "fork"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "f2/f7防线被撕开后，对方王滞留中央、无法安全易位，防线崩溃导致快速被杀或大幅失子。",
+      "defense_reference": "防守方应尽早易位，或用马和后保护f2/f7，切忌贪吃诱饵而打开防线。"
     },
     {
       "key": "capturingDefender",
@@ -83,7 +87,9 @@
         "hangingPiece",
         "overloading"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "目标子失去保护后被白吃，己方获得明确子力优势或直接杀棋。",
+      "defense_reference": "防守方应避免单子承担关键防守职责，或提前布置闪将/间招作为反击伏笔。"
     },
     {
       "key": "discoveredAttack",
@@ -97,7 +103,7 @@
       "definition": "移动己方一子，让开身后另一远射子（车、象、后）的攻击线，从而同时产生两个威胁。",
       "recognition": "己方两子叠在同一条线上，中间子移开后，后方远射子直接攻击对方高价值目标。",
       "key_move_signal": "中间子移开、露出后方攻击线的那一手；常伴随将军（闪将）或直接威胁吃子。",
-      "teaching_focus": "讲清哪枚子移开了、露出了谁的攻击线、被攻击的目标为何无法同时应对两个威胁。",
+      "teaching_focus": "讲清哪枚子移开了、露出了身后谁的攻击线、两个威胁分别是什么（如车攻击后 + 马威胁吃车）、对方为什么无法一手同时化解。",
       "assertion": "本题已确定核心战术为【闪击】。请围绕『如何通过移动一子同时产生两个威胁』组织讲解，明确指出闪击发生的关键手。",
       "prerequisite": "己方一枚远射子被己方另一子挡在同一线上，移开即露出攻击。",
       "common_mistakes": [
@@ -110,7 +116,9 @@
         "doubleCheck",
         "fork"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方同时面临两个威胁，通常只能应对其中一个，另一威胁兑现导致失子、失势或被将杀。",
+      "defense_reference": "防守方应寻找能同时解两威胁的着法，或提前察觉叠线隐患并补防。"
     },
     {
       "key": "doubleCheck",
@@ -137,7 +145,9 @@
         "smotheredMate",
         "exposedKing"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方王被双将后被迫移动（唯一解将方式），王移动到不安全地带后遭追击杀棋。",
+      "defense_reference": "防守方无法用吃子或垫子解双将，唯一解防是王逃往安全格；应提前察觉闪击威胁，不给双将机会。"
     },
     {
       "key": "exposedKing",
@@ -152,7 +162,7 @@
       "definition": "对方王周围缺乏兵阵保护，暴露在开阔地带，容易受到多方子力的联合攻击。",
       "recognition": "对方王前方无兵遮挡，周围可动格子少且均被己方子力控制。",
       "key_move_signal": "利用对方王暴露的弱点发动攻击的关键手（如将军、逼迫、控制关键格）。",
-      "teaching_focus": "讲清对方王为何暴露、己方如何集中火力攻击暴露的王、对方为何无法及时筑起防线。",
+      "teaching_focus": "指出王暴露的具体证据（如g列兵冲到了g4、王前空荡荡）、己方子力如何逐格压缩王的生存空间、每一步将军让王更逼近死角。",
       "assertion": "本题已确定核心战术涉及【暴露王】。请围绕『如何利用对方王暴露的弱点发动攻击』组织讲解，不要脱离攻击暴露王的主线。",
       "prerequisite": "对方王前兵阵残缺、周围缺乏防守子力。",
       "common_mistakes": [
@@ -165,7 +175,9 @@
         "sacrifice",
         "doubleCheck"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方王被反复将军、无兵阵掩护，最终被逼入角落或边线形成杀棋。",
+      "defense_reference": "防守方应尽快在王前筑起兵阵并集结防守子力；若王已暴露，须找安全格躲藏并伺机反攻。"
     },
     {
       "key": "fork",
@@ -184,7 +196,7 @@
       "definition": "同一枚棋子在一步之内同时攻击对方两个或更多目标，对方无法同时保全，必丢其一。",
       "recognition": "某子落点后，其攻击范围同时覆盖两个高价值目标（常见王与后、王与车）；若其中一个是将军，对方被迫应将而丢掉另一子。",
       "key_move_signal": "走子后该子同时攻击两个目标、且常伴随将军的那一手，即为本题的叉击手。",
-      "teaching_focus": "讲清是哪枚子完成叉击、同时叉住了哪两个目标、对方为何顾此失彼；带将军时强调对方必须先解将、无暇救子。",
+      "teaching_focus": "明确说出哪枚子完成叉击、同时叉住了哪两个具体子（如'后叉王与车'）、为何对方顾此失彼；带将军时强调应的强制性让另一目标无法同时被救。",
       "assertion": "本题已确定核心战术为【叉击】。请围绕『如何用一步同时攻击两个目标』组织讲解，明确指出叉击发生在哪一手，不要讲成其他战术、不要虚构无关情节。",
       "prerequisite": "对方两个目标同时落在己方某子一步可及的攻击范围内，且无法同时保全。",
       "common_mistakes": [
@@ -197,7 +209,9 @@
         "attraction",
         "discoveredAttack"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "对方被迫应对更紧迫的目标（如应将），另一个目标被吃掉，净赚一子或更多。",
+      "defense_reference": "防守方应避免高价值子与王站成可叉形态，或确保被叉目标至少有一个有保护。"
     },
     {
       "key": "hangingPiece",
@@ -225,7 +239,9 @@
         "capturingDefender",
         "deflection"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "对方无保护子被直接吃掉，己方获得子力优势；若连续多次出现悬子，局面迅速溃败。",
+      "defense_reference": "防守方每次走子后应确认是否有子失去保护；养成'走前检查、走后复查'的习惯。"
     },
     {
       "key": "kingsideAttack",
@@ -252,7 +268,9 @@
         "sacrifice",
         "clearance"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "王翼防线被突破后，对方王暴露在f/g/h线的火力网内，形成杀棋或被迫弃子解杀。",
+      "defense_reference": "防守方应保持王前兵阵完整，避免过早推进保护兵；对方集结子力时须第一时间补防或中央反击以分散攻势。"
     },
     {
       "key": "pin",
@@ -268,7 +286,7 @@
       "definition": "用远射子（车、象、后）攻击对方一子，使其无法移开（否则暴露身后更高价值的子），从而限制其行动。",
       "recognition": "己方远射子、对方被牵子、对方被保护子三者在一条线上；被牵子移动会暴露身后子。",
       "key_move_signal": "建立牵制的那一手（远射子站到线上）；或利用已有牵制发动攻击的关键手。",
-      "teaching_focus": "讲清哪枚子被牵制了、为什么它不能移动、如何利用牵制（如吃掉被牵子或攻击被保护子）。",
+      "teaching_focus": "点明牵制类型（绝对/相对）、被牵的是哪一枚子、身后被保护的是什么子、如何加码攻击被牵子让局面不可挽回。",
       "assertion": "本题已确定核心战术为【牵制】。请围绕『如何利用牵制限制对方子力行动』组织讲解，明确指出建立或利用牵制的关键手。",
       "prerequisite": "己方远射子、对方被牵子、对方更高价值子三者共线。",
       "common_mistakes": [
@@ -281,7 +299,9 @@
         "capturingDefender",
         "xRayAttack"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "被牵制子丧失功能且无法逃脱，对方被迫承受子力损失或阵地失控。",
+      "defense_reference": "防守方可尝试将军解牵、垫子挡线、或弃被牵子换取补偿（仅限相对牵制），绝对牵制下只能寻找反击机会。"
     },
     {
       "key": "queensideAttack",
@@ -308,7 +328,9 @@
         "exposedKing",
         "advancedPawn"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "后翼防线被突破后对方王无处可逃，为防守被迫大量弃子，最终被杀或形成胜势残局。",
+      "defense_reference": "防守方可先发制人在王翼施压反牵制，或用兵线牢牢封住a/b/c线不让对方车/后侵入。"
     },
     {
       "key": "sacrifice",
@@ -326,7 +348,7 @@
       "definition": "主动牺牲子力（弃兵、弃马、弃象、弃车甚至弃后），换取更长远的优势（如攻王、打开线路、制造杀棋）。",
       "recognition": "己方主动让对方吃掉一子，但后续几步能获得更大优势（如攻王、升变、夺回更多子力）。",
       "key_move_signal": "主动牺牲子力的那一手；需注意后续几步是否能兑现承诺的优势。",
-      "teaching_focus": "讲清为何要弃子、弃子后能换来什么（攻王机会、打开线路、强制走法）、对方为何无法拒绝。",
+      "teaching_focus": "讲清弃了哪个子、弃后获得了什么具体回报（如打开h线攻王、腾出关键格给马跳入），后续几步内如何用强制手段兑现优势；不要让观众觉得只是'白白少子'。",
       "assertion": "本题已确定核心战术涉及【弃子】。请围绕『弃子的补偿与后续手段』组织讲解，明确指出弃子的关键手及其战略意图。",
       "prerequisite": "弃子后能在数步内通过强制手段取得超过所弃子力的回报。",
       "common_mistakes": [
@@ -339,7 +361,9 @@
         "clearance",
         "kingsideAttack"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "弃子后通过强制手段（将军、威胁杀、升变等）收回多于所弃子力的回报，或直接杀棋。",
+      "defense_reference": "防守方应评估接受弃子后的后续变化；若算不清可选择拒绝接受弃子，并将对方弃子意图转化为自己的反击机会。"
     },
     {
       "key": "skewer",
@@ -354,7 +378,7 @@
       "definition": "用远射子攻击对方高价值子，迫其移开后，吃掉其身后同一条线上的另一枚子。是牵制的反向形式。",
       "recognition": "一条直线上，对方两子前后排列，前子为高价值（常为王或后）；攻击前子使其被迫闪避，露出后方目标。",
       "key_move_signal": "沿直线攻击对方前子的那一手；前子移开后，后子被吃。",
-      "teaching_focus": "讲清是哪条线上的串击、前后两个目标分别是什么、前子被迫让位后为何后子无法幸免；与牵制区分（串击是逼高价值子先动）。",
+      "teaching_focus": "讲清哪条线上发生了串击、前子与后子分别是什么、前子闪避后为什么后子就暴露了；与牵制区分（串击是逼前子走、牵制是逼前子不走）。",
       "assertion": "本题已确定核心战术为【串击】。请围绕『如何利用串击在一条线上连续获取利益』组织讲解，明确指出串击发生的关键手。",
       "prerequisite": "一条直线上对方两子前后排列，前子价值高于后子。",
       "common_mistakes": [
@@ -367,7 +391,9 @@
         "xRayAttack",
         "fork"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "高价值子被迫闪避后，身后较低价值子被吃掉，己方赚取子力差。",
+      "defense_reference": "防守方应避免高价值子与低价值子或王站在同一条线上；若已成串击，高价值子可尝试避开同时带将军或威胁。"
     },
     {
       "key": "trappedPiece",
@@ -395,7 +421,9 @@
         "hangingPiece",
         "deflection"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "被困子最终被吃掉，对方损失关键子力且无法获得补偿。",
+      "defense_reference": "防守方应在子力陷入包围网前提前撤离；若已陷入，尝试制造反击威胁迫使对方释放压力。"
     }
   ],
   "advanced": [
@@ -425,7 +453,9 @@
         "fork",
         "deflection"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "对方子力被诱入特定格子后，紧接着遭到叉击、串击或杀棋攻击，损失子力或被将杀。",
+      "defense_reference": "防守方应警惕对方弃子的真实意图；接受诱饵前需算清后续三步的所有局面变化。"
     },
     {
       "key": "clearance",
@@ -453,7 +483,9 @@
         "discoveredAttack",
         "advancedPawn"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "关键线路被清空后，远射子的攻击直达目标，形成将军、杀棋或吃子。",
+      "defense_reference": "防守方应留意对方在某条线路上各子排列关系；发现腾挪征兆时提前补防或封线。"
     },
     {
       "key": "collinearMove",
@@ -480,7 +512,9 @@
         "pin",
         "skewer"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "滑动后攻防关系改变，对方某子突然变为无保护或受到多重攻击，进而失子。",
+      "defense_reference": "防守方应在对局中养成沿每条线检查攻防关系的习惯，发现对方滑动可能时提前调整站位。"
     },
     {
       "key": "discoveredCheck",
@@ -507,7 +541,9 @@
         "doubleCheck",
         "fork"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方王被闪将后必须先应将，己方移开子趁机同时构成另一威胁（吃子、占要道），对方顾此失彼。",
+      "defense_reference": "防守方应提前排查叠线隐患；若闪将已发生，只能先应将并接受移开子造成的连带损失。"
     },
     {
       "key": "defensiveMove",
@@ -535,7 +571,9 @@
         "intermezzo",
         "zugzwang"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "己方走出唯一精确防守后转危为安，化解对方全部威胁，反获均势或反攻机会。",
+      "defense_reference": "进攻方应确保每个威胁都算到底，不给对方唯一防脱险；若对方走出精确防，应重新评估而不可继续硬攻。"
     },
     {
       "key": "deflection",
@@ -563,7 +601,9 @@
         "overloading",
         "attraction"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "防守子被引离后，其原保护目标暴露，被直接吃掉或攻击导致崩溃。",
+      "defense_reference": "防守方应避免保护关键目标的子同时处于可被将军或威胁的位置；若必须离岗，安排替代防守子。"
     },
     {
       "key": "interference",
@@ -591,7 +631,9 @@
         "clearance",
         "overloading"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "两子联络被切断后，失去保护的一方被吃掉或防线瓦解。",
+      "defense_reference": "防守方应避免关键保护关系依赖单一线路；若被干扰，尝试用另一路线恢复联系或发动反威胁。"
     },
     {
       "key": "intermezzo",
@@ -620,7 +662,9 @@
         "defensiveMove",
         "deflection"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "间招插入后打乱对方全盘计划，己方在多一先手的情况下执行原本战术或获得额外利益。",
+      "defense_reference": "防守方应养成'每次应对前先扫一遍候选将军和威胁'的习惯，不给对方间招空间。"
     },
     {
       "key": "quietMove",
@@ -647,7 +691,9 @@
         "clearance",
         "deflection"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "看似无害的静招构成无声杀网，对方无论走什么都无法阻止后续强行杀棋或必得子。",
+      "defense_reference": "防守方应在看似无害的走法后深算后续局面变化，警惕悄悄形成的杀网。"
     },
     {
       "key": "xRayAttack",
@@ -675,7 +721,9 @@
         "skewer",
         "collinearMove"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "透过中间子的攻击出人意料地威胁到后方目标，对方因未察觉而被吃子或将军。",
+      "defense_reference": "防守方应沿每条线检查'背后是否有更高价值子被穿透瞄准'，养成隔子检查的习惯。"
     },
     {
       "key": "zugzwang",
@@ -702,7 +750,9 @@
         "quietMove",
         "pawnEndgame"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "对方被迫走棋后局面自动恶化，失子、失势或被将杀，无法自救。",
+      "defense_reference": "防守方在残局中应预留'等着'避免落入逼迫，若已陷入则尽力寻找不恶化局面的中性走法。"
     },
     {
       "key": "enPassant",
@@ -729,7 +779,9 @@
         "clearance",
         "discoveredAttack"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方兵被吃过路兵后，原本想建立的兵形被破坏，关键线路暴露或中心控制削弱。",
+      "defense_reference": "防守方在用兵两步推进时应检查是否会触发过路兵；若触发后失势，考虑改用一步一步推。"
     },
     {
       "key": "overloading",
@@ -756,7 +808,9 @@
         "capturingDefender",
         "interference"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "超载子被迫放弃某项职责后，被弃保护的目标被吃掉，防线随之瓦解。",
+      "defense_reference": "防守方应避免让单一子力承担多重关键守护任务；若已超载，主动弃轻保重以止损。"
     }
   ],
   "mate_patterns": [
@@ -784,7 +838,9 @@
         "exposedKing",
         "sacrifice"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "对方王在边线与己方兵之间被马和车联合将杀，无逃脱。",
+      "defense_reference": "防守方应避免王在边线时被对方马控制主要逃脱格；提前让王离开边线或清除障碍兵。"
     },
     {
       "key": "arabianMate",
@@ -810,7 +866,9 @@
         "anastasiaMate",
         "hookMate"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "王被马封死角落逃脱格后遭车沿边线将杀。",
+      "defense_reference": "防守方应避免王长时间停留在角落，注意对方马控制角的典型位置。"
     },
     {
       "key": "backRankMate",
@@ -837,7 +895,9 @@
         "deflection",
         "blindSwineMate"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "对方王被己方兵阵堵死在底线，被车或后沿底线将杀。",
+      "defense_reference": "防守方应提前为底线王开一个'气孔'（推一步底线兵），或确保底线有子可垫。"
     },
     {
       "key": "balestraMate",
@@ -862,7 +922,9 @@
         "exposedKing",
         "doubleBishopMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "象的斜线将军与后封锁逃脱格配合，王无处可逃被杀。",
+      "defense_reference": "防守方应注意象后配合杀的模式：当象和后的控制区域重叠时，王必须站在重叠区外。"
     },
     {
       "key": "blindSwineMate",
@@ -888,7 +950,9 @@
         "killBoxMate",
         "deflection"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "两车沿底线或第七线交替将军，王被扫死在边线或底线。",
+      "defense_reference": "防守方王应紧贴底线兵或及时前出，避免被双车锁定在底线只能左右移动的窘境。"
     },
     {
       "key": "bodenMate",
@@ -914,7 +978,9 @@
         "sacrifice",
         "balestraMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "两象分别从两条相邻斜线将军，王被己方子力卡住无法移动被杀。",
+      "defense_reference": "防守方应避免王站在双象交叉火力的中心，及时清除卡住王的己方棋子。"
     },
     {
       "key": "cornerMate",
@@ -940,7 +1006,9 @@
         "anastasiaMate",
         "trappedPiece"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "对方王被限制在角落，被车或后将军后无逃脱格被杀。",
+      "defense_reference": "防守方应避免王退入角落；若已进入，确保至少有一个逃脱格可用。"
     },
     {
       "key": "doubleBishopMate",
@@ -966,7 +1034,9 @@
         "balestraMate",
         "cornerMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "两象分别控制黑白两色斜线，对方王任何移动格都被瞄准，遂遭将军杀棋。",
+      "defense_reference": "防守方应避免把王送入两种颜色斜线均被对方象控制的致命区域。"
     },
     {
       "key": "dovetailMate",
@@ -992,7 +1062,9 @@
         "epauletteMate",
         "killBoxMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "后贴近王将军，己方兵或子力卡住王两侧逃脱格形成杀棋。",
+      "defense_reference": "防守方应注意王周围子力的协作：不要让己方棋子从背后堵死王的退路。"
     },
     {
       "key": "epauletteMate",
@@ -1018,7 +1090,9 @@
         "backRankMate",
         "swallowstailMate"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "王被己方子力以'肩章'形态夹住，后在正面将军杀死。",
+      "defense_reference": "防守方应避免王两侧被己方子力堵死而无路可退，尤其在底线附近。"
     },
     {
       "key": "hookMate",
@@ -1044,7 +1118,9 @@
         "vukovicMate",
         "anastasiaMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "马跳到对方王的斜前角同时被己方车保护，构成不另需支援的钩状杀棋。",
+      "defense_reference": "防守方应警惕马在王的斜前方落子、且该格有对方远射子保护的经典杀形。"
     },
     {
       "key": "killBoxMate",
@@ -1070,7 +1146,9 @@
         "triangleMate",
         "dovetailMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "后在对方王水平方向紧贴将军，同时后方被远射子保护，形成'牢笼'杀。",
+      "defense_reference": "防守方应保持王周围有足够空位，不给对方后形成贴面将军加后方支援的杀形。"
     },
     {
       "key": "morphysMate",
@@ -1095,7 +1173,9 @@
         "backRankMate",
         "pillsburysMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "车将军封死底线，象控制斜线逃脱格，王在边线的狭小空间内被杀。",
+      "defense_reference": "防守方应警惕对方象占据控制王前后斜线格位的模型，尽早驱离或兑换该象。"
     },
     {
       "key": "operaMate",
@@ -1120,7 +1200,9 @@
         "backRankMate",
         "pillsburysMate"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "车沿底线将军让王无路可退再形成杀棋的经典组合模型。",
+      "defense_reference": "防守方底线应始终保持通畅，不要让王陷入对方车、后沿底线的连环将军中。"
     },
     {
       "key": "pillsburysMate",
@@ -1145,7 +1227,9 @@
         "morphysMate",
         "anastasiaMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "马跳到王仅剩的邻格、被后方远射子保护，直接贴面将杀。",
+      "defense_reference": "防守方应注意王四周邻格是否有被对方子力（马/象）攻击和保护的安全隐患。"
     },
     {
       "key": "smotheredMate",
@@ -1172,7 +1256,9 @@
         "sacrifice",
         "fork"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "王被己方子力围死，对方马跳进去将军因王无移动格而杀。",
+      "defense_reference": "防守方应避免把王彻底围死不留出气口；王的关键邻格应至少有一步可走空间。"
     },
     {
       "key": "swallowstailMate",
@@ -1198,7 +1284,9 @@
         "epauletteMate",
         "killBoxMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "后在相邻斜线紧贴王将军，王两侧被己方子力封闭形成'燕尾'杀。",
+      "defense_reference": "防守方应注意后在斜线贴近王的杀形，提前将王移出后控制的范围。"
     },
     {
       "key": "triangleMate",
@@ -1224,7 +1312,9 @@
         "blindSwineMate",
         "dovetailMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "王被自己在角落的两兵和一个己方子构成三角包围，后被将军无法脱逃被杀。",
+      "defense_reference": "防守方应避免王退入角落且两兵堵死仅剩的逃脱格，及早清出逃生通道。"
     },
     {
       "key": "vukovicMate",
@@ -1250,7 +1340,9 @@
         "arabianMate",
         "anastasiaMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "象控制大斜线（如b1/h7对角线），车+后的组合在侧翼将王杀死。",
+      "defense_reference": "防守方应警惕对方象永久控制关键斜线后配合重子杀棋的模式，早做兑换或封线。"
     }
   ],
   "phase_sub": [
@@ -1278,7 +1370,9 @@
         "zugzwang",
         "queenRookEndgame"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "车残局中多一兵或车占据第七线可形成决定优势；精确的车位和王的活跃度定胜负。",
+      "defense_reference": "防守方应让车保持在活跃位置（第七线/开放线），王前出配合车制造反击而非被动守护。"
     },
     {
       "key": "bishopEndgame",
@@ -1304,7 +1398,9 @@
         "zugzwang",
         "pawnEndgame"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "象残局中异色象常导致和棋，同色象多兵时主动方可通过逼迫和关键格入侵获胜。",
+      "defense_reference": "防守方应利用异色象的封锁能力建立堡垒，同色象时应避免兵站在象色格上被限制。"
     },
     {
       "key": "pawnEndgame",
@@ -1330,7 +1426,9 @@
         "advancedPawn",
         "promotion"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "兵残局中一兵领先常即胜势，关键格与对王决定胜负。",
+      "defense_reference": "防守方在兵残局应精确计算对王和关键格，避免被动等着落入逼迫局面。"
     },
     {
       "key": "knightEndgame",
@@ -1356,7 +1454,9 @@
         "zugzwang",
         "pawnEndgame"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "马残局中马对通路兵的封锁效率低，通路兵的升变威胁变得更具压迫性。",
+      "defense_reference": "防守方应让马占据中央格（辐射8格控制面），通过将军威胁换节奏而非被动追逐通路兵。"
     },
     {
       "key": "queenEndgame",
@@ -1382,7 +1482,9 @@
         "zugzwang",
         "queenRookEndgame"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "后残局中一兵领先常不够赢：需要靠后将/后牵制的连续将军制造杀棋或逼和转胜。",
+      "defense_reference": "防守方应尽量保持后处于能不断将军对方王的位置，用长将化解对方的胜势企图。"
     },
     {
       "key": "queenRookEndgame",
@@ -1408,7 +1510,9 @@
         "queenEndgame",
         "backRankMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "后对车残局中车方可设堡垒防守，后方则需通过夹击或逼迫突破堡垒。",
+      "defense_reference": "防守方应让车紧贴王形成安全区，避免后和王被对方后加王夹攻。"
     }
   ],
   "other": [
@@ -1439,7 +1543,9 @@
         "queensideAttack",
         "defensiveMove"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "易位后王的安全大幅提高且车进入活跃位置，为后续攻防部署创造条件。",
+      "defense_reference": "防守方应在对局初期尽早易位；若错过机会王滞留中央，可能成为对方战术的直接靶子。"
     },
     {
       "key": "promotion",
@@ -1469,7 +1575,9 @@
         "underPromotion",
         "clearance"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "兵抵达底线升变为后（或其他子），单兵升变足以彻底改变子力对比。",
+      "defense_reference": "防守方应在兵接近底线前用子力（王或远射子）封锁升变格，或在升变前发动必躲的反击。"
     },
     {
       "key": "underPromotion",
@@ -1497,7 +1605,9 @@
         "fork",
         "smotheredMate"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "升变为马可获得将军/叉击等额外战术收益；升变为车或象可避免逼和。",
+      "defense_reference": "防守方应警惕对方低升变的战术意图（常见升为马将军同时攻击另一目标），而非只考虑升后。"
     }
   ],
   "position_eval": [
@@ -1513,7 +1623,7 @@
       "definition": "局面中存在可抓住的机会，正确走法能取得决定性优势（约200到600厘兵评估）。",
       "recognition": "对方出现不精确或失误，存在一步或一组强制手段能稳获子力或位置优势。",
       "key_move_signal": "抓住机会、把临时机会转化为持久优势的那一手。",
-      "teaching_focus": "讲清机会从何而来、这一手如何把优势固定下来、对方为何无法挽回。",
+      "teaching_focus": "点明优势的来源（多兵、子力活跃、对方王不安），不要让观众只听到'有优势'却不知道优势在哪。",
       "assertion": "本题已确定主题为【优势】。请围绕『如何抓住机会取得决定性优势』组织讲解，明确指出转化优势的关键手。",
       "prerequisite": "对方刚走出不精确着法，留下了可被强制利用的弱点。",
       "common_mistakes": [
@@ -1526,7 +1636,9 @@
         "hangingPiece",
         "sacrifice"
       ],
-      "difficulty_level": "intermediate"
+      "difficulty_level": "intermediate",
+      "typical_consequence": "己方以优势姿态进入战术阶段，正确的操作将优势稳固地转化为胜势。",
+      "defense_reference": "防守方在劣势局面下应寻求复杂化——给对方多条线路选择，制造犯错机会。"
     },
     {
       "key": "crushing",
@@ -1540,7 +1652,7 @@
       "definition": "抓住对方明显失误，取得碾压性优势（评估约600厘兵以上），通常意味着大量赢子或直接攻杀。",
       "recognition": "对方出现严重漏算或失着，存在强制手段可大量赢子或直接攻入王城。",
       "key_move_signal": "把对方失误转化为压倒性优势的那一手强制着法。",
-      "teaching_focus": "讲清对方错在哪里、这一手如何最大化惩罚、为何对方再无翻盘资源。",
+      "teaching_focus": "解释为什么是碾压：对方所有反击都被提前算死、每一步都是强制的、任何应着都导致即时失子或被杀。",
       "assertion": "本题已确定主题为【碾压】。请围绕『如何最大化惩罚对方失误取得压倒性优势』组织讲解，明确指出致胜的关键手。",
       "prerequisite": "对方刚走出严重失着，留下可被强制重创的破绽。",
       "common_mistakes": [
@@ -1553,7 +1665,9 @@
         "fork",
         "exposedKing"
       ],
-      "difficulty_level": "basic"
+      "difficulty_level": "basic",
+      "typical_consequence": "碾压局面下对方已无有效防守，只差最后一击即可获胜。",
+      "defense_reference": "防守方在碾压局面下应主动制造混乱（弃子、开线），力求对方犯错而非坐等被碾死。"
     },
     {
       "key": "equality",
@@ -1580,7 +1694,9 @@
         "zugzwang",
         "intermezzo"
       ],
-      "difficulty_level": "advanced"
+      "difficulty_level": "advanced",
+      "typical_consequence": "均势局面下靠精确的战术构想打破平衡，先发现战术的一方常可获先机。",
+      "defense_reference": "防守方在均势下不应高估己方局势而贸然行动，保持子力协调是最安全的策略。"
     }
   ]
 }
