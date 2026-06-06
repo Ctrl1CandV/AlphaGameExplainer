@@ -1,4 +1,4 @@
-from src.common import Logger, resolve_path, GeneratedCommentary, Segment, AnalyzedMove, CompressedStep
+from src.common import Logger, resolve_path, GeneratedCommentary, Segment, AnalyzedMove, CompressedStep, PIECE_VALUES
 from src.commentator import generate_structured, generate
 from src.stockfish_analyzer import get_solution
 from src.llm_backend import release_backend
@@ -342,8 +342,85 @@ def _check_draw(board, analyzed_moves, tablebase_solver) -> str:
 #  Puzzle 战术讲解管线（新增，不复用 _run_pipeline）
 # ============================================================
 
+def _prelude_san_piece_cn(san: str) -> str:
+    """从 SAN 走法提取棋子中文名（如 'Nxg2'→'马'，'Qxc7'→'后'，'e4'→'兵'）。"""
+    _map = {"N": "马", "B": "象", "R": "车", "Q": "后", "K": "王"}
+    for letter, cn in _map.items():
+        if san.startswith(letter):
+            return cn
+    return "兵"
+
+
+def _side_material_desc(board, color: chess.Color) -> str:
+    """某一方除王外的子力中文描述（如'一车一兵'、'单王'）。"""
+    order = [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN]
+    cn_num = {1: "一", 2: "两", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八"}
+    piece_cn = {chess.QUEEN: "后", chess.ROOK: "车", chess.BISHOP: "象",
+                chess.KNIGHT: "马", chess.PAWN: "兵"}
+    counts = {}
+    for piece in board.piece_map().values():
+        if piece.color == color and piece.piece_type != chess.KING:
+            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
+    parts = []
+    for pt in order:
+        c = counts.get(pt, 0)
+        if c > 0:
+            parts.append(f"{cn_num.get(c, str(c))}{piece_cn[pt]}")
+    return "".join(parts) if parts else "单王"
+
+
+def _advantage_desc(board) -> str:
+    """根据子力价值判断当前局面优势方。"""
+    white_val = sum(PIECE_VALUES[p.piece_type]
+                    for p in board.piece_map().values()
+                    if p.color == chess.WHITE and p.piece_type != chess.KING)
+    black_val = sum(PIECE_VALUES[p.piece_type]
+                    for p in board.piece_map().values()
+                    if p.color == chess.BLACK and p.piece_type != chess.KING)
+    diff = white_val - black_val
+    if diff >= 5:
+        return "白方子力大幅领先"
+    if diff >= 2:
+        return "白方子力占优"
+    if diff <= -5:
+        return "黑方子力大幅领先"
+    if diff <= -2:
+        return "黑方子力占优"
+    return "双方子力均势"
+
+
+def _build_prelude_narration(prelude_san: str, board_after, puzzle_side: str) -> str:
+    """纯模板生成预备着开场旁白（一到两句），交代对方走法 + 子力对比 + 优势 + 轮到谁。"""
+    opponent = "白方" if puzzle_side == "黑方" else "黑方"
+    piece_cn = _prelude_san_piece_cn(prelude_san)
+    is_capture = "x" in prelude_san
+    is_check = board_after.is_check()
+
+    white_mat = _side_material_desc(board_after, chess.WHITE)
+    black_mat = _side_material_desc(board_after, chess.BLACK)
+    advantage = _advantage_desc(board_after)
+
+    # 第一句：对方走了什么
+    if is_capture and is_check:
+        move_part = f"{opponent}{piece_cn}直接吃子并将军，撕开对方防线"
+    elif is_capture:
+        move_part = f"{opponent}{piece_cn}果断吃子，直接获取子力"
+    elif is_check:
+        move_part = f"{opponent}{piece_cn}走子并将军，施加压力"
+    else:
+        move_part = f"{opponent}{piece_cn}调整位置，为后续战术做铺垫"
+
+    # 第二句：子力对比 + 优势 + 轮到谁
+    material_part = (
+        f"目前白方有{white_mat}，黑方有{black_mat}，{advantage}。"
+        f"现在轮到{puzzle_side}，需要找出最强的战术手段。"
+    )
+
+    return f"{move_part}。{material_part}"
+
+
 def _run_puzzle_pipeline(input_text: str):
-    """执行 Puzzle 战术讲解管线，返回 (commentary, board, puzzle, storyboard)。"""
+    """执行 Puzzle 战术讲解管线，返回 (commentary, board, puzzle, storyboard, prelude_san, pre_fen, prelude_narration)。"""
     from src.parser import parse_puzzle_input
     from src.storyboard import build_for_puzzle
     from src.commentator import generate_puzzle_structured
@@ -360,8 +437,11 @@ def _run_puzzle_pipeline(input_text: str):
             Logger.error(f"非法初始局面: FEN不合法 (status={status})")
             return None
 
-    # Lichess 预备步：推进对方铺垫手，使棋盘到达解题起始位置
+    # 记录预备步信息，供视频/文本输出使用
+    prelude_san = ""
+    pre_fen = puzzle.fen  # 预备步之前的初始局面 FEN
     if puzzle.prelude_move is not None:
+        prelude_san = board.san(puzzle.prelude_move)
         board.push(puzzle.prelude_move)
 
     Logger.info(f"  标签: {puzzle.effective_themes}, 步数: {len(puzzle.moves)}, Rating: {puzzle.rating}")
@@ -376,8 +456,14 @@ def _run_puzzle_pipeline(input_text: str):
         Logger.error(f"Puzzle 解说生成失败: {e}")
         return None
 
-    Logger.info("[4/4] 解说生成完成")
-    return commentary, board, puzzle, storyboard
+    # 生成预备着旁白（纯模板，不依赖 LLM）
+    prelude_narration = ""
+    if prelude_san:
+        puzzle_side = "白方" if board.turn == chess.WHITE else "黑方"
+        prelude_narration = _build_prelude_narration(prelude_san, board, puzzle_side)
+
+    Logger.info("[4/4] 战术解说完成")
+    return commentary, board, puzzle, storyboard, prelude_san, pre_fen, prelude_narration
 
 
 def run_puzzle(input_text: str) -> str:
@@ -385,7 +471,9 @@ def run_puzzle(input_text: str) -> str:
     result = _run_puzzle_pipeline(input_text)
     if result is None:
         return ""
-    commentary, _board, _puzzle, _storyboard = result
+    commentary, _board, _puzzle, _storyboard, _prelude_san, _pre_fen, prelude_narration = result
+    if prelude_narration:
+        print(prelude_narration + "\n")
     print(commentary.raw_text)
     return commentary.raw_text
 
@@ -422,7 +510,7 @@ def run_puzzle_video(input_text: str, voice_prompt: str = "") -> str:
     if result is None:
         return ""
 
-    commentary, board, puzzle, storyboard = result
+    commentary, board, puzzle, storyboard, prelude_san, pre_fen, prelude_narration = result
     moves = puzzle.moves
     nodes = storyboard.get("nodes", [])
     if not moves:
@@ -436,6 +524,19 @@ def run_puzzle_video(input_text: str, voice_prompt: str = "") -> str:
     from src.tts_engine import synthesize as tts_synthesize
 
     segments = _build_puzzle_segments(commentary, moves, nodes)
+
+    # 预备着段：棋盘从预备步前的局面开始，先动画演示对方的铺垫手
+    if prelude_san and puzzle.prelude_move is not None:
+        prelude_text = prelude_narration or f"对方走了{prelude_san}，局面来到当前状态。"
+        prelude_seg = Segment(
+            move_idx=0,
+            text=prelude_text,
+            pacing="normal",
+            moves=[puzzle.prelude_move],
+            phase="",
+        )
+        segments.insert(0, prelude_seg)
+
     segments = tts_synthesize(segments, voice_prompt=voice_prompt)
 
     # 生成视频
@@ -446,8 +547,10 @@ def run_puzzle_video(input_text: str, voice_prompt: str = "") -> str:
 
     panel_info = {"endgame_name": tactic_name}
 
+    # 从预备步前的局面开始渲染，预备着段将动画演示这一步
+    initial_fen = pre_fen if prelude_san else board.fen()
     frame_paths, frame_durations = render_animated_frames(
-        segments, board.fen(), panel_info=panel_info)
+        segments, initial_fen, panel_info=panel_info)
 
     # puzzle 链路跳过片头片尾，字幕偏移仅含初始局面展示时长
     subtitle_offset = INTRO_SEC
@@ -518,7 +621,7 @@ def run_puzzle_csv(filepath: str, limit: int = 0, text_only: bool = False) -> st
                 result = _run_puzzle_pipeline(input_text)
                 if result is None:
                     raise RuntimeError("管线返回空结果")
-                commentary, _board, _pz, _sb = result
+                commentary, _board, _pz, _sb, _prelude_san, _pre_fen, _prelude_narr = result
                 output_path = os.path.join(batch_dir, f"{pid}.txt")
                 with open(output_path, "w", encoding="utf-8") as f:
                     f.write(commentary.raw_text)

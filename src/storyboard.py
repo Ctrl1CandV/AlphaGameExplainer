@@ -1146,7 +1146,7 @@ def _is_discovered(board_before: chess.Board, move: chess.Move,
             if target is None or target.color != enemy_color:
                 continue
             # 检查 from_sq 是否在 sq→atk_sq 之间
-            between = chess.SquareSet(chess.BB_BETWEEN[sq][atk_sq])
+            between = chess.SquareSet(chess.between(sq, atk_sq))
             if from_sq in between:
                 return True
     return False

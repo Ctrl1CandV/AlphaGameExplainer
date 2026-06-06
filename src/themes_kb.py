@@ -134,6 +134,8 @@ def get_theme_definitions_text(themes: List[str]) -> str:
             lines.append(f"  前提: {t['prerequisite']}")
         if t.get("recognition"):
             lines.append(f"  识别: {t['recognition']}")
+        if t.get("key_move_signal"):
+            lines.append(f"  关键手信号: {t['key_move_signal']}")
         if t.get("teaching_focus"):
             lines.append(f"  教学重点: {t['teaching_focus']}")
         if t.get("typical_consequence"):
