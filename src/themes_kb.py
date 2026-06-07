@@ -116,19 +116,89 @@ def filter_themes(raw_themes: List[str]) -> Tuple[List[str], List[str]]:
     return effective, auxiliary
 
 
-def primary_theme(effective: List[str]) -> str:
-    """主标签 = effective[0]，空列表返回 ''。"""
-    return effective[0] if effective else ""
+# 讲解核心选取的桶分层（tier 越小越优先作为讲解核心）：
+#   tier 0 战术机理：motifs / advanced —— fork/pin/sacrifice 等，最值得讲透
+#   tier 1 收束目标：mate_patterns —— 杀型，告诉观众结局形态
+#   tier 2 评估背景：position_eval / other —— crushing/advantage 等，只描述
+#                    优势程度，讲不出机理，仅在没有更优标签时兜底
+_CORE_BUCKETS = ("motifs", "advanced")
+_OUTCOME_BUCKETS = ("mate_patterns",)
+
+_KEY_TO_BUCKET: dict = {}
 
 
-def get_theme_definitions_text(themes: List[str]) -> str:
-    """将标签列表转为可注入 prompt 的定义文本块。"""
+def _key_to_bucket() -> dict:
+    """构建并缓存 标签 key → 所属桶名 的映射。"""
+    global _KEY_TO_BUCKET
+    if _KEY_TO_BUCKET:
+        return _KEY_TO_BUCKET
+    kb = load_kb()
+    for bucket, entries in kb.items():
+        for entry in entries:
+            k = entry.get("key")
+            if k:
+                _KEY_TO_BUCKET[k] = bucket
+    return _KEY_TO_BUCKET
+
+
+def _theme_tier(key: str) -> int:
+    """标签讲解优先级 tier：0 机理 < 1 杀型 < 2 评估/其它。"""
+    bucket = _key_to_bucket().get(key, "")
+    if bucket in _CORE_BUCKETS:
+        return 0
+    if bucket in _OUTCOME_BUCKETS:
+        return 1
+    return 2
+
+
+def select_core_theme(effective: List[str]) -> str:
+    """从 effective 选最适合作为讲解核心的标签。
+
+    规则：tier 升序（机理 > 杀型 > 评估兜底），tier 相同时保持 lichess 原顺序。
+    这样 ['crushing', 'sacrifice'] 会选中 sacrifice（机理）而非 crushing（评估）。
+    空列表返回 ''。
+    """
+    if not effective:
+        return ""
+    return min(effective, key=lambda k: (_theme_tier(k), effective.index(k)))
+
+
+def related_intersection(core_key: str, others: List[str]) -> List[str]:
+    """与核心标签存在联动关系的次要标签（按 others 顺序）。
+
+    related_themes 是单向声明，故做双向判定：core 指向 other，或 other 指向 core，
+    任一成立即视为联动。例如 sacrifice 未声明 crushing，但 crushing 声明了
+    sacrifice，二者仍应识别为联动。
+    """
+    core = get_theme(core_key)
+    if not core:
+        return []
+    core_related = set(core.get("related_themes", []))
+    result = []
+    for k in others:
+        if k in core_related:
+            result.append(k)
+            continue
+        other = get_theme(k)
+        if other and core_key in other.get("related_themes", []):
+            result.append(k)
+    return result
+
+
+def get_theme_definitions_text(themes: List[str], include_en: bool = True) -> str:
+    """将标签列表转为可注入 prompt 的定义文本块。
+
+    include_en=False 时不输出英文标签名，避免英文混入小模型的中文口播输出。
+    """
     lines = []
     for key in themes:
         t = get_theme(key)
         if t is None:
             continue
-        lines.append(f"【{t['cn']}】（{t['en']}）")
+        if include_en:
+            lines.append(f"【{t['cn']}】（{t['en']}）")
+        else:
+            lines.append(f"【{t['cn']}】")
         lines.append(f"  定义: {t['definition']}")
         if t.get("prerequisite"):
             lines.append(f"  前提: {t['prerequisite']}")

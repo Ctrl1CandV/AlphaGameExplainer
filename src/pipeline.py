@@ -472,7 +472,9 @@ def run_puzzle(input_text: str) -> str:
     if result is None:
         return ""
     commentary, _board, _puzzle, _storyboard, _prelude_san, _pre_fen, prelude_narration = result
-    if prelude_narration:
+    if commentary.opening:
+        print(commentary.opening + "\n")
+    else:
         print(prelude_narration + "\n")
     print(commentary.raw_text)
     return commentary.raw_text
@@ -536,6 +538,17 @@ def run_puzzle_video(input_text: str, voice_prompt: str = "") -> str:
             phase="",
         )
         segments.insert(0, prelude_seg)
+
+    # 开场白段：基于骨架的半模板，插在预备着之后、正式解说之前
+    if commentary.opening:
+        intro_seg = Segment(
+            move_idx=-1,       # 独立音频文件名，避免与预备着段(move_idx=0)写同一个 wav
+            text=commentary.opening,
+            pacing="normal",
+            moves=[],          # 不关联走法，仅语音+字幕
+            phase="",
+        )
+        segments.insert(0 if not (prelude_san and puzzle.prelude_move is not None) else 1, intro_seg)
 
     segments = tts_synthesize(segments, voice_prompt=voice_prompt)
 

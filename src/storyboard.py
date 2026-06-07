@@ -1181,6 +1181,533 @@ def associate_move_with_theme(board_before: chess.Board, move: chess.Move,
     return effective_themes[0] if effective_themes else ""
 
 
+# ============================================================
+#  Puzzle 战术关键手定位器
+#  -------------------------------------------------------------
+#  目标：基于棋盘事实，为核心标签（机理类）确定"真正体现该战术的那一步"，
+#  解决 "核心标签选对了但关键手讲错" 的问题（典型场景：sacrifice 被误选成
+#  前面那步将军）。
+#
+#  设计原则：
+#   1) 完全在 Python 层用棋盘事实做判定，不让 LLM 猜；
+#   2) 每类标签一个独立评分函数，返回 (score, reason)；多候选取最高分；
+#   3) 评分失败 / 分数全为 0 时回退到通用信号（将军/将杀/吃高价值子）；
+#   4) 不修改 associate_move_with_theme，不影响残局链路。
+# ============================================================
+
+# 评估类标签：只描述结果，不参与"关键手"定位（避免 crushing 抢机理叙事的关键手）
+_OUTCOME_THEMES = {
+    "crushing", "advantage", "equality", "winning",
+    "long", "short", "oneMove", "veryLong",
+}
+
+
+def _collect_puzzle_move_facts(board: chess.Board, moves: List[chess.Move]):
+    """复盘整条解法，抽取每步的棋盘事实，供关键手评分使用。
+
+    返回 list[dict]，每个元素是一步的事实。包含但不限于：
+      - idx: 1-based 步号
+      - san / uci
+      - board_before / board_after（独立 chess.Board 实例，避免外部修改污染）
+      - mover_color / piece_type（主动行棋方与移动子种类）
+      - is_check / is_capture / is_checkmate
+      - captured_piece_type（被吃子种类，无则为 None）
+      - gives_mover_attacked（移动子落点后是否被对方攻击）
+      - material_delta_white（白方视角的子力净值变化，单位为 PIECE_VALUES）
+      - legal_reply_count_after（走后对方合法应招数）
+
+    不抛异常：所有字段用 try/except 兜底，缺失即为 None/0。
+    """
+    facts = []
+    temp = board.copy()
+    for i, move in enumerate(moves):
+        board_before = temp.copy()
+        mover_color = temp.turn
+        is_check = bool(temp.gives_check(move))
+        is_capture = bool(temp.is_capture(move))
+        is_checkmate = False  # 走前不可能将杀；走后才知
+        piece_type = board_before.piece_at(move.from_square)
+        mover_pt = piece_type.piece_type if piece_type else None
+
+        captured_piece_type = None
+        if is_capture:
+            if temp.is_en_passant(move):
+                captured_piece_type = chess.PAWN
+            else:
+                cap = temp.piece_at(move.to_square)
+                if cap:
+                    captured_piece_type = cap.piece_type
+
+        temp.push(move)
+        board_after = temp.copy()
+        is_checkmate = board_after.is_checkmate()
+
+        # 子力净值变化（白方视角）
+        mat_before_white = 0
+        mat_after_white = 0
+        try:
+            for sq, p in board_before.piece_map().items():
+                mat_before_white += PIECE_VALUES.get(p.piece_type, 0) * (1 if p.color == chess.WHITE else -1)
+            for sq, p in board_after.piece_map().items():
+                mat_after_white += PIECE_VALUES.get(p.piece_type, 0) * (1 if p.color == chess.WHITE else -1)
+            material_delta_white = mat_after_white - mat_before_white
+        except Exception:
+            material_delta_white = 0
+
+        # 移动子落点后是否被对方攻击
+        gives_mover_attacked = False
+        try:
+            if mover_pt is not None and mover_pt != chess.KING:
+                enemy = not mover_color
+                if board_after.is_attacked_by(enemy, move.to_square):
+                    gives_mover_attacked = True
+        except Exception:
+            gives_mover_attacked = False
+
+        legal_reply_count_after = 0
+        try:
+            legal_reply_count_after = sum(1 for _ in board_after.legal_moves)
+        except Exception:
+            pass
+
+        san = ""
+        try:
+            san = board_before.san(move)
+        except Exception:
+            san = move.uci() if move else ""
+
+        facts.append({
+            "idx": i + 1,
+            "move": move,
+            "san": san,
+            "board_before": board_before,
+            "board_after": board_after,
+            "mover_color": mover_color,
+            "piece_type": mover_pt,
+            "is_check": is_check,
+            "is_capture": is_capture,
+            "is_checkmate": is_checkmate,
+            "captured_piece_type": captured_piece_type,
+            "gives_mover_attacked": gives_mover_attacked,
+            "material_delta_white": material_delta_white,
+            "legal_reply_count_after": legal_reply_count_after,
+        })
+    return facts
+
+
+def _score_mate_key_move(theme_key, fact, facts, mover_color):
+    """将杀/将型：直接取最后一步（将杀那步）。"""
+    if not fact.get("is_checkmate"):
+        return 0.0, ""
+    return 1.0, "本手完成将杀，是战术的终局兑现。"
+
+
+def _score_fork_key_move(theme_key, fact, facts, mover_color):
+    """叉击：走子后该子同时攻击两个高价值目标（用现有 _is_fork 复用）。"""
+    try:
+        if _is_fork(fact["board_before"], fact["move"], fact["board_after"]):
+            return 0.9, "本手用一子同时叉住两个目标，是本战术的叉击手。"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _score_pin_key_move(theme_key, fact, facts, mover_color):
+    """牵制：走子后建立/强化牵制关系。"""
+    try:
+        if _is_pin(fact["board_before"], fact["move"], fact["board_after"]):
+            return 0.9, "本手建立了牵制（被牵子无法擅动），是本战术的关键。"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _score_skewer_key_move(theme_key, fact, facts, mover_color):
+    """串击：走子后形成串击。"""
+    try:
+        if _is_skewer(fact["board_before"], fact["move"], fact["board_after"]):
+            return 0.9, "本手形成串击，逼对方高价值子先动、暴露低价值子。"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _score_discovered_key_move(theme_key, fact, facts, mover_color):
+    """闪击：移开遮挡子，露出远射攻击线。"""
+    try:
+        if _is_discovered(fact["board_before"], fact["move"], fact["board_after"]):
+            return 0.9, "本手移开遮挡子，露出身后远射子的攻击线，是闪击手。"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _score_double_check_key_move(theme_key, fact, facts, mover_color):
+    """双将：走子后同时存在两路将军。"""
+    if not fact.get("is_check"):
+        return 0.0, ""
+    board_after = fact["board_after"]
+    enemy_king = board_after.king(not mover_color)
+    if enemy_king is None:
+        return 0.0, ""
+    attackers = [p for p in board_after.attackers(mover_color, enemy_king)]
+    if len(attackers) >= 2:
+        return 0.95, "本手产生双将，对方王只能移动，无法用吃子或垫子解将。"
+    return 0.0, ""
+
+
+def _score_promotion_key_move(theme_key, fact, facts, mover_color):
+    """升变：走到底线的那一步（或同回合吃子+升变）。"""
+    move = fact.get("move")
+    if move is None:
+        return 0.0, ""
+    if move.promotion:
+        return 1.0, "本手完成升变，把兵变成更有力的子（如后），是战术的兑现点。"
+    return 0.0, ""
+
+
+def _score_advanced_pawn_key_move(theme_key, fact, facts, mover_color):
+    """通路兵：推动己方兵逼近升变 / 清除升变路径障碍。
+    证据：mover_pt 为兵 + 走动后该兵离 8 行/1 行更近。
+    """
+    if fact.get("piece_type") != chess.PAWN:
+        return 0.0, ""
+    move = fact.get("move")
+    if move is None:
+        return 0.0, ""
+    to_rank = chess.square_rank(move.to_square)
+    # 升变在 promotion scorer 里评；这里只评"推进"和"清障"
+    if move.promotion:
+        return 0.0, ""
+    # 推进：白方向 7 行靠近，黑方向 0 行靠近
+    moved_toward_promotion = (
+        (mover_color == chess.WHITE and to_rank >= 5) or
+        (mover_color == chess.BLACK and to_rank <= 2)
+    )
+    if moved_toward_promotion and not fact.get("is_capture"):
+        return 0.8, "本手推进己方兵逼近升变格，是通路兵战术的关键推进。"
+    # 吃子清障：清掉兵前方的对方兵
+    if fact.get("is_capture") and fact.get("captured_piece_type") == chess.PAWN:
+        return 0.7, "本手吃掉前方障碍兵，己方通路兵推进道路被打通。"
+    return 0.0, ""
+
+
+def _score_sacrifice_key_move(theme_key, fact, facts, mover_color):
+    """弃子：主动让高价值子被对方吃/进入对方攻击范围，后续获得决定性收益。
+
+    评分逻辑（不要求 100% 准确，但要稳健）：
+      +0.4  本手是己方走子且非将杀
+      +0.3  本手是吃子（弃子吃对方的子）或主动进入对方攻击范围
+      +0.4  移动子落点后被对方攻击（gives_mover_attacked）
+      +0.2  己方本手净亏子（material_delta 往不利方向走）
+      +0.3  后续 1-2 ply 内出现：对方回吃 / 对方被迫应将 / 己方赢回 ≥ 弃子
+      +0.3  后续 4 ply 内出现：将杀 / 对方合法应招数 ≤ 2 / 己方净赚子
+    """
+    if not fact.get("move"):
+        return 0.0, ""
+    if fact.get("is_checkmate"):
+        return 0.0, ""
+    if fact.get("piece_type") in (None, chess.KING):
+        return 0.0, ""
+
+    score = 0.0
+    reasons = []
+    mover_pt = fact.get("piece_type")
+    mover_value = PIECE_VALUES.get(mover_pt, 0)
+    # 王或兵的"弃子"意义不大（王弃子=自杀，兵弃子=常见推进）
+    if mover_value < 2:
+        return 0.0, ""
+
+    # 触发 A：本手是吃子（主动弃子换取对方子） 或 落点后被对方攻击
+    if fact.get("is_capture") or fact.get("gives_mover_attacked"):
+        score += 0.4
+        reasons.append("主动让高价值子进入对方攻击范围")
+
+    # 触发 B：净亏子（白方走且 delta < 0，或黑方走且 delta > 0）
+    delta = fact.get("material_delta_white", 0)
+    if mover_color == chess.WHITE and delta < 0:
+        score += 0.2
+        reasons.append("本手暂时净亏子力")
+    elif mover_color == chess.BLACK and delta > 0:
+        score += 0.2
+        reasons.append("本手暂时净亏子力")
+
+    # 触发 C：后续 1-2 ply 内对方回吃
+    for j in range(fact["idx"], min(fact["idx"] + 2, len(facts))):
+        nf = facts[j]
+        if nf.get("is_capture") and nf.get("captured_piece_type") == mover_pt:
+            score += 0.3
+            reasons.append("对方随后回吃了弃子")
+            break
+
+    # 触发 D：后续出现将杀 / 对方合法应招极少 / 己方净赚
+    for j in range(fact["idx"], min(fact["idx"] + 4, len(facts))):
+        nf = facts[j]
+        if nf.get("is_checkmate"):
+            score += 0.3
+            reasons.append("通过弃子最终完成将杀")
+            break
+        if nf.get("legal_reply_count_after", 99) <= 2:
+            score += 0.2
+            reasons.append("弃子后对方合法应招明显收缩")
+            break
+
+    if score <= 0:
+        return 0.0, ""
+
+    reason = "本手是弃子： " + "，".join(reasons) + "，是本题的弃子关键手。"
+    return min(score, 1.0), reason
+
+
+def _score_capturing_defender_key_move(theme_key, fact, facts, mover_color):
+    """消除防守子：本手是吃子 + 后续 1-2 ply 内吃到原保护子。"""
+    if not fact.get("is_capture"):
+        return 0.0, ""
+    # 简化：吃子且下一手还能吃子（说明上一手打开了链）
+    idx = fact["idx"]
+    nxt_idx = idx  # facts 是 0-based 列表，下一手的列表索引 = idx（1-based 当前 +1 → 列表 idx）
+    if 0 <= nxt_idx < len(facts):
+        nxt = facts[nxt_idx]
+        if nxt.get("is_capture") and nxt.get("idx", 0) == idx + 1:
+            return 0.7, "本手先吃掉防守子，下一手即可白吃目标，是消除防守子的关键。"
+    # 单独吃子也算（无后续）
+    if not fact.get("gives_mover_attacked"):
+        return 0.5, "本手主动吃掉对方防守子，使目标失去保护。"
+    return 0.0, ""
+
+
+def _score_deflection_key_move(theme_key, fact, facts, mover_color):
+    """驱离/引离：迫使对方子离开关键职责。
+    简化判定：弃子型引离（用 sacrifice 评分近似）。
+    """
+    if fact.get("is_checkmate"):
+        return 0.0, ""
+    s, r = _score_sacrifice_key_move(theme_key, fact, facts, mover_color)
+    if s > 0.4 and r:
+        return 0.6, "本手通过弃子把对方防守子引离关键岗位。" + r
+    return 0.0, ""
+
+
+def _score_clearance_key_move(theme_key, fact, facts, mover_color):
+    """腾线/清障：移开己方子打开远射线路。
+    简化判定：走子后己方远射子的攻击格子数明显增加，或吃子清掉同线障碍。
+    """
+    if fact.get("is_capture") and fact.get("captured_piece_type") == chess.PAWN:
+        return 0.5, "本手清除线路上的障碍，为后续远射打开通路。"
+    if not fact.get("is_capture"):
+        # 比较走动前后己方远射子可攻击格数
+        try:
+            before_att = 0
+            after_att = 0
+            for sq, p in fact["board_before"].piece_map().items():
+                if p.color == mover_color and p.piece_type in (chess.QUEEN, chess.ROOK, chess.BISHOP):
+                    before_att += len(fact["board_before"].attacks(sq))
+            for sq, p in fact["board_after"].piece_map().items():
+                if p.color == mover_color and p.piece_type in (chess.QUEEN, chess.ROOK, chess.BISHOP):
+                    after_att += len(fact["board_after"].attacks(sq))
+            if after_att - before_att >= 6:
+                return 0.6, "本手移开己方子，打开己方远射子攻击线。"
+        except Exception:
+            pass
+    return 0.0, ""
+
+
+def _score_intermezzo_key_move(theme_key, fact, facts, mover_color):
+    """中间手：解对方威胁前先插入更强的一手。
+    简化判定：本手是己方非应将步且同时形成将军/吃子威胁。
+    """
+    if fact.get("is_checkmate"):
+        return 0.0, ""
+    if fact.get("is_check") and fact.get("is_capture"):
+        return 0.6, "本手在对方威胁前插入带将军的吃子，是典型的中间手。"
+    return 0.0, ""
+
+
+def _score_exposed_king_key_move(theme_key, fact, facts, mover_color):
+    """暴露王：利用对方王暴露的弱点发动攻击（将军/逼迫）。"""
+    if fact.get("is_check") and not fact.get("is_capture"):
+        return 0.6, "本手对暴露的王发动将军，迫其在开阔地带逃生。"
+    if fact.get("is_check") and fact.get("is_capture"):
+        return 0.7, "本手对暴露的王发动弃子将军，强制改变局面走向。"
+    return 0.0, ""
+
+
+def _score_kingside_attack_key_move(theme_key, fact, facts, mover_color):
+    """王翼进攻：突破王前防线。
+    简化判定：己方在王翼区域（d/e/f 列，文件号 3-5）发动弃子。
+    """
+    if not fact.get("is_capture"):
+        return 0.0, ""
+    move = fact.get("move")
+    if move is None:
+        return 0.0, ""
+    to_file = chess.square_file(move.to_square)
+    if 3 <= to_file <= 5 and fact.get("gives_mover_attacked"):
+        return 0.7, "本手在王翼区域弃子，撕开对方王前防线。"
+    return 0.0, ""
+
+
+def _score_attacking_f2_f7_key_move(theme_key, fact, facts, mover_color):
+    """攻击 f2/f7：直接落到 f2/f7 攻击、或者弃子突破该格。"""
+    move = fact.get("move")
+    if move is None:
+        return 0.0, ""
+    to_sq = move.to_square
+    if to_sq in (chess.F2, chess.F7):
+        return 0.9, "本手直接落到 f2/f7，突破对方开局薄弱防线。"
+    # 弃子型
+    if fact.get("is_capture") and fact.get("gives_mover_attacked"):
+        return 0.6, "本手通过弃子制造对 f2/f7 区域的攻击压力。"
+    return 0.0, ""
+
+
+def _score_hanging_piece_key_move(theme_key, fact, facts, mover_color):
+    """悬子：直接吃掉对方无保护子。"""
+    if not fact.get("is_capture"):
+        return 0.0, ""
+    if not fact.get("gives_mover_attacked"):
+        return 0.8, "本手吃掉对方无保护的子（悬子），净赚一子。"
+    return 0.0, ""
+
+
+def _score_overloading_key_move(theme_key, fact, facts, mover_color):
+    """过载：对方一子承担多个防守任务，本手攻击使其无法兼顾。
+    简化：用 sacrifice 评分近似。
+    """
+    s, r = _score_sacrifice_key_move(theme_key, fact, facts, mover_color)
+    if s >= 0.5:
+        return 0.5, "本手利用过载：对方防守子无法兼顾两个任务，被迫放弃其一。"
+    return 0.0, ""
+
+
+# 标签 → 评分函数的注册表。未列出的标签走通用回退。
+_THEME_SCORERS = {
+    # 几何可判
+    "fork": _score_fork_key_move,
+    "pin": _score_pin_key_move,
+    "skewer": _score_skewer_key_move,
+    "discoveredAttack": _score_discovered_key_move,
+    "doubleCheck": _score_double_check_key_move,
+    "discoveredCheck": _score_discovered_key_move,
+    # 终局/升变
+    "mate": _score_mate_key_move,
+    "mateIn1": _score_mate_key_move,
+    "mateIn2": _score_mate_key_move,
+    "mateIn3": _score_mate_key_move,
+    "backRankMate": _score_mate_key_move,
+    "smotheredMate": _score_mate_key_move,
+    "promotion": _score_promotion_key_move,
+    # 交换/诱导
+    "sacrifice": _score_sacrifice_key_move,
+    "capturingDefender": _score_capturing_defender_key_move,
+    "deflection": _score_deflection_key_move,
+    "attraction": _score_deflection_key_move,
+    "clearance": _score_clearance_key_move,
+    "intermezzo": _score_intermezzo_key_move,
+    "overloading": _score_overloading_key_move,
+    # 攻击类
+    "exposedKing": _score_exposed_king_key_move,
+    "kingsideAttack": _score_kingside_attack_key_move,
+    "attackingF2F7": _score_attacking_f2_f7_key_move,
+    "hangingPiece": _score_hanging_piece_key_move,
+    # 通路兵
+    "advancedPawn": _score_advanced_pawn_key_move,
+}
+
+
+def _fallback_key_move_idx(facts):
+    """通用回退：取将军/将杀/吃高价值子中分数最高的一步。
+    用于标签未注册或评分全 0 的情况。
+    """
+    best_idx = 1 if facts else 0
+    best_score = -1.0
+    for fact in facts:
+        s = 0.0
+        if fact.get("is_checkmate"):
+            s = 1.0
+        elif fact.get("is_check"):
+            s = 0.6
+        elif fact.get("is_capture"):
+            cap_v = PIECE_VALUES.get(fact.get("captured_piece_type"), 0)
+            s = 0.3 + 0.05 * cap_v
+        if s > best_score:
+            best_score = s
+            best_idx = fact["idx"]
+    return best_idx
+
+
+def _locate_theme_key_moves(facts, effective_themes, main_theme_key):
+    """对 effective_themes 中的每个标签定位其关键手。
+
+    返回 dict：
+      {
+        "<theme_key>": {
+          "idx": int,           # 1-based 步号
+          "score": float,       # 评分（0-1）
+          "reason": str,        # 可解释理由
+        },
+        ...
+        "core": {...},          # 核心标签的定位结果（引用同一对象）
+        "key_move_idx": int,    # 全局关键手步号（核心标签的位置）
+        "key_move_san": str,    # 关键手 SAN
+        "key_move_reason": str, # 关键手理由
+      }
+    """
+    result = {}
+    if not facts or not effective_themes:
+        idx0 = _fallback_key_move_idx(facts) if facts else 0
+        san0 = facts[idx0 - 1]["san"] if facts and 0 < idx0 <= len(facts) else ""
+        return {
+            "core": {"idx": idx0, "score": 0.0, "reason": "通用回退：选最具决定性的一步。"},
+            "key_move_idx": idx0,
+            "key_move_san": san0,
+            "key_move_reason": "通用回退：选最具决定性的一步。",
+        }
+
+    # 取解题方颜色（与 build_for_puzzle 一致：board.turn 走子方为解题方）
+    mover_color = facts[0]["mover_color"] if facts else chess.WHITE
+
+    for theme_key in effective_themes:
+        if theme_key in _OUTCOME_THEMES:
+            # 评估类标签不参与定位
+            continue
+        scorer = _THEME_SCORERS.get(theme_key)
+        if scorer is None:
+            continue
+        best = None
+        for fact in facts:
+            try:
+                score, reason = scorer(theme_key, fact, facts, mover_color)
+            except Exception as e:
+                Logger.warn(f"标签 {theme_key} 评分异常: {e}")
+                continue
+            if score <= 0:
+                continue
+            if best is None or score > best["score"]:
+                best = {"idx": fact["idx"], "score": score, "reason": reason}
+        if best is not None:
+            result[theme_key] = best
+
+    # 核心标签定位：优先用专门评分，否则用通用回退
+    core_loc = result.get(main_theme_key)
+    if core_loc is None:
+        idx0 = _fallback_key_move_idx(facts)
+        san0 = facts[idx0 - 1]["san"] if 0 < idx0 <= len(facts) else ""
+        core_loc = {
+            "idx": idx0,
+            "score": 0.0,
+            "reason": "通用回退：选最具决定性的一步。",
+        }
+    result["core"] = core_loc
+    result["key_move_idx"] = core_loc["idx"]
+    san_key = ""
+    if 0 < core_loc["idx"] <= len(facts):
+        san_key = facts[core_loc["idx"] - 1]["san"]
+    result["key_move_san"] = san_key
+    result["key_move_reason"] = core_loc["reason"]
+    return result
+
+
 def _puzzle_target_length(node_count: int, rating: int) -> str:
     """动态字数预算（实施决策 D）：按节点数 × 每节点字数预算，结合 Rating 分层。"""
     if rating < 1500:
@@ -1202,11 +1729,21 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
 
     puzzle: PuzzleData，含 effective_themes / rating / opening_tags 等。
     """
-    from src.themes_kb import get_theme, primary_theme, get_theme_definitions_text
+    from src.themes_kb import (get_theme, select_core_theme,
+                               related_intersection, get_theme_definitions_text)
 
     effective = puzzle.effective_themes
-    main_theme_key = primary_theme(effective)
+    # 核心标签：优先选战术机理（fork/sacrifice…），而非评估分类（crushing/advantage）
+    main_theme_key = select_core_theme(effective)
     main_theme = get_theme(main_theme_key) or {}
+    # 次要标签 + 与核心存在联动关系的标签（供组合叙事）
+    secondary_keys = [k for k in effective if k != main_theme_key]
+    synergy_keys = related_intersection(main_theme_key, secondary_keys)
+
+    # 关键手定位：复盘整条解法 → 对每个机理类标签用棋盘事实评分 → 选最高分。
+    # 解决"核心标签选对了但关键手讲错"（如 sacrifice 被误选成前面那步将军）。
+    move_facts = _collect_puzzle_move_facts(board, moves)
+    key_move_map = _locate_theme_key_moves(move_facts, effective, main_theme_key)
 
     # 单步 CompressedStep 包装，供 insight_extractor 复用
     temp = board.copy()
@@ -1268,6 +1805,15 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
         fen_before = temp.fen()
         turn = "白方走" if temp.turn == chess.WHITE else "黑方走"
         san = temp.san(move)
+        # 抽取被吃子的具体类型（确定性事实，供解说"吃掉了什么子"而非泛泛"吃子"）
+        captured_piece_cn = ""
+        if is_capture:
+            if temp.is_en_passant(move):
+                captured_piece_cn = "兵"
+            else:
+                captured = temp.piece_at(move.to_square)
+                if captured:
+                    captured_piece_cn = piece_cn(captured.piece_type)
         temp.push(move)
         fen_after = temp.fen()
         board_after = temp.copy()
@@ -1286,6 +1832,19 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
                 f"本步涉及【{theme_entry.get('cn', related_theme)}】："
                 f"{theme_entry.get('definition', '')}"
             )
+
+        # 关键手定位结果回灌：本步属于哪些标签的关键手、是不是核心关键手
+        step_idx = i + 1
+        roles_here = [k for k, loc in key_move_map.items()
+                      if isinstance(loc, dict) and loc.get("idx") == step_idx
+                      and k not in ("core",)]
+        is_core_key = (key_move_map.get("core", {}) or {}).get("idx") == step_idx
+        key_move_reason = ""
+        if is_core_key:
+            key_move_reason = key_move_map.get("key_move_reason", "") or ""
+        elif roles_here:
+            # 取第一个次要标签的理由
+            key_move_reason = key_move_map[roles_here[0]].get("reason", "")
 
         # 注入洞察
         insight = insights[i] if i < len(insights) else {}
@@ -1311,7 +1870,12 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
             "is_game_over_after": board_after.is_game_over(),
             "is_capture_node": is_capture,
             "has_check_in_node": is_check,
+            "captured_piece_cn": captured_piece_cn,
             "legal_reply_count_after": sum(1 for _ in board_after.legal_moves),
+            # 关键手定位（新增）
+            "theme_key_roles": roles_here,
+            "is_core_theme_key_move": is_core_key,
+            "theme_key_reason": key_move_reason,
             # Puzzle 专用字段
             "related_theme": related_theme,
             "theme_context": theme_context,
@@ -1345,16 +1909,38 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
             last_node["puzzle_tactical_facts"].append(net_fact)
 
     # 组装 storyboard
-    theme_defs_text = get_theme_definitions_text(effective)
+    theme_defs_text = get_theme_definitions_text(effective, include_en=False)
     tactic_name = main_theme.get("cn", "战术练习")
-    if len(effective) > 1:
+    if secondary_keys:
         other_names = []
-        for k in effective[1:]:
+        for k in secondary_keys:
             t = get_theme(k)
             if t:
                 other_names.append(t["cn"])
         if other_names:
             tactic_name += " + " + " + ".join(other_names[:2])
+
+    # 关键手定位诊断日志（失败安全：异常吞掉，不影响主流程）
+    try:
+        core_loc = key_move_map.get("core", {}) or {}
+        Logger.info(
+            f"  关键手定位 核心标签={main_theme_key} 关键手步号={core_loc.get('idx')} "
+            f"SAN={key_move_map.get('key_move_san', '')} 评分={core_loc.get('score', 0):.2f}")
+        for tk, loc in key_move_map.items():
+            if tk in ("core",):
+                continue
+            if isinstance(loc, dict):
+                Logger.info(
+                    f"    标签 {tk}: 关键手步号={loc.get('idx')} 评分={loc.get('score', 0):.2f}")
+    except Exception as e:
+        Logger.warn(f"关键手定位日志失败: {e}")
+
+    # 联动标签中文名：供 prompt/锚点组合叙事（如"通过弃子打出碾压"）
+    synergy_names = []
+    for k in synergy_keys:
+        t = get_theme(k)
+        if t:
+            synergy_names.append(t["cn"])
 
     return {
         "endgame_name": tactic_name,
@@ -1365,6 +1951,11 @@ def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
             "theme_definitions": theme_defs_text,
             "assertions": [main_theme.get("assertion", "")] if main_theme else [],
             "narrative_mode": narrative_mode,
+            "synergy_themes": synergy_names,
+            # 关键手定位（新增）：全局统一的关键手步号 + 理由
+            "key_move_idx": key_move_map.get("key_move_idx", 0),
+            "key_move_san": key_move_map.get("key_move_san", ""),
+            "key_move_reason": key_move_map.get("key_move_reason", ""),
         },
         "difficulty_hint": puzzle.rating,
         "difficulty_level": main_theme.get("difficulty_level", "intermediate"),

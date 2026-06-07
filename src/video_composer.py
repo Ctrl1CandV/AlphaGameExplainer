@@ -15,8 +15,8 @@ import chess
 
 TITLE_SEC = 3.5                 # 片头动画总时长
 FPS = RENDER_FPS                # 与渲染帧率统一
-SUBTITLE_HEIGHT = 84
-SUBTITLE_MARGIN = 18
+SUBTITLE_HEIGHT = 62
+SUBTITLE_MARGIN = 10
 # 视频开头静音 = 片头标题卡 + 初始局面静态展示
 LEAD_SILENCE = TITLE_SEC + INTRO_SEC
 
@@ -212,13 +212,16 @@ def _make_silence(duration: float, output_path: str) -> str:
 
 
 def _create_subtitle_background(width: int, height: int) -> str:
-    """创建渐变字幕背景——从底部全黑向上渐隐"""
+    """创建居中圆角字幕卡片背景——不覆盖全宽，仅占画面中央区域。"""
+    card_w = min(width - 80, 800)
+    card_x = (width - card_w) // 2
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    for y in range(height):
-        alpha = int(190 * max(0, 1 - y / height * 1.3))
-        if alpha > 0:
-            draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+    # 居中圆角矩形，半透明深色
+    draw.rounded_rectangle(
+        [card_x, 0, card_x + card_w, height],
+        radius=12, fill=(12, 12, 18, 210),
+    )
     path = os.path.join("output", "frames", "subtitle_bg.png")
     img.save(path)
     return path
@@ -311,6 +314,8 @@ def compose(frame_paths: List[str], frame_durations: List[float],
 
     # ---- 字幕 ----
     band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
+    card_w = min(frame_w - 80, 800)
+    card_x = (frame_w - card_w) // 2
 
     # 字体查找
     _FONT_PATH = "C:/Windows/Fonts/simhei.ttf"
@@ -323,7 +328,7 @@ def compose(frame_paths: List[str], frame_durations: List[float],
         return TextClip(
             text=txt, font=_FONT_PATH, font_size=26, color="#F0EDE5",
             stroke_color="#1a1a1a", stroke_width=1.5,
-            method="caption", size=(frame_w - 80, SUBTITLE_HEIGHT),
+            method="caption", size=(card_w, SUBTITLE_HEIGHT),
             text_align="center",
         )
 
@@ -343,7 +348,7 @@ def compose(frame_paths: List[str], frame_durations: List[float],
                        .with_duration(video.duration)
                        .with_position((0, band_top)))
         subs = SubtitlesClip(cues, make_textclip=_mk_sub)
-        subs = subs.with_position((20, band_top))
+        subs = subs.with_position((card_x, band_top))
         layers.extend([sub_bg_clip, subs])
     else:
         Logger.warn("无有效字幕，跳过字幕层")

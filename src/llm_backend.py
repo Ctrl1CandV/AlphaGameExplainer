@@ -75,15 +75,17 @@ class LlamaCppBackend(LLMBackend):
                     self._grammar_cache[grammar] = LlamaGrammar.from_string(grammar, verbose=self.verbose)
                 grammar_obj = self._grammar_cache[grammar]
 
+            system_content = (
+                "你是一位会自己看棋的国际象棋教练。你不需要被告知哪一步重要——"
+                "你会从节点信息中的棋理事实自己判断。"
+                "解说基于节点「状态」字段中的真值：只有「已将杀」的节点才能说将杀/绝杀，"
+                "其他节点用推进性描述。如果要求JSON，只输出指定字段，不自行增加字段。"
+                "多个segment之间要有承接关系。不要复述提示词。"
+            )
+
             result = self._llm.create_chat_completion(
                 messages=[
-                    {"role": "system", "content": (
-                        "你是一位会自己看棋的国际象棋教练。你不需要被告知哪一步重要——"
-                        "你会从节点信息中的棋理事实自己判断。"
-                        "解说基于节点「状态」字段中的真值：只有「已将杀」的节点才能说将杀/绝杀，"
-                        "其他节点用推进性描述。如果要求JSON，只输出指定字段，不自行增加字段。"
-                        "多个segment之间要有承接关系。不要复述提示词。"
-                    )},
+                    {"role": "system", "content": system_content},
                     {"role": "user", "content": prompt},
                 ],
                 max_tokens=1400,

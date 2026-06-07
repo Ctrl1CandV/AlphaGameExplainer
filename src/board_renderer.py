@@ -5,14 +5,19 @@ import chess
 import math
 import os
 
-# 画布布局,16:9,标准化720p
-CANVAS_W = 1280
+# 画布布局：4:3 偏方正比例，棋盘主导，避免 16:9 两侧留白
+CANVAS_W = 960
 CANVAS_H = 720
 SQUARE = 75
 BOARD_SIZE = 600                # SQUARE * 8
-BOARD_LEFT = 340                # (CANVAS_W - BOARD_SIZE) // 2，棋盘水平居中
-BOARD_TOP = 60                  # 顶部留空给 HUD 信息条
-TOP_BAR_H = 36                  # 顶部 HUD 条高度
+BOARD_LEFT = 28
+BOARD_TOP = 20
+TOP_BAR_H = 36                  # 保留常量，兼容历史引用
+
+# 右侧信息面板：紧凑宽度，与棋盘整体视觉平衡
+PANEL_GAP = 24
+PANEL_LEFT = BOARD_LEFT + BOARD_SIZE + PANEL_GAP     # 652
+PANEL_WIDTH = CANVAS_W - PANEL_LEFT - BOARD_LEFT     # 280
 
 PIECES_DIR = os.path.join("assets", "pieces")
 FRAMES_DIR = os.path.join("output", "frames")
@@ -104,9 +109,15 @@ def _get_background(width: int, height: int) -> Image.Image:
 #  绘制函数
 
 def _draw_board(draw: ImageDraw.ImageDraw):
-    """ 绘制棋盘（圆角边框，无阴影——棋盘居中已有呼吸感） """
-    board_rect = [BOARD_LEFT - 2, BOARD_TOP - 2, BOARD_LEFT + BOARD_SIZE + 3, BOARD_TOP + BOARD_SIZE + 3]
-    draw.rounded_rectangle(board_rect, radius=6, outline=(80, 80, 80), width=3)
+    """ 绘制棋盘（双层暖色描边，轻微浮起感） """
+    # 外层暖色描边
+    outer_rect = [BOARD_LEFT - 4, BOARD_TOP - 4,
+                  BOARD_LEFT + BOARD_SIZE + 5, BOARD_TOP + BOARD_SIZE + 5]
+    draw.rounded_rectangle(outer_rect, radius=8, outline=(120, 95, 60), width=3)
+    # 内层细描边
+    board_rect = [BOARD_LEFT - 2, BOARD_TOP - 2,
+                  BOARD_LEFT + BOARD_SIZE + 3, BOARD_TOP + BOARD_SIZE + 3]
+    draw.rounded_rectangle(board_rect, radius=6, outline=(90, 90, 92), width=2)
 
     for r in range(8):
         for c in range(8):
@@ -198,120 +209,155 @@ def _draw_pieces_static(
 
 #  HUD 叠加层
 
-def _draw_top_bar(img: Image.Image, info: dict):
-    """ 顶部信息条：残局类型 | 进度 | 当前阶段 """
-    bar_h = TOP_BAR_H
-    # 半透明深色背景（上实下虚）
-    overlay = Image.new("RGBA", (CANVAS_W, bar_h), (0, 0, 0, 0))
-    for y in range(bar_h):
-        a = int(160 * (1 - y / bar_h * 0.45))
-        if a > 0:
-            ImageDraw.Draw(overlay).line(
-                [(0, y), (CANVAS_W, y)], fill=(18, 18, 22, min(180, a)))
-    img.paste(overlay, (0, 0), overlay)
+def _draw_vertical_eval_bar(img: Image.Image, cx: int, top: int, bar_w: int,
+                            bar_h: int, score: float):
+    """纵向评估条：白方在下方填充（优势越大白区越高），黑方在上"""
+    draw = ImageDraw.Draw(img)
+    x0 = cx - bar_w // 2
+    x1 = cx + bar_w // 2
+
+    clamped = max(-10.0, min(10.0, float(score)))
+    white_ratio = (clamped + 10) / 20          # 0=黑优, 1=白优
+    white_h = int(bar_h * white_ratio)
+
+    # 背景（黑方区域）
+    draw.rectangle([x0, top, x1, top + bar_h], fill=(48, 48, 54),
+                   outline=(80, 80, 88), width=1)
+    # 白方区域（自下而上填充）
+    if white_h > 0:
+        draw.rectangle([x0 + 1, top + bar_h - white_h, x1 - 1, top + bar_h - 1],
+                       fill=(222, 222, 226))
+    # 中心标记线
+    mid_y = top + bar_h // 2
+    draw.line([(x0 - 3, mid_y), (x1 + 3, mid_y)], fill=(120, 120, 128), width=1)
+
+    # 顶部「黑优」、底部「白优」标签
+    font_s = _get_font(11)
+    draw.text((x1 + 8, top), "黑优", fill=(150, 150, 158), font=font_s, anchor="lm")
+    draw.text((x1 + 8, top + bar_h), "白优", fill=(190, 190, 198), font=font_s, anchor="lm")
+
+
+def _draw_captured_row(img: Image.Image, x: int, y: int, max_w: int,
+                       cap_black: list, cap_white: list):
+    """面板内已吃子图标行（黑方丢子 / 白方丢子，超宽自动换行）"""
+    draw = ImageDraw.Draw(img)
+    CAP_SIZE = 22
+    GAP = 2
+    cur_x = x
+    cur_y = y
+
+    def _paste_list(pieces: list, start_x: int, start_y: int):
+        nonlocal_x = start_x
+        nonlocal_y = start_y
+        for pchar in pieces:
+            if nonlocal_x + CAP_SIZE > x + max_w:
+                nonlocal_x = x
+                nonlocal_y += CAP_SIZE + 2
+            try:
+                icon = _load_piece(pchar).resize((CAP_SIZE, CAP_SIZE))
+                img.paste(icon, (nonlocal_x, nonlocal_y), icon)
+            except Exception:
+                pass
+            nonlocal_x += CAP_SIZE + GAP
+        return nonlocal_x, nonlocal_y
+
+    if cap_black:
+        cur_x, cur_y = _paste_list(cap_black, cur_x, cur_y)
+    if cap_black and cap_white:
+        draw.line([(cur_x + 2, cur_y + CAP_SIZE // 2),
+                   (cur_x + 8, cur_y + CAP_SIZE // 2)],
+                  fill=(120, 120, 120), width=1)
+        cur_x += 12
+    if cap_white:
+        _paste_list(cap_white, cur_x, cur_y)
+
+
+def _draw_panel_card(draw: ImageDraw.ImageDraw, x: int, y: int, w: int,
+                     h: int, alpha: int = 170):
+    """面板内单张卡片：半透明深色圆角矩形。"""
+    draw.rounded_rectangle([x, y, x + w, y + h], radius=10,
+                           fill=(22, 22, 32, alpha))
+
+
+def _draw_side_panel(img: Image.Image, info: dict):
+    """右侧信息面板：卡片式分区，每块独立圆角矩形，避免大面积黑块。
+
+    所有区域在数据缺失时优雅降级（谜题链路无评分数据时不画评估条）。
+    """
+    px = PANEL_LEFT
+    pw = PANEL_WIDTH
+    panel_top = BOARD_TOP
+    inner_x = px + 16
+    inner_w = pw - 32
 
     draw = ImageDraw.Draw(img)
-    font = _get_font(17)
+    y = panel_top
 
+    # ---- 卡片 1：标题 + 进度 ----
+    card1_h = 80
+    _draw_panel_card(draw, px, y, pw, card1_h)
     endgame_name = info.get("endgame_name", "残局")
     winner = info.get("winner_color")
-    if winner == chess.WHITE:
-        title_color = (255, 215, 0)
-    elif winner == chess.BLACK:
-        title_color = (180, 200, 230)
-    else:
-        title_color = (255, 215, 0)
-
-    draw.text((24, 8), endgame_name, fill=title_color, font=font)
-
+    title_color = (180, 200, 230) if winner == chess.BLACK else (255, 215, 0)
+    draw.text((px + pw // 2, y + 24), endgame_name,
+              fill=title_color, font=_get_font(20), anchor="ma")
     move_num = info.get("move_num", 0)
     total = info.get("total_moves", 0)
-    draw.text((CANVAS_W // 2, 8),
-              f"第 {move_num}/{total} 步",
-              fill=(200, 200, 200), font=font, anchor="ma")
+    draw.text((px + pw // 2, y + 54), f"第 {move_num} / {total} 步",
+              fill=(200, 200, 200), font=_get_font(16), anchor="ma")
+    y += card1_h + 12
 
-    phase = info.get("current_phase", "")
-    if phase:
-        draw.text((CANVAS_W - 24, 8), phase,
-                  fill=(160, 170, 210), font=font, anchor="ra")
-
-def _draw_bottom_info(img: Image.Image, info: dict):
-    """棋盘下方信息：已吃子图标 + 水平评估条"""
-    draw = ImageDraw.Draw(img)
-    bottom_y = BOARD_TOP + BOARD_SIZE + 6
-
-    # ---- 已吃子图标 ----
-    cap_white = info.get("captured_white", [])
-    cap_black = info.get("captured_black", [])
-    CAP_SIZE = 20
-    GAP = 1
-    icon_x = BOARD_LEFT
-
-    # 黑方已丢棋子
-    if cap_black:
-        for idx, pchar in enumerate(cap_black):
-            if idx > 0 and idx % 10 == 0:
-                icon_x = BOARD_LEFT
-                bottom_y += CAP_SIZE + 1
-            try:
-                icon = _load_piece(pchar).resize((CAP_SIZE, CAP_SIZE))
-                img.paste(icon, (icon_x, bottom_y), icon)
-                icon_x += CAP_SIZE + GAP
-            except Exception:
-                pass
-    # 分隔符（双方都有已吃子时显示）
-    if cap_black and cap_white:
-        draw.line([(icon_x + 2, bottom_y + CAP_SIZE // 2),
-                   (icon_x + 8, bottom_y + CAP_SIZE // 2)],
-                  fill=(120, 120, 120), width=1)
-        icon_x += 12
-    # 白方已丢棋子
-    if cap_white:
-        for idx, pchar in enumerate(cap_white):
-            if idx > 0 and idx % 10 == 0:
-                icon_x = BOARD_LEFT
-                bottom_y += CAP_SIZE + 1
-            try:
-                icon = _load_piece(pchar).resize((CAP_SIZE, CAP_SIZE))
-                img.paste(icon, (icon_x, bottom_y), icon)
-                icon_x += CAP_SIZE + GAP
-            except Exception:
-                pass
-
-    # ---- 水平评估条（仅在有评分数据时绘制）----
+    # ---- 卡片 2：纵向评估条（仅在有评分数据时绘制）----
     score = info.get("score")
     if score is not None:
-        bar_w = 400
-        bar_h = 4
-        bar_x = BOARD_LEFT + (BOARD_SIZE - bar_w) // 2
-        bar_y = BOARD_TOP + BOARD_SIZE + 10
+        card2_h = 210
+        _draw_panel_card(draw, px, y, pw, card2_h)
+        _draw_vertical_eval_bar(img, px + pw // 2 - 12, y + 14, 14, 180, score)
+        y += card2_h + 12
 
-        clamped = max(-10, min(10, score))
-        white_ratio = (clamped + 10) / 20
+    # ---- 卡片 3：已吃子 ----
+    cap_white = info.get("captured_white", [])
+    cap_black = info.get("captured_black", [])
+    if cap_white or cap_black:
+        card3_h = 60
+        _draw_panel_card(draw, px, y, pw, card3_h)
+        draw.text((inner_x, y + 6), "已吃子",
+                  fill=(150, 150, 158), font=_get_font(12), anchor="lt")
+        _draw_captured_row(img, inner_x, y + 24, inner_w, cap_black, cap_white)
+        y += card3_h + 12
 
-        # 黑→白渐变
-        for px in range(bar_w):
-            t = px / bar_w
-            if t < white_ratio:
-                # 白方区域
-                r = int(180 + t * 55)
-                g = int(180 + t * 50)
-                b = int(180 + t * 55)
+    # ---- 卡片 4：当前阶段 ----
+    phase = info.get("current_phase", "")
+    if phase:
+        card4_h = 42
+        _draw_panel_card(draw, px, y, pw, card4_h)
+        draw.text((px + pw // 2, y + 22), phase,
+                  fill=(255, 215, 0), font=_get_font(16), anchor="ma")
+        y += card4_h + 12
+
+    # ---- 卡片 5：走法历史（最近 5 步）----
+    history = info.get("history", [])
+    if history:
+        card5_h = 60
+        _draw_panel_card(draw, px, y, pw, card5_h)
+        draw.text((inner_x, y + 6), "近期走法",
+                  fill=(150, 150, 158), font=_get_font(12), anchor="lt")
+        font_hist = _get_font(14)
+        recent = history[-5:]
+        line = ""
+        row_y = y + 24
+        for token in recent:
+            trial = (line + " " + token).strip()
+            if draw.textlength(trial, font=font_hist) > inner_w and line:
+                draw.text((inner_x, row_y), line, fill=(190, 190, 198),
+                          font=font_hist, anchor="lt")
+                row_y += 18
+                line = token
             else:
-                # 黑方区域
-                r = int(35 + t * 10)
-                g = int(35 + t * 8)
-                b = int(40 + t * 8)
-            draw.line([(bar_x + px, bar_y), (bar_x + px, bar_y + bar_h)], fill=(r, g, b))
-
-        # 中心标记线
-        mid_x = bar_x + bar_w // 2
-        draw.line([(mid_x, bar_y - 2), (mid_x, bar_y + bar_h + 2)], fill=(120, 120, 120), width=1)
-
-        # 标签
-        font_s = _get_font(9)
-        draw.text((bar_x, bar_y + bar_h + 3), "黑优", fill=(120, 120, 120), font=font_s, anchor="ma")
-        draw.text((bar_x + bar_w, bar_y + bar_h + 3), "白优", fill=(180, 180, 180), font=font_s, anchor="ma")
+                line = trial
+        if line:
+            draw.text((inner_x, row_y), line, fill=(190, 190, 198),
+                      font=font_hist, anchor="lt")
 
 def _draw_phase_label(img: Image.Image, phase_name: str, alpha: int = 200):
     """ 阶段切换标记——棋盘右上角半透明标签 """
@@ -369,8 +415,7 @@ def render_frame(
 
     # HUD 层
     if info:
-        _draw_top_bar(img, info)
-        _draw_bottom_info(img, info)
+        _draw_side_panel(img, info)
 
     # 阶段标签层
     if phase_label_name:
@@ -449,8 +494,7 @@ def _render_move_sequence(
 
             # HUD
             if info:
-                _draw_top_bar(img, info)
-                _draw_bottom_info(img, info)
+                _draw_side_panel(img, info)
 
             # 阶段标签（仅在首帧序列前 N 帧叠加）
             frame_idx_global = _sub_frame_idx + i
