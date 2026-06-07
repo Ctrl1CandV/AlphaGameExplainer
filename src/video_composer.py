@@ -10,13 +10,15 @@ from src.common import Logger
 from src.board_renderer import (
     CANVAS_W, CANVAS_H, BOARD_LEFT, BOARD_TOP, BOARD_SIZE,
     COLOR_BG, INTRO_SEC, FPS as RENDER_FPS, render_frame,
+    IS_VERTICAL,
 )
 import chess
 
 TITLE_SEC = 3.5                 # 片头动画总时长
 FPS = RENDER_FPS                # 与渲染帧率统一
-SUBTITLE_HEIGHT = 62
-SUBTITLE_MARGIN = 10
+# 竖版字幕稍大、位置稍高，适配手机屏阅读
+SUBTITLE_HEIGHT = 80 if IS_VERTICAL else 62
+SUBTITLE_MARGIN = 16 if IS_VERTICAL else 10
 # 视频开头静音 = 片头标题卡 + 初始局面静态展示
 LEAD_SILENCE = TITLE_SEC + INTRO_SEC
 
@@ -325,8 +327,9 @@ def compose(frame_paths: List[str], frame_durations: List[float],
         _FONT_PATH = "C:/Windows/Fonts/arial.ttf"
 
     def _mk_sub(txt):
+        sub_font_size = 28 if IS_VERTICAL else 26
         return TextClip(
-            text=txt, font=_FONT_PATH, font_size=26, color="#F0EDE5",
+            text=txt, font=_FONT_PATH, font_size=sub_font_size, color="#F0EDE5",
             stroke_color="#1a1a1a", stroke_width=1.5,
             method="caption", size=(card_w, SUBTITLE_HEIGHT),
             text_align="center",

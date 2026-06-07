@@ -1,17 +1,22 @@
 from PIL import Image, ImageDraw, ImageFont
 from typing import List, Tuple, Optional
 from src.common import Segment, Logger
+from dotenv import load_dotenv
 import chess
 import math
 import os
 
+load_dotenv()
+_video_layout = os.getenv("VIDEO_LAYOUT", "horizontal").strip().lower()
+IS_VERTICAL = _video_layout == "vertical"
+
 # 画布布局：4:3 偏方正比例，棋盘主导，避免 16:9 两侧留白
-CANVAS_W = 960
-CANVAS_H = 720
+CANVAS_W = 720 if IS_VERTICAL else 960
+CANVAS_H = 1280 if IS_VERTICAL else 720
 SQUARE = 75
 BOARD_SIZE = 600                # SQUARE * 8
-BOARD_LEFT = 28
-BOARD_TOP = 20
+BOARD_LEFT = (CANVAS_W - BOARD_SIZE) // 2 if IS_VERTICAL else 28  # 竖版居中
+BOARD_TOP = 100 if IS_VERTICAL else 20
 TOP_BAR_H = 36                  # 保留常量，兼容历史引用
 
 # 右侧信息面板：紧凑宽度，与棋盘整体视觉平衡
@@ -359,6 +364,55 @@ def _draw_side_panel(img: Image.Image, info: dict):
             draw.text((inner_x, row_y), line, fill=(190, 190, 198),
                       font=font_hist, anchor="lt")
 
+def _draw_vertical_info_bar(img: Image.Image, info: dict):
+    """竖版：棋盘下方的紧凑信息条，适配手机窄屏。
+
+    仅保留战术名 + 步数 + 已吃子图标，不展示评估条和走法历史。
+    """
+    draw = ImageDraw.Draw(img)
+    bar_top = BOARD_TOP + BOARD_SIZE + 16
+    bar_h = 44
+    bar_w = BOARD_SIZE
+    bar_x = BOARD_LEFT
+
+    # 半透明圆角背景条
+    draw.rounded_rectangle(
+        [bar_x, bar_top, bar_x + bar_w, bar_top + bar_h],
+        radius=10, fill=(22, 22, 32, 190),
+    )
+
+    # 左侧：战术名（金色）
+    endgame_name = info.get("endgame_name", "残局")
+    draw.text((bar_x + 16, bar_top + bar_h // 2), endgame_name,
+              fill=(255, 215, 0), font=_get_font(18), anchor="lm")
+
+    # 右侧：步数
+    move_num = info.get("move_num", 0)
+    total = info.get("total_moves", 0)
+    step_text = f"第{move_num}/{total}步" if total else ""
+    if step_text:
+        draw.text((bar_x + bar_w - 16, bar_top + bar_h // 2), step_text,
+                  fill=(200, 200, 200), font=_get_font(14), anchor="rm")
+
+    # 已吃子小图标（紧贴战术名右侧）
+    cap_black = info.get("captured_black", []) or []
+    cap_white = info.get("captured_white", []) or []
+    cap_icons: list = []
+    if cap_black:
+        cap_icons.extend(cap_black)
+    if cap_white:
+        cap_icons.extend(cap_white)
+    if cap_icons:
+        CAP_SIZE = 20
+        icon_x = bar_x + 16 + draw.textlength(endgame_name, font=_get_font(18)) + 12
+        for pchar in cap_icons[-5:]:  # 最多 5 枚，避免溢出
+            try:
+                icon = _load_piece(pchar).resize((CAP_SIZE, CAP_SIZE))
+                img.paste(icon, (int(icon_x), bar_top + (bar_h - CAP_SIZE) // 2), icon)
+            except Exception:
+                pass
+            icon_x += CAP_SIZE + 2
+
 def _draw_phase_label(img: Image.Image, phase_name: str, alpha: int = 200):
     """ 阶段切换标记——棋盘右上角半透明标签 """
     if not phase_name or alpha <= 0:
@@ -415,7 +469,10 @@ def render_frame(
 
     # HUD 层
     if info:
-        _draw_side_panel(img, info)
+        if IS_VERTICAL:
+            _draw_vertical_info_bar(img, info)
+        else:
+            _draw_side_panel(img, info)
 
     # 阶段标签层
     if phase_label_name:
@@ -494,7 +551,10 @@ def _render_move_sequence(
 
             # HUD
             if info:
-                _draw_side_panel(img, info)
+                if IS_VERTICAL:
+                    _draw_vertical_info_bar(img, info)
+                else:
+                    _draw_side_panel(img, info)
 
             # 阶段标签（仅在首帧序列前 N 帧叠加）
             frame_idx_global = _sub_frame_idx + i

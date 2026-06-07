@@ -170,6 +170,57 @@ def _preprocess_text_for_chattts(text: str, pacing: str) -> str:
     return f"{speed_tag}{body}"
 
 
+# 句末标点 → 句后静音时长（毫秒）。营造自然换气与语气停顿。
+_PAUSE_AFTER_PUNCT = {
+    "。": 300, "！": 400, "？": 350, "；": 250,
+}
+_DEFAULT_PAUSE_MS = 250
+# 短句合并阈值：少于该字符数的句子并入相邻句，避免短句+低温触发 ChatTTS 衬词
+_MIN_SENTENCE_CHARS = 10
+# 句音频头尾淡入淡出毫秒，避免硬接静音产生的爆音/断线感
+_SENTENCE_FADE_MS = 60
+
+
+def _split_sentences(text: str) -> List[tuple]:
+    """把整段文本按句末标点切分为 [(句子文本, 句后静音毫秒), ...]。
+
+    过短的句子并入相邻句，避免短句独立合成触发 ChatTTS 衬词。
+    句子文本保留原标点，句后静音时长由句末标点决定。
+    """
+    if not text:
+        return []
+    # 按句末标点切分，保留标点（最后一段可能无句末标点）
+    parts = re.findall(r"[^。！？；]*[。！？；]|[^。！？；]+", text)
+    sentences = [p.strip() for p in parts if p.strip()]
+    if not sentences:
+        return []
+
+    # 合并过短句：累积到达阈值再独立成句；末尾残留并入上一句
+    merged: List[str] = []
+    buffer = ""
+    for sentence in sentences:
+        candidate = buffer + sentence
+        if len(candidate) < _MIN_SENTENCE_CHARS:
+            buffer = candidate
+        else:
+            merged.append(candidate)
+            buffer = ""
+    if buffer:
+        if merged:
+            merged[-1] = merged[-1] + buffer
+        else:
+            merged.append(buffer)
+
+    # 为每句计算句后静音
+    result = []
+    for sentence in merged:
+        last_char = sentence[-1] if sentence else ""
+        pause_ms = _PAUSE_AFTER_PUNCT.get(last_char, _DEFAULT_PAUSE_MS)
+        result.append((sentence, pause_ms))
+    return result
+
+
+
 def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
     """用 ChatTTS 逐段合成，成功返回 True"""
     global _chattts, _chattts_spk_emb
@@ -216,31 +267,64 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
             "pause_after":  {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
         }
         pp = pacing_params.get(seg.pacing, pacing_params["normal"])
-        
+
         speech_text = _clean_text_for_speech(text)
-        processed_text = _preprocess_text_for_chattts(speech_text, seg.pacing)
+
+        # 分句合成：把整段按句末标点切成单句逐句合成，句间插入真实静音，
+        # 让解说有自然的换气与停顿，而非整段匀速念稿。
+        sentences = _split_sentences(speech_text)
+        if not sentences:
+            seg.audio_path = ""
+            continue
 
         try:
-            params = chat.InferCodeParams(
-                spk_emb=_chattts_spk_emb,
-                temperature=pp["temperature"],
-                top_P=pp["top_P"],
-                top_K=pp["top_K"],
-            )
-            wavs = chat.infer([processed_text], params_infer_code=params, skip_refine_text=True)
-            if not wavs or len(wavs) == 0 or len(wavs[0]) == 0:
+            combined = AudioSegment.empty()
+            sent_ok = False
+            for sent_idx, (sentence, pause_ms) in enumerate(sentences):
+                processed_text = _preprocess_text_for_chattts(sentence, seg.pacing)
+                # 段首句用更低温度稳定音色，后续句略升温减少累积漂移
+                temperature = pp["temperature"] if sent_idx == 0 else min(pp["temperature"] + 0.1, 0.4)
+                params = chat.InferCodeParams(
+                    spk_emb=_chattts_spk_emb,
+                    temperature=temperature,
+                    top_P=pp["top_P"],
+                    top_K=pp["top_K"],
+                )
+                wavs = chat.infer([processed_text], params_infer_code=params, skip_refine_text=True)
+                if not wavs or len(wavs) == 0 or len(wavs[0]) == 0:
+                    continue
+
+                # 单句先落临时文件做响度归一化，再读回拼接
+                sent_path = os.path.abspath(
+                    os.path.join(AUDIO_DIR, f"_sent_{seg.move_idx:03d}_{sent_idx:02d}.wav"))
+                sf.write(sent_path, np.array(wavs[0]), _CHATTTS_SAMPLE_RATE)
+                _normalize_audio(sent_path)
+
+                sent_audio = AudioSegment.from_wav(sent_path)
+                # 头尾淡入淡出，避免句与静音硬接产生爆音/断线感
+                sent_audio = sent_audio.fade_in(_SENTENCE_FADE_MS).fade_out(_SENTENCE_FADE_MS)
+                combined += sent_audio
+                # 句后插入真实静音（最后一句不加，段间静音由 composer 处理）
+                if sent_idx < len(sentences) - 1:
+                    combined += AudioSegment.silent(duration=pause_ms)
+                sent_ok = True
+
+                try:
+                    os.remove(sent_path)
+                except Exception:
+                    pass
+
+            if not sent_ok or len(combined) == 0:
+                seg.audio_path = ""
                 continue
 
-            wav = np.array(wavs[0])
-            sf.write(path, wav, _CHATTTS_SAMPLE_RATE)
-            _normalize_audio(path)
-
-            audio = AudioSegment.from_wav(path)
-            seg.duration_s = audio.duration_seconds + 0.3
+            combined.export(path, format="wav")
+            seg.duration_s = combined.duration_seconds + 0.3
             success_count += 1
 
         except Exception:
             seg.audio_path = ""
+
 
     elapsed = time.time() - t_start
     Logger.success(f"语音合成完成: {success_count}/{len(batch_texts)} 段, {elapsed:.1f}s")
