@@ -17,7 +17,6 @@ SQUARE = 75
 BOARD_SIZE = 600                # SQUARE * 8
 BOARD_LEFT = (CANVAS_W - BOARD_SIZE) // 2 if IS_VERTICAL else 28  # 竖版居中
 BOARD_TOP = 100 if IS_VERTICAL else 20
-TOP_BAR_H = 36                  # 保留常量，兼容历史引用
 
 # 右侧信息面板：紧凑宽度，与棋盘整体视觉平衡
 PANEL_GAP = 24
@@ -618,13 +617,14 @@ def _step_overhead_sec() -> float:
 
 #  主渲染入口
 
-def render_animated_frames(segments: List[Segment], initial_fen: str,
-                            panel_info: Optional[dict] = None) -> Tuple[List[str], List[float]]:
+def render_animated_frames(
+        segments: List[Segment], initial_fen: str, panel_info: Optional[dict] = None
+    ) -> Tuple[List[str], List[float]]:
     """
-    节点级动画渲染。
-    每个 segment 在其解说音频时长内顺序播放本节点的全部子步。
-    时长对齐、音画同步逻辑不变。新增阶段切换时的标签叠加。
-    panel_info 可选: {"endgame_name": str, "scores": [...], "winner_color": ...}
+    节点级动画渲染
+    每个segment在其解说音频时长内顺序播放本节点的全部子步
+    时长对齐、音画同步逻辑不变，新增阶段切换时的标签叠加
+    panel_info可选:{"endgame_name": str, "scores": [...], "winner_color": ...}
     返回: (frame_paths, frame_durations)
     """
     os.makedirs(FRAMES_DIR, exist_ok=True)

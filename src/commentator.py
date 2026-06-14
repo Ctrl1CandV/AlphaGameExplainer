@@ -1,6 +1,6 @@
-from src.common import Logger, StoryboardSegment, StoryboardVisuals, StoryboardArrow
-from src.common import GeneratedCommentary, ALLOWED_PACING, ALLOWED_ARROW_COLORS
-from src.common import is_valid_square_name, normalize_pacing
+from src.common import GeneratedCommentary, ALLOWED_PACING
+from src.common import Logger, StoryboardSegment
+from src.common import normalize_pacing
 from src.llm_backend import create_backend_from_env
 from typing import Optional
 import chess
@@ -48,10 +48,8 @@ _EXAMPLE_FALLBACK = (
 
 _JSON_EXAMPLE = """{"segments":[{"id":1,"sub_endgame":"车兵对车","voiceover":"白车退回底线后方建立菲利多防线，关键是让白王稳稳守住兵前那一格，车则在身后控制住整条直线。这样一来，黑方就算想从正面压上来，也找不到直接突破的入口。","pacing":"slow"},{"id":2,"sub_endgame":"车兵对车","voiceover":"承接刚搭好的防线，黑王一步步向白兵逼近，想把白王从兵前的关键格挤开。这里的重点不是马上制造战术，而是用王不断前压，试探防线会不会出现松动。","pacing":"normal"},{"id":3,"sub_endgame":"车兵对车","voiceover":"顺着前面对防线的持续施压，黑车突然绕到侧翼发难，对白方王的位置形成更直接的骚扰。白王一旦被迫离开兵前那条线，原本稳固的菲利多防线就会裂开一道口子，局面也随之进入真正的转折。","pacing":"slow"}]}"""
 
-
 def _get_example(endgame_name: str) -> str:
     return _EXAMPLE_BY_ENDGAME.get(endgame_name, _EXAMPLE_FALLBACK)
-
 
 def _build_header(storyboard: dict) -> str:
     endgame_name = storyboard.get("endgame_name", "残局")
@@ -679,89 +677,16 @@ def _validate_storyboard_chunk(data: dict, chunk_nodes: list) -> tuple:
     return True, ""
 
 
-def _safe_phase_label(value: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    return re.sub(r"\s+", "", text)[:12]
-
-
-def _build_visuals_from_node(node: dict) -> StoryboardVisuals:
-    highlights = []
-    arrows = []
-
-    try:
-        temp = chess.Board(node.get("fen_before", ""))
-    except Exception:
-        return StoryboardVisuals(phase_label=_safe_phase_label(node.get("suggested_phase_label", "")))
-
-    sans = node.get("sans") or [part.strip() for part in str(node.get("moves", "")).split("→") if part.strip()]
-    for san in sans[:2]:
-        try:
-            move = temp.parse_san(san)
-        except ValueError:
-            continue
-
-        from_sq = chess.square_name(move.from_square)
-        to_sq = chess.square_name(move.to_square)
-        color = "blue"
-        label = ""
-
-        if temp.gives_check(move):
-            color = "red"
-            label = "将军"
-        elif temp.is_capture(move):
-            color = "yellow"
-            label = "吃子"
-        else:
-            piece = temp.piece_at(move.from_square)
-            if piece and piece.piece_type == chess.KING:
-                color = "green"
-                label = "王位推进"
-
-        if is_valid_square_name(to_sq) and to_sq not in highlights:
-            highlights.append(to_sq)
-        if is_valid_square_name(from_sq) and is_valid_square_name(to_sq) and color in ALLOWED_ARROW_COLORS:
-            arrows.append(StoryboardArrow(
-                from_sq=from_sq,
-                to_sq=to_sq,
-                color=color,
-                label=label,
-            ))
-        temp.push(move)
-
-    if node.get("is_checkmate_after") or node.get("is_check_after"):
-        try:
-            board_after = chess.Board(node.get("fen_after", ""))
-            king_sq = board_after.king(board_after.turn)
-            if king_sq is not None:
-                sq_name = chess.square_name(king_sq)
-                if sq_name not in highlights:
-                    highlights.append(sq_name)
-        except Exception:
-            pass
-
-    return StoryboardVisuals(
-        extra_highlights=highlights[:3],
-        arrows=arrows[:2],
-        phase_label=_safe_phase_label(node.get("suggested_phase_label", "") or node.get("phase", "")),
-    )
-
-
-
-
 def _dict_to_storyboard_segments(data: dict, chunk_nodes: list) -> list:
     result = []
     node_by_id = {node["id"]: node for node in chunk_nodes}
     for seg in data.get("segments", []):
         node = node_by_id.get(int(seg.get("id", 0)), {})
-        visuals = _build_visuals_from_node(node)
         result.append(StoryboardSegment(
             id=int(seg.get("id", 0)),
             sub_endgame=str(seg.get("sub_endgame", "")),
             voiceover=str(seg.get("voiceover", "")),
             pacing=normalize_pacing(str(seg.get("pacing", "normal"))),
-            visuals=visuals,
         ))
     return result
 
@@ -1340,8 +1265,8 @@ def _clean_opening_text(text: str) -> str:
 
 
 def _fallback_summary(storyboard: dict) -> str:
-    """LLM 总结失败时的纯中文兜底总结。
-
+    """
+    LLM 总结失败时的纯中文兜底总结。
     素材优先级：知识库技法(motifs) > 取胜路线(从节点 goal 归纳) > 子残局名。
     无论走哪条都尽量凑出 2-3 句有阶段逻辑的话，避免落到干瘪的单句
     （旧实现 motifs 空时只产「核心在于X阶段的处理」一句，正是线上短总结的来源）。
@@ -1485,7 +1410,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
         return commentary
 
     backend = create_backend_from_env()
-    commentary.backend = backend.name
 
     node_count = len(nodes)
     total_chunks = max(1, (node_count + CHUNK_SIZE - 1) // CHUNK_SIZE)
@@ -1579,7 +1503,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
                     sub_endgame=node.get("sub_endgame_name", ""),
                     voiceover=voice,
                     pacing=normalize_pacing(node.get("suggested_pacing", "normal")),
-                    visuals=_build_visuals_from_node(node),
                 ))
             all_segments.extend(chunk_segments)
 
@@ -1625,56 +1548,6 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
     status = "正常" if not commentary.fallback_used else f"部分回退({commentary.chunks_succeeded}/{total_chunks})"
     Logger.success(f"解说生成完成: {len(all_segments)} 段, {status}")
     return commentary
-
-
-def generate(board: chess.Board, storyboard: dict) -> str:
-    """兼容包装：优先使用结构化生成，失败则走旧纯文本链路"""
-    try:
-        structured = generate_structured(board, storyboard)
-        if structured.segments:
-            return structured.raw_text
-    except Exception as e:
-        Logger.warn(f"结构化生成异常，回退旧文本链路: {e}")
-
-    nodes = storyboard.get("nodes", [])
-    if not nodes:
-        Logger.warn("分镜数据为空，无法生成解说")
-        return ""
-
-    node_count = len(nodes)
-    total_chunks = max(1, (node_count + CHUNK_SIZE - 1) // CHUNK_SIZE)
-    backend = create_backend_from_env()
-
-    header = _build_header(storyboard)
-    example = _get_example(storyboard.get("endgame_name", "残局"))
-
-    all_parts = []
-    for chunk_idx in range(total_chunks):
-        start = chunk_idx * CHUNK_SIZE
-        end = min(start + CHUNK_SIZE, node_count)
-        chunk_nodes = nodes[start:end]
-
-        prompt = _build_chunk_prompt(header, chunk_nodes, chunk_idx, total_chunks, example if chunk_idx == 0 else "")
-
-        result = _generate_chunk_fallback(prompt)
-        if not result:
-            continue
-
-        if len(result) > MAX_CHARS:
-            prompt_short = prompt + f"\n\n每步尽量写成2-4句，但总共不超过{MAX_CHARS//2}字。重新输出。"
-            retry = _generate_chunk_fallback(prompt_short)
-            if retry:
-                result = retry
-            else:
-                result = result[:MAX_CHARS]
-
-        all_parts.append(result)
-
-    if not all_parts:
-        return ""
-
-    final = "\n".join(all_parts).strip()
-    return final
 
 
 # ============================================================
@@ -2552,7 +2425,6 @@ def generate_puzzle_structured(board: chess.Board, storyboard: dict) -> Generate
         return commentary
 
     backend = create_backend_from_env()
-    commentary.backend = backend.name
 
     node_count = len(nodes)
     total_chunks = max(1, (node_count + CHUNK_SIZE - 1) // CHUNK_SIZE)
@@ -2645,7 +2517,6 @@ def generate_puzzle_structured(board: chess.Board, storyboard: dict) -> Generate
                     sub_endgame="",
                     voiceover=voice,
                     pacing=normalize_pacing(node.get("suggested_pacing", "normal")),
-                    visuals=_build_visuals_from_node(node),
                 ))
             all_segments.extend(chunk_segments)
 

@@ -1,6 +1,7 @@
-from src.common import Segment, Logger
+from src.common import Segment, Logger, GeneratedCommentary, CompressedStep
 from typing import List, Optional
 from pydub import AudioSegment
+import chess
 import torch
 import time
 import os
@@ -331,12 +332,99 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
     return success_count > 0
 
 
-def synthesize(segments: List[Segment], voice_prompt: str = None,
-               emotion: str = "default", speed: float = 1.0) -> List[Segment]:
+# ============================================================
+# Segment 构造（commentary + moves → List[Segment]）
+# 原位置：pipeline.py。Segment 是 TTS 的输入类型，转换逻辑应与 TTS 同域。
+# pipeline 只负责调度，不应理解 voice_map / node_moves 的内部细节。
+# ============================================================
+
+def build_node_segments(
+        commentary: GeneratedCommentary, moves: List[chess.Move],
+        compressed: Optional[List[CompressedStep]] = None
+    ) -> List[Segment]:
     """
-    合成语音，音频路径和时长回填到 Segment。
-    优先级: ChatTTS > pyttsx3
+    按压缩节点分段：一个节点 = 一段解说 + 该节点的全部子步走法。
+    这是解决音画粒度错位的核心改动：旧实现把节点整段解说塞给第一个子步，
+    其余子步置空文本，导致首步静止十几秒念完、后续子步无声飞闪、解说视角与画面错位。
+
+    现在改为节点级分段：每段携带本节点的全部 moves，由 board_renderer 在该段音频
+    时长内顺序播放这些子步并均摊定格，解说推进时棋子也在持续走。
+    一段一段音频，不再有空文本段，从根上消除空段累积漂移。
+    无压缩信息时退化为逐步分段。
     """
+    # 节点 id → (voiceover, pacing) 查找表
+    voice_map: dict = {}
+    if commentary.segments:
+        for seg in commentary.segments:
+            voice_map[seg.id] = (seg.voiceover, seg.pacing)
+
+    result: List[Segment] = []
+    if compressed:
+        move_cursor = 0
+        for cs in compressed:
+            n = len(cs.sans)
+            node_moves = moves[move_cursor:move_cursor + n]
+            move_cursor += n
+            if not node_moves:
+                continue
+            vo, pac = voice_map.get(cs.idx, (None, "normal"))
+            text = vo if vo else ""
+            result.append(Segment(
+                move_idx=cs.idx,
+                text=text,
+                pacing=pac or "normal",
+                moves=list(node_moves),
+                phase=getattr(cs, "phase", ""),
+            ))
+        # 解法被截断、moves 比 compressed 覆盖的还多时，剩余走法兜底成一段静默节点
+        if move_cursor < len(moves):
+            result.append(Segment(
+                move_idx=(compressed[-1].idx if compressed else 0) + 1,
+                text="",
+                pacing="normal",
+                moves=list(moves[move_cursor:]),
+            ))
+        return result
+
+    # 无压缩信息：逐步分段
+    for i, move in enumerate(moves):
+        result.append(Segment(move_idx=i + 1, text="", pacing="normal", moves=[move]))
+    return result
+
+
+def build_puzzle_segments(
+        commentary: GeneratedCommentary, moves: List[chess.Move], nodes: list
+    ) -> List[Segment]:
+    """按节点构造 Segment 列表（puzzle 版：无开场白/总结段，phase 为空）。"""
+    voice_map: dict = {}
+    if commentary.segments:
+        for seg in commentary.segments:
+            voice_map[seg.id] = (seg.voiceover, seg.pacing)
+
+    result: List[Segment] = []
+    for node in nodes:
+        nid = node["id"]
+        vo, pac = voice_map.get(nid, (None, "normal"))
+        text = vo if vo else ""
+        # 每节点一个 move（puzzle 不压缩）
+        node_moves: List[chess.Move] = []
+        if nid <= len(moves):
+            node_moves = [moves[nid - 1]]
+        result.append(Segment(
+            move_idx=nid,
+            text=text,
+            pacing=pac or "normal",
+            moves=node_moves,
+            phase="",
+        ))
+    return result
+
+
+def synthesize(
+        segments: List[Segment], voice_prompt: str = None,
+        emotion: str = "default", speed: float = 1.0
+    ) -> List[Segment]:
+    """ 合成语音，音频路径和时长回填到Segment """
     os.makedirs(AUDIO_DIR, exist_ok=True)
 
     # 确保空段有时间戳

@@ -473,9 +473,9 @@ def _puzzle_tactical_facts(board_before: chess.Board, cs, board_after: chess.Boa
 
 
 
-def _net_material_fact(start_board: chess.Board,
-                       moves: list,
-                       strong_color: chess.Color) -> str:
+def _net_material_fact(
+        start_board: chess.Board, moves: list, strong_color: chess.Color
+    ) -> str:
     """计算整串走法走完后，强方相对开局的子力净值，返回一句中文叙述。
     无净值优势时返回空串，由调用方处理杀棋判定。"""
     try:

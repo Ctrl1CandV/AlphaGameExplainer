@@ -110,18 +110,18 @@ def _allocate_cues(text: str, start: float, duration: float) -> List[tuple]:
 
 
 def build_cues(segments: List[Segment], offset_s: float = 0.0) -> List[tuple]:
-    """构建字幕 cue 列表，格式 [((start_s, end_s), text), ...]。
-
-    直接供 moviepy 的 SubtitlesClip(list) 使用，绕开其脆弱的 SRT 文本解析
-    （file_to_subtitles 对多行文本/空行/数字冒号易误判，产生 None 时间戳后崩溃）。
-    过滤空文本 cue，确保下游不会拿到非法条目。
+    """
+    构建字幕cue列表，格式 ((start_s, end_s), text)
+    直接供moviepy的SubtitlesClip(list)使用绕开其脆弱的SRT文本解析
+    file_to_subtitles对多行文本/空行/数字冒号易误判，产生None时间戳后崩溃
+    过滤空文本cue，确保下游不会拿到非法条目
     """
     cues: List[tuple] = []
-    for seg in segments:
-        if not seg.text.strip():
+    for segment in segments:
+        if not segment.text.strip():
             continue
-        seg_start = offset_s + seg.start_time
-        for start, end, text in _allocate_cues(seg.text, seg_start, seg.duration_s):
+        seg_start = offset_s + segment.start_time
+        for start, end, text in _allocate_cues(segment.text, seg_start, segment.duration_s):
             t = (text or "").strip()
             if not t:
                 continue

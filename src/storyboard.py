@@ -1,14 +1,15 @@
-from src.common import CompressedStep, Logger, AnalyzedMove, PIECE_VALUES
-from src.common import piece_cn
-from src.endgame_knowledge import match as match_endgame
 from src.endgame_knowledge import describe_endgame, get_forbidden_concepts
+from src.common import CompressedStep, Logger, AnalyzedMove, PIECE_VALUES
+from src.endgame_knowledge import match as match_endgame
 from typing import List, Optional, Tuple
+from src.common import piece_cn
 import chess
 
 MAX_NODE_SPAN = 4
 LONG_MOVE_THRESHOLD = 18
 COMPACT_NODE_THRESHOLD = 7
-MAX_SPAN_CAP = 10        # 压缩跨度上限（再长的解法每节点也不超过10着）
+# 压缩跨度上限
+MAX_SPAN_CAP = 10
 
 def _tag_position(board: chess.Board, move: chess.Move) -> List[str]:
     tags = []
@@ -141,8 +142,6 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
             "idx": i + 1, "san": san, "tags": tags,
             "only": only, "eval": score, "eval_delta": None,
             "turn": turn, "fen_before": fen_before, "fen_after": fen_after,
-            "trap": am.trap_san,
-            "candidates": am.candidates,
         }
         per_move.append(entry)
         prev_score = score
@@ -214,7 +213,6 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
             all_tags.append("对王调整")
 
         total_delta = sum(g.get("eval_delta", 0) for g in grp if g.get("eval_delta") is not None)
-        trap = next((g["trap"] for g in grp if g.get("trap")), None) or ""
 
         compressed.append(CompressedStep(
             idx=len(compressed) + 1,
@@ -223,10 +221,8 @@ def compress(board: chess.Board, analyzed_moves: List[AnalyzedMove]) -> List[Com
             fen_after=last["fen_after"],
             is_critical=is_critical,
             is_only_move=any(g.get("only") for g in grp),
-            trap=trap,
             tags=all_tags,
             eval_delta=total_delta,
-            candidates=list(set(c for g in grp for c in g.get("candidates", []))),
         ))
 
     compressed = _merge_check_sequences(compressed)
@@ -436,10 +432,8 @@ def _merge_check_sequences(steps: List[CompressedStep]) -> List[CompressedStep]:
             fen_after=last.fen_after,
             is_critical=True,
             is_only_move=any(steps[k].is_only_move for k in range(i, j)),
-            trap=first.trap or "",
             tags=[maneuver_pattern],
             eval_delta=sum((steps[k].eval_delta or 0) for k in range(i, j)),
-            candidates=[],
         )
         steps[i] = merged_cs
         for k in range(i + 1, j):
@@ -505,6 +499,74 @@ def _side_material_desc(board: chess.Board, color: chess.Color) -> str:
         if c > 0:
             parts.append(f"{cn_num.get(c, str(c))}{piece_cn(pt)}")
     return "".join(parts) if parts else "单王"
+
+
+# ============================================================
+# Puzzle 预备步旁白生成（纯模板，不依赖 LLM）
+# 原位置：pipeline.py，因强依赖 _side_material_desc / PIECE_VALUES，
+# 与 storyboard 同域，迁回此处，避免 pipeline 反向引用 storyboard 私有函数。
+# ============================================================
+
+def _prelude_san_piece_cn(san: str) -> str:
+    """ 从SAN走法提取棋子中文名 """
+    _map = {"N": "马", "B": "象", "R": "车", "Q": "后", "K": "王"}
+    for letter, cn in _map.items():
+        if san.startswith(letter):
+            return cn
+    return "兵"
+
+
+def _advantage_desc(board: chess.Board) -> str:
+    """ 根据子力价值判断当前局面优势方 """
+    white_val = sum(
+        PIECE_VALUES[p.piece_type] for p in board.piece_map().values()
+        if p.color == chess.WHITE and p.piece_type != chess.KING
+    )
+    black_val = sum(
+        PIECE_VALUES[p.piece_type] for p in board.piece_map().values()
+        if p.color == chess.BLACK and p.piece_type != chess.KING
+    )
+    diff = white_val - black_val
+    if diff >= 5:
+        return "白方子力大幅领先"
+    if diff >= 2:
+        return "白方子力占优"
+    if diff <= -5:
+        return "黑方子力大幅领先"
+    if diff <= -2:
+        return "黑方子力占优"
+    return "双方子力均势"
+
+
+def build_prelude_narration(prelude_san: str, board_after: chess.Board, puzzle_side: str) -> str:
+    """纯模板生成预备着开场旁白（一到两句），交代对方走法 + 子力对比 + 优势 + 轮到谁。"""
+    opponent = "白方" if puzzle_side == "黑方" else "黑方"
+    piece_cn_name = _prelude_san_piece_cn(prelude_san)
+    is_capture = "x" in prelude_san
+    is_check = board_after.is_check()
+
+    white_mat = _side_material_desc(board_after, chess.WHITE)
+    black_mat = _side_material_desc(board_after, chess.BLACK)
+    advantage = _advantage_desc(board_after)
+
+    # 第一句：对方走了什么
+    if is_capture and is_check:
+        move_part = f"{opponent}{piece_cn_name}直接吃子并将军，撕开对方防线"
+    elif is_capture:
+        move_part = f"{opponent}{piece_cn_name}果断吃子，直接获取子力"
+    elif is_check:
+        move_part = f"{opponent}{piece_cn_name}走子并将军，施加压力"
+    else:
+        move_part = f"{opponent}{piece_cn_name}调整位置，为后续战术做铺垫"
+
+    # 第二句：子力对比 + 优势 + 轮到谁
+    material_part = (
+        f"目前白方有{white_mat}，黑方有{black_mat}，{advantage}。"
+        f"现在轮到{puzzle_side}，需要找出最强的战术手段。"
+    )
+
+    return f"{move_part}。{material_part}"
+
 
 def _piece_square(board: chess.Board, color: chess.Color, piece_type: chess.PieceType):
     for sq, piece in board.piece_map().items():
@@ -881,7 +943,6 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             "phase": cs.phase,
             "phase_hint": phase_hint,
             "tags": cs.tags,
-            "trap": cs.trap,
             "fen_before": cs.fen_before,
             "transition_summary": _transition_summary(cs.fen_before, cs.fen_after),
             "eval_delta": getattr(cs, "eval_delta", None),
@@ -1722,12 +1783,11 @@ def _puzzle_target_length(node_count: int, rating: int) -> str:
     return f"{min(min_len, 2200)}-{min(max_len, 3200)}字"
 
 
-def build_for_puzzle(board: chess.Board, moves: List[chess.Move],
-                     puzzle) -> dict:
-    """每个 move 直接成一个节点（跳过压缩）。逐步推演棋盘，提取每步事实，
-    关联标签，注入标签定义，返回与 build() 输出格式兼容的 storyboard dict。
-
-    puzzle: PuzzleData，含 effective_themes / rating / opening_tags 等。
+def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> dict:
+    """
+    每个move直接成一个节点，逐步推演棋盘，提取每步事实
+    关联标签，注入标签定义，返回与build()输出格式兼容的storyboard dict
+    puzzle: PuzzleData，含 effective_themes、rating、opening_tags等
     """
     from src.themes_kb import (get_theme, select_core_theme,
                                related_intersection, get_theme_definitions_text)

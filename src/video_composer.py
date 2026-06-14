@@ -1,50 +1,47 @@
-import os
-from typing import List
-from PIL import Image, ImageDraw, ImageFont
+from src.board_renderer import (
+    CANVAS_W, CANVAS_H, BOARD_LEFT, BOARD_TOP, BOARD_SIZE,
+    INTRO_SEC, FPS as RENDER_FPS, render_frame, IS_VERTICAL,
+)
 from moviepy import (
     ImageSequenceClip, AudioFileClip, CompositeVideoClip,
     concatenate_audioclips, TextClip, ImageClip,
 )
 from moviepy.video.tools.subtitles import SubtitlesClip
 from src.common import Logger
-from src.board_renderer import (
-    CANVAS_W, CANVAS_H, BOARD_LEFT, BOARD_TOP, BOARD_SIZE,
-    COLOR_BG, INTRO_SEC, FPS as RENDER_FPS, render_frame,
-    IS_VERTICAL,
-)
-import chess
 
-TITLE_SEC = 3.5                 # 片头动画总时长
-FPS = RENDER_FPS                # 与渲染帧率统一
+from PIL import Image, ImageDraw, ImageFont
+from typing import List
+import chess
+import os
+import shutil
+
+# 片头动画总时长与播放帧数
+TITLE_SEC, FPS = 3.5, RENDER_FPS
 # 竖版字幕稍大、位置稍高，适配手机屏阅读
 SUBTITLE_HEIGHT = 80 if IS_VERTICAL else 62
 SUBTITLE_MARGIN = 16 if IS_VERTICAL else 10
 # 视频开头静音 = 片头标题卡 + 初始局面静态展示
 LEAD_SILENCE = TITLE_SEC + INTRO_SEC
 
-
-# ============================================================
-#  片头动画
-# ============================================================
-
-def _make_title_frames(endgame_name: str, width: int, height: int,
-                        initial_fen: str = "") -> List[Image.Image]:
-    """生成片头动画帧序列（~3.5s × FPS 帧）。
-
+#  片头动画部分
+def _make_title_frames(
+    endgame_name: str, width: int, height: int, initial_fen: str = ""
+    ) -> List[Image.Image]:
+    """
+    生成片头动画帧序列（3.5s * FPS 帧）
     动画时间轴：
       0.0-0.8s:  背景从纯黑渐变显现
-      0.5-1.2s:  棋盘缩略图 105% → 100%（微小 Ken Burns 效果）
-      1.0-2.0s:  标题从下方 30px 滑入
-      1.5-2.5s:  副标题从下方 20px 滑入
+      0.5-1.2s:  棋盘缩略图105% → 100%（微小 Ken Burns 效果）
+      1.0-2.0s:  标题从下方30px滑入
+      1.5-2.5s:  副标题从下方20px滑入
       2.0-3.0s:  装饰线从左到右画出
-      3.0-3.5s:  底部文字 fade in
+      3.0-3.5s:  底部文字fade in
     """
     total = round(TITLE_SEC * FPS)
     frames: List[Image.Image] = []
 
     # 预渲染棋盘缩略图
-    thumb = None
-    thumb_size = 0
+    thumb, thumb_size = None, 0
     if initial_fen:
         try:
             b = chess.Board(initial_fen)
@@ -159,13 +156,11 @@ def _make_title_frames(endgame_name: str, width: int, height: int,
 
     return frames
 
-
-# ============================================================
-#  片尾画面
-# ============================================================
-
-def _make_outro_frames(last_frame: Image.Image, width: int, height: int) -> List[Image.Image]:
-    """生成片尾帧序列（~2.5s）：画面渐暗 + "感谢观看" fade in"""
+#  片尾画面部分
+def _make_outro_frames(
+        last_frame: Image.Image, width: int, height: int
+    ) -> List[Image.Image]:
+    """ 生成片尾帧序列 """
     outro_sec = 2.5
     total = round(outro_sec * FPS)
     frames: List[Image.Image] = []
@@ -200,21 +195,16 @@ def _make_outro_frames(last_frame: Image.Image, width: int, height: int) -> List
 
     return frames
 
-
-# ============================================================
-#  音频 & 字幕 辅助
-# ============================================================
-
+#  音频与字幕部分
 def _make_silence(duration: float, output_path: str) -> str:
-    """生成静音片段"""
+    """ 生成静音片段 """
     from pydub import AudioSegment
     silence = AudioSegment.silent(duration=int(duration * 1000))
     silence.export(output_path, format="wav")
     return output_path
 
-
 def _create_subtitle_background(width: int, height: int) -> str:
-    """创建居中圆角字幕卡片背景——不覆盖全宽，仅占画面中央区域。"""
+    """ 创建居中圆角字幕卡片背景——不覆盖全宽，仅占画面中央区域 """
     card_w = min(width - 80, 800)
     card_x = (width - card_w) // 2
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -230,24 +220,58 @@ def _create_subtitle_background(width: int, height: int) -> str:
 
 
 # ============================================================
-#  主合成函数
+# 临时产物清理（帧图片 / 音频段 / 字幕 / 批次目录）
+# 原位置：pipeline.py。这些路径都是视频合成下游的副作用产物，
+# 路径常量与产出方内聚，避免 pipeline 硬编码 output/audio、output/frames。
 # ============================================================
 
-def compose(frame_paths: List[str], frame_durations: List[float],
-            segments, srt_path: str, endgame_name: str = "",
-            fps: int = FPS, cues=None, initial_fen: str = "",
-            skip_title: bool = False, skip_outro: bool = False) -> str:
-    """合成最终视频。包含片头动画 → 渲染帧 → 片尾，并叠加字幕。
+def cleanup_artifacts(frame_paths: list, srt_path: str, segments: list) -> None:
+    """ 清理一次视频合成过程中产生的所有临时文件与目录 """
+    # 帧图片
+    for p in frame_paths:
+        try:
+            os.remove(p)
+        except Exception:
+            pass
+    # 音频段
+    for seg in segments:
+        if seg.audio_path and os.path.exists(seg.audio_path):
+            try:
+                os.remove(seg.audio_path)
+            except Exception:
+                pass
+    # 字幕
+    if os.path.exists(srt_path):
+        try:
+            os.remove(srt_path)
+        except Exception:
+            pass
+    # 批次文件 + 静音 + 标题卡所在目录
+    audio_dir = os.path.join("output", "audio")
+    frames_dir = os.path.join("output", "frames")
+    for dir in (audio_dir, frames_dir):
+        if os.path.isdir(dir):
+            try:
+                shutil.rmtree(dir)
+            except Exception:
+                pass
 
+
+#  主合成函数
+def compose(
+        frame_paths: List[str], frame_durations: List[float],
+        segments, srt_path: str, endgame_name: str = "",
+        fps: int = FPS, cues=None, initial_fen: str = "",
+        skip_title: bool = False, skip_outro: bool = False
+    ) -> str:
+    """
+    合成最终视频，包含片头动画 → 渲染帧 → 片尾，并叠加字幕
     initial_fen: 初始局面 FEN，用于片头棋盘缩略图
-    skip_title: True 时跳过片头标题卡动画（puzzle 链路使用）
-    skip_outro: True 时跳过片尾动画（puzzle 链路使用）
+    skip_title与skip_outro: puzzle 链路使用，是否跳过片头标题卡动画和片尾动画
     """
     Logger.info("合成视频...")
-
     frames_dir = os.path.join("output", "frames")
     os.makedirs(frames_dir, exist_ok=True)
-
     frame_w, frame_h = CANVAS_W, CANVAS_H
 
     # ---- 片头动画帧 ----
