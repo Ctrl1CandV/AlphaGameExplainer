@@ -111,8 +111,8 @@ class TablebaseSolver:
         winning = current_wdl is None or current_wdl > 0
         losing = current_wdl is not None and current_wdl < 0
         if winning:
-            # c[2]是child_wdl，<0意味着对手仍然处于输势，即我走完这步后，对手仍然必败
-            keep = [cand for cand in cands if c[2] < 0]
+            # cand[2]是child_wdl，<0意味着对手仍然处于输势，即我走完这步后，对手仍然必败
+            keep = [cand for cand in cands if cand[2] < 0]
             pool = keep or cands
             # 筛选策略，根据三元组的优先级选出最优move
             best = min(pool, key=lambda c: (0 if c[1] else 1, dtz_abs(c), c[4]))
@@ -121,7 +121,7 @@ class TablebaseSolver:
             best = min(cands, key=lambda c: (1 if c[1] else 0, -dtz_abs(c)))
         else:
             # 维持不输，再者拖最久
-            keep = [c for c in cands if c[2] >= 0]
+            keep = [cand for cand in cands if cand[2] >= 0]
             pool = keep or cands
             best = min(pool, key=lambda c: (1 if c[1] else 0, -dtz_abs(c)))
 
