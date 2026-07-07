@@ -339,7 +339,12 @@ def compose(
         video = video.with_audio(concatenate_audioclips(audio_clips))
 
     # ---- 字幕 ----
-    band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
+    # 竖版：字幕紧贴信息栏下方，中间黑色空隙从 262px 压缩到约 36px
+    if IS_VERTICAL:
+        info_bar_bottom = BOARD_TOP + BOARD_SIZE + 16 + 44
+        band_top = info_bar_bottom + 36
+    else:
+        band_top = frame_h - SUBTITLE_HEIGHT - SUBTITLE_MARGIN
     card_w = min(frame_w - 80, 800)
     card_x = (frame_w - card_w) // 2
 

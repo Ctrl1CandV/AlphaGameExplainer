@@ -12,11 +12,11 @@ IS_VERTICAL = _video_layout == "vertical"
 
 # 画布布局：4:3 偏方正比例，棋盘主导，避免 16:9 两侧留白
 CANVAS_W = 720 if IS_VERTICAL else 960
-CANVAS_H = 1280 if IS_VERTICAL else 720
+CANVAS_H = 960 if IS_VERTICAL else 720
 SQUARE = 75
 BOARD_SIZE = 600                # SQUARE * 8
 BOARD_LEFT = (CANVAS_W - BOARD_SIZE) // 2 if IS_VERTICAL else 28  # 竖版居中
-BOARD_TOP = 262 if IS_VERTICAL else 20
+BOARD_TOP = 40 if IS_VERTICAL else 20  # 竖版棋盘贴顶，减少中间黑色空隙
 
 # 右侧信息面板：紧凑宽度，与棋盘整体视觉平衡
 PANEL_GAP = 24
