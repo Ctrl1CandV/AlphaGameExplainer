@@ -124,6 +124,25 @@ def filter_themes(raw_themes: List[str]) -> Tuple[List[str], List[str]]:
 _CORE_BUCKETS = ("motifs", "advanced")
 _OUTCOME_BUCKETS = ("mate_patterns",)
 
+# 根因3修复：叙事基调标签集合。这些标签描述的是"谁占优、局势基调是什么"，
+# 与 fork/pin/sacrifice 等"用了什么手段"的机理标签是两个正交维度，不应该
+# 混在同一个 tier 系统里排序——否则会出现 defensiveMove(曾被误放进机理桶)
+# 压过 crushing(评估桶) 的语义冲突：Lichess 常给同一题同时打上
+# ["crushing", "defensiveMove", ...]（描述整条 PV 里出现过的各种元素，不
+# 代表单一叙事主导），若靠桶优先级选核心标签，会把"碾压式主动进攻"误判成
+# "防守化解危机"，两者叙事方向完全相反。
+# 修复方案：defensiveMove 与 position_eval 桶的 crushing/advantage/equality
+# 一起，单独抽出来做"叙事基调"判断，不参与 select_core_theme 的机理选择；
+# select_core_theme 排除这组标签后只在纯机理/杀型标签中选教学核心。
+_STANCE_KEYS = frozenset({"crushing", "advantage", "equality", "defensiveMove"})
+# 基调标签内部优先级：进攻性评估标签（crushing/advantage，均表示解题方在
+# 赢子/占优）必须排在 defensiveMove 之前——Lichess 常把"碾压/占优"题同时打上
+# defensiveMove（因为整条 PV 里对方某步有过精确防守），若 defensiveMove 抢先，
+# 会把明明是解题方主动进攻的题误判成"防守化解危机"（见 004Ys）。defensiveMove
+# 只在没有任何进攻性评估标签时才主导基调（此时才是真正的防守型题）；equality
+# 兜底（防守成和）。storyboard 侧还有子力事实兜底核验作为第二道保险。
+_STANCE_PRIORITY = ("crushing", "advantage", "defensiveMove", "equality")
+
 _KEY_TO_BUCKET: dict = {}
 
 
@@ -142,7 +161,14 @@ def _key_to_bucket() -> dict:
 
 
 def _theme_tier(key: str) -> int:
-    """标签讲解优先级 tier：0 机理 < 1 杀型 < 2 评估/其它。"""
+    """标签讲解优先级 tier：0 机理 < 1 杀型 < 2 评估/其它。
+
+    叙事基调标签（_STANCE_KEYS）永远归为 tier 2，不参与机理优先级竞争——
+    即使 defensiveMove 物理上仍登记在 advanced 桶里，也不再享有 tier 0
+    优先级，避免压过真正的机理标签或制造攻守错判。
+    """
+    if key in _STANCE_KEYS:
+        return 2
     bucket = _key_to_bucket().get(key, "")
     if bucket in _CORE_BUCKETS:
         return 0
@@ -152,15 +178,33 @@ def _theme_tier(key: str) -> int:
 
 
 def select_core_theme(effective: List[str]) -> str:
-    """从 effective 选最适合作为讲解核心的标签。
+    """从 effective 选最适合作为讲解核心的标签（纯"机理/杀型"教学标签）。
 
     规则：tier 升序（机理 > 杀型 > 评估兜底），tier 相同时保持 lichess 原顺序。
     这样 ['crushing', 'sacrifice'] 会选中 sacrifice（机理）而非 crushing（评估）。
+    叙事基调标签（crushing/advantage/equality/defensiveMove）已被 _theme_tier
+    统一降到 tier 2，只在没有任何机理/杀型标签时才会被选为核心（作为兜底）。
     空列表返回 ''。
     """
     if not effective:
         return ""
     return min(effective, key=lambda k: (_theme_tier(k), effective.index(k)))
+
+
+def select_narrative_stance(effective: List[str]) -> str:
+    """从 effective 中选出决定"叙事基调"的标签，与核心教学标签正交、独立选择。
+
+    只在 _STANCE_KEYS（crushing/advantage/equality/defensiveMove）范围内挑选，
+    按 _STANCE_PRIORITY 的严重程度顺序取共存标签中优先级最高的一个；
+    没有任何基调标签时返回 ''（由调用方决定默认基调）。
+    """
+    present = [k for k in effective if k in _STANCE_KEYS]
+    if not present:
+        return ""
+    for k in _STANCE_PRIORITY:
+        if k in present:
+            return k
+    return present[0]
 
 
 def related_intersection(core_key: str, others: List[str]) -> List[str]:

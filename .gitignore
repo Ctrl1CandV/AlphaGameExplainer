@@ -10,3 +10,5 @@ output/
 *test*
 .claude
 docs/
+data/quality_benchmark*
+CLAUDE.md

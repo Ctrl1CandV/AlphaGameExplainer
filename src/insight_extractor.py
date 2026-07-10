@@ -82,11 +82,17 @@ def _replay_node(board_before: chess.Board, sans: List[str],
       weak_king_fled: 弱方王是否在本节点内移动过
       last_check: 本节点最后一着是否将军
       board_after: 走完后的局面
+      per_move: [{san, mover, piece_type, is_check, is_capture, is_promo,
+                  is_checkmate, board_after}, ...] 逐着回放的完整轨迹——
+                根因4/5修复的基础设施：多着节点不再只有起止两个采样点，
+                每一着都留下真实棋盘状态，供空间轨迹采样和"将杀发生在
+                第几着"定位使用，避免模型在描述过程时被迫编造中间数字。
     """
     temp = board_before.copy()
     strong_actions = []
     weak_king_fled = False
     last_check = False
+    per_move = []
     for san in sans:
         try:
             mv = temp.parse_san(san)
@@ -99,6 +105,17 @@ def _replay_node(board_before: chess.Board, sans: List[str],
         promo = mv.promotion is not None
         temp.push(mv)
         last_check = chk
+        is_mate = temp.is_checkmate()
+        per_move.append({
+            "san": san,
+            "mover": mover,
+            "piece_type": pc.piece_type if pc else None,
+            "is_check": chk,
+            "is_capture": cap,
+            "is_promo": promo,
+            "is_checkmate": is_mate,
+            "board_after": temp.copy(),
+        })
         if strong_color is not None and mover == strong_color:
             strong_actions.append((pc.piece_type if pc else None, chk, cap, promo))
         elif pc is not None and pc.piece_type == chess.KING:
@@ -108,6 +125,7 @@ def _replay_node(board_before: chess.Board, sans: List[str],
         "weak_king_fled": weak_king_fled,
         "last_check": last_check,
         "board_after": temp,
+        "per_move": per_move,
     }
 
 
@@ -474,10 +492,26 @@ def _puzzle_tactical_facts(board_before: chess.Board, cs, board_after: chess.Boa
 
 
 def _net_material_fact(
-        start_board: chess.Board, moves: list, strong_color: chess.Color
+        start_board: chess.Board, moves: list, strong_color: chess.Color,
+        start_balance: int = 0,
     ) -> str:
-    """计算整串走法走完后，强方相对开局的子力净值，返回一句中文叙述。
-    无净值优势时返回空串，由调用方处理杀棋判定。"""
+    """计算整串走法走完后，强方相对"解题开局"的子力净值，返回一句中文叙述。
+
+    根因C修复（收尾结果句版）：此前只统计传入 moves 这段区间内的吃子往来，
+    完全不知道 start_board 之前（如 Lichess 预备步）是否已经发生过材料损失。
+    典型 bug 案例 puzzle_001aK：预备步黑车吃掉白方一个马（白方净亏3），
+    解题第1步白王吃回黑车（+5），moves 区间内部看是"强方净赢一个车"，
+    但把预备步的损失算进来，实际只是"先亏马、再吃回车，两笔相抵净赚约2"——
+    原来的措辞会让观众听成"白捡一个车"，严重高估战果。
+
+    start_balance：strong_color 在 start_board 局面（即解题开局，已经是预备步
+    走完之后）相对对方的子力点值差（用 _material_balance 算出，正数=占优）。
+    默认 0 保持向后兼容（残局链路无预备步概念，传 0 等价于旧行为）。
+
+    返回句子里不再使用"净赢X"这种听起来像"净得且无对应损失"的强断言，
+    而是按 start_balance 是否已经为负，分别说"扩大优势"或"由落后转为占优/
+    仍未转正"，避免把"吃回"讲成"白捡"。
+    """
     try:
         strong_captured = {}   # 强方吃掉的对方子（仅真实吃子）
         weak_captured = {}     # 弱方吃掉的强方子（仅真实吃子）
@@ -508,31 +542,122 @@ def _net_material_fact(
         def _value(bucket):
             return sum(_PIECE_VALUES.get(pt, 0) * n for pt, n in bucket.items())
 
-        net_points = _value(strong_captured) - _value(weak_captured)
+        segment_delta = _value(strong_captured) - _value(weak_captured)
+        end_balance = start_balance + segment_delta
 
-        # 纯升变（无吃子）：净点值为 0，但升变本身就是实质性收益
-        if net_points == 0 and has_promotion:
-            return "经过升变，强方获得了更强的子力"
+        # 纯升变（无吃子）：区间内净点值为 0，但升变本身就是实质性收益
+        if segment_delta == 0 and has_promotion:
+            if start_balance > 0:
+                return "强方在原有优势基础上净赢了升变得来的更强子力"
+            return "强方净赢了升变得来的更强子力，缓解了此前的不利局面"
 
-        if net_points <= 0:
+        if segment_delta <= 0:
             return ""
 
-        # 对消双方共有的棋子类型，尽量映射到单一棋子名
-        remain = dict(strong_captured)
-        for pt, n in weak_captured.items():
-            remain[pt] = remain.get(pt, 0) - n
-        remain = {pt: n for pt, n in remain.items() if n > 0}
+        # 结论必须以"相对解题开局的最终子力平衡"（end_balance）为准，而不是只看
+        # 这段区间自己吃了多少——否则会把"先亏马、再吃回车"讲成"净赢一个车"
+        # （puzzle_001aK 的真实 bug）。start_balance==0（没有历史损失/增益，
+        # 典型如残局链路或无预备步的 puzzle）时，退回精确的单一棋子命名，
+        # 与原有行为完全一致；start_balance!=0 时只给可验证的点值结论，不做
+        # 精确棋子命名（因为历史那部分损益的具体棋子构成未知，命名会失真）。
+        #
+        # 返回值保持"强方+短语"的片段风格（不含句号、不含多分句），供调用方
+        # （build_puzzle_keypoint_skeleton）用固定关键词捕获后拼进模板句——
+        # 因此下面每个分支都必须至少包含"净赢/净多得"这组关键词之一。
+        if start_balance == 0:
+            remain = dict(strong_captured)
+            for pt, n in weak_captured.items():
+                remain[pt] = remain.get(pt, 0) - n
+            remain = {pt: n for pt, n in remain.items() if n > 0}
+            if len(remain) == 1:
+                pt, n = next(iter(remain.items()))
+                unit = _piece_cn(pt)
+                count_cn = "一" if n == 1 else ("两" if n == 2 else str(n))
+                return f"强方净赢{count_cn}个{unit}"
+            return f"强方净多得约{segment_delta}个兵的子力价值"
 
-        if len(remain) == 1:
-            pt, n = next(iter(remain.items()))
-            unit = _piece_cn(pt)
-            count_cn = "一" if n == 1 else ("两" if n == 2 else str(n))
-            return f"经过这一连串交换，强方净赢{count_cn}个{unit}"
-
-        # 无法映射到单一棋子：吃子+升变混杂时用点值
-        return f"经过这一连串交换，强方净多得约{net_points}个兵的子力价值"
+        if end_balance > 0:
+            return f"强方净多得约{end_balance}个兵的子力价值"
+        if end_balance == 0:
+            # 吃回后刚好追平，不构成净赢，但仍是可核实的确定结论——
+            # 用"均势"而非"净赢"措辞，避免虚报优势。
+            return "强方吃回此前损失后与对方回到大致均势，并非净赢"
+        # end_balance < 0：追回了一部分但仍净落后，同样不构成净赢，
+        # 交由调用方走将杀/通用兜底措辞，避免断言不成立的优势。
+        return ""
     except Exception:
         return ""
+
+
+def _material_balance(board: chess.Board, perspective_color: chess.Color) -> int:
+    """perspective 方相对对方的子力点值差（不含王）。正数=占优，负数=落后。"""
+    mine = other = 0
+    for p in board.piece_map().values():
+        if p.piece_type == chess.KING:
+            continue
+        v = _PIECE_VALUES.get(p.piece_type, 0)
+        if p.color == perspective_color:
+            mine += v
+        else:
+            other += v
+    return mine - other
+
+
+def per_step_material_fact(
+        board_before: chess.Board, san: str,
+        solver_color: chess.Color, start_balance: int) -> str:
+    """本步（相对解题开局 start_balance）的确定性子力得失结论，供 prompt 前置注入。
+
+    根因C修复（前置注入版）：此前净得失只在最后节点粗略总结，中间每步 LLM
+    拿不到"本步是吃回 / 兑子 / 净赢 / 无净收益"的确定事实，只能自己猜——
+    典型如 puzzle_001aK 的 Kxe2 只是吃回此前被吃的马，解说却说"净赢一个车"。
+
+    这里用"相对解题开局的累计子力平衡"判定：
+      - start_balance：解题局面开始时 solver 相对对方的子力差；
+      - after_balance：本步走完后的子力差；
+      - 结合本步是否吃子、走子方，产出一句不可改写的中文结论。
+
+    solver 视角固定为解题方，避免"谁占优"表述漂移。失败安全：异常返回空串。
+    """
+    try:
+        temp = board_before.copy()
+        mover = temp.turn
+        move = temp.parse_san(san)
+        is_capture = temp.is_capture(move)
+        captured_cn = ""
+        if is_capture:
+            if temp.is_en_passant(move):
+                captured_cn = "兵"
+            else:
+                victim = temp.piece_at(move.to_square)
+                if victim is not None:
+                    captured_cn = _piece_cn(victim.piece_type)
+        temp.push(move)
+        after_balance = _material_balance(temp, solver_color)
+
+        # 本步不是吃子：只交代子力关系有没有变化，不允许臆造得子。
+        if not is_capture:
+            if move.promotion:
+                return "本步是升变，升变后解题方多一个大子，但这不是吃子得来的。"
+            return "本步没有吃子，双方子力数量不变，不要说本步赢子或得子。"
+
+        who = "解题方" if mover == solver_color else "对方"
+        # 解题方吃子：区分"吃回/兑子/真净赢"三种，杜绝把吃回讲成净赢。
+        if mover == solver_color:
+            if after_balance > start_balance and after_balance > 0:
+                return (f"本步{who}吃掉对方的{captured_cn}，走完后解题方净子力领先，"
+                        f"可以说取得了子力优势。")
+            if after_balance > start_balance and after_balance <= 0:
+                return (f"本步{who}吃掉对方的{captured_cn}，但这只是把此前损失的子力吃回来，"
+                        f"走完后子力尚未反超，不能说已经净赢。")
+            return (f"本步{who}吃掉对方的{captured_cn}，属于兑子交换，"
+                    f"子力关系没有变成单方白得，不要说净赢。")
+        # 对方吃子：解题方本步是被吃/弃子，绝不能讲成解题方得子。
+        return (f"本步是对方吃掉解题方的{captured_cn}，解题方本步在弃子或被吃，"
+                f"不要把这步说成解题方得子。")
+    except Exception:
+        return ""
+
 
 def extract_for_node(
     cs, root_winner_strong: Optional[chess.Color],
@@ -616,6 +741,17 @@ def extract_for_node(
 
             facts["on_edge"] = on_edge
             facts["in_corner"] = in_corner
+
+            # 逐着空间轨迹（根因4修复）：多着节点此前只有起止两点采样，
+            # prompt 却要求叙述"渐进过程"，导致模型在中间插值编造数字。
+            # 这里复用 _replay_node 已经保留的逐着 board_after，对每一着都
+            # 采样一次 weak 王安全格数，得到完整轨迹供 prompt 如实引用。
+            per_move = replay.get("per_move") or []
+            if len(per_move) >= 2:
+                trajectory = [facts["weak_before"]]
+                for pm in per_move:
+                    trajectory.append(len(_king_safe_squares(pm["board_after"], weak_color)))
+                facts["space_trajectory"] = trajectory
         elif weak_color is not None and is_puzzle:
             # puzzle 模式：仍记录 is_checkmate_after 供后续使用
             facts["weak_before"] = None
@@ -643,6 +779,7 @@ def extract_for_node(
                 "reduction_pct": round((1 - wa / wb) * 100) if wb > 0 else 0,
                 "king_region": _REGION_CN.get(facts.get("king_region", ""), ""),
                 "escapes_cut": facts.get("escapes_cut", 0),
+                "trajectory": facts.get("space_trajectory") or [],
             }
 
         result = {

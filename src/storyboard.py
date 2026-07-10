@@ -956,6 +956,10 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             "forbidden_concepts": forbidden,
             "is_capture_node": is_capture_node,
             "has_check_in_node": has_check_in_node,
+            # 根因B/E修复（前置注入）：把本节点起始局面双方真实子力直接给模型，
+            # 杜绝"兵残局里凭空造后"这类捏造（KPvK 系列高频）。是不可改写事实。
+            "white_material": _side_material_desc(board_before, chess.WHITE),
+            "black_material": _side_material_desc(board_before, chess.BLACK),
             "is_check_after": board_after.is_check(),
             "is_checkmate_after": board_after.is_checkmate(),
             "is_stalemate_after": board_after.is_stalemate(),
@@ -1789,11 +1793,12 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
     关联标签，注入标签定义，返回与build()输出格式兼容的storyboard dict
     puzzle: PuzzleData，含 effective_themes、rating、opening_tags等
     """
-    from src.themes_kb import (get_theme, select_core_theme,
+    from src.themes_kb import (get_theme, select_core_theme, select_narrative_stance,
                                related_intersection, get_theme_definitions_text)
 
     effective = puzzle.effective_themes
     # 核心标签：优先选战术机理（fork/sacrifice…），而非评估分类（crushing/advantage）
+    # 根因3修复：机理标签选择与叙事基调选择正交处理，见 select_narrative_stance。
     main_theme_key = select_core_theme(effective)
     main_theme = get_theme(main_theme_key) or {}
     # 次要标签 + 与核心存在联动关系的标签（供组合叙事）
@@ -1849,14 +1854,37 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
     puzzle_side_color = board.turn
     puzzle_side = "白方" if puzzle_side_color == chess.WHITE else "黑方"
     defending_side = "黑方" if puzzle_side_color == chess.WHITE else "白方"
-    narrative_mode = "tactical_solution"
-    if main_theme_key == "defensiveMove":
-        narrative_mode = "defensive_resource"
+
+    # 根因3修复：叙事基调不能再由 select_core_theme 的 tier 系统单点决定。
+    # defensiveMove 语义上和 crushing/advantage/equality 一样是"评估类"标签
+    # （描述谁占优、叙事基调），却被误放进"机理"桶，导致 crushing+defensiveMove
+    # 共存时（Lichess 常见的多标签噪声）机理桶的 tier 0 会压过评估桶的 tier 2，
+    # 把明明是碾压进攻的题目错误地定为"防守化解危机"。stance_key 从
+    # select_narrative_stance 单独选出，与 main_theme_key（机理教学核心）解耦，
+    # 两者互不干扰。
+    stance_key = select_narrative_stance(effective)
+    narrative_mode = "defensive_resource" if stance_key == "defensiveMove" else "tactical_solution"
+
+    # 兜底核验：即使标签系统选出 defensiveMove，也要用棋盘事实核实解题方
+    # 起始局面是否真的处于劣势。若解题方在解题局面开局时子力已占优或均势
+    # （不是绝对劣势），则不允许叙事基调被判定为"防守化解危机"——这是用
+    # 客观子力事实否决标签噪声的最后一道保险（对应 puzzle_0039T/puzzle_002Uy
+    # 两个已确认的攻守颠倒案例：两题都是 crushing+defensiveMove 共存，且解题
+    # 方在起始局面并非劣势）。
+    if narrative_mode == "defensive_resource":
+        solver_material = _material_score(board, puzzle_side_color)
+        opponent_material = _material_score(board, not puzzle_side_color)
+        if solver_material >= opponent_material:
+            narrative_mode = "tactical_solution"
 
     # 逐节点构建
     temp = board.copy()
     nodes_out = []
     start_board_for_material = board.copy()
+    # 根因C修复（前置注入）：解题开局时解题方相对对方的子力差，作为每步
+    # per-step material fact 的基线，用于区分"吃回/兑子/真净赢"（见 puzzle_001aK）。
+    from src.insight_extractor import _material_balance, per_step_material_fact
+    solver_start_balance = _material_balance(board, puzzle_side_color)
     for i, move in enumerate(moves):
         board_before = temp.copy()
         is_check = temp.gives_check(move)
@@ -1865,6 +1893,9 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
         fen_before = temp.fen()
         turn = "白方走" if temp.turn == chess.WHITE else "黑方走"
         san = temp.san(move)
+        # 本步确定性子力得失结论（不可改写事实，前置注入 prompt）
+        material_fact = per_step_material_fact(
+            board_before, san, puzzle_side_color, solver_start_balance)
         # 抽取被吃子的具体类型（确定性事实，供解说"吃掉了什么子"而非泛泛"吃子"）
         captured_piece_cn = ""
         if is_capture:
@@ -1931,6 +1962,7 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
             "is_capture_node": is_capture,
             "has_check_in_node": is_check,
             "captured_piece_cn": captured_piece_cn,
+            "material_fact": material_fact,
             "legal_reply_count_after": sum(1 for _ in board_after.legal_moves),
             # 关键手定位（新增）
             "theme_key_roles": roles_here,
@@ -1962,7 +1994,8 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
     if nodes_out:
         from src.insight_extractor import _net_material_fact
         net_fact = _net_material_fact(
-            start_board_for_material, moves, puzzle_side_color)
+            start_board_for_material, moves, puzzle_side_color,
+            start_balance=solver_start_balance)
         last_node = nodes_out[-1]
         if net_fact and not last_node.get("is_checkmate_after"):
             net_fact = net_fact.replace("强方", puzzle_side)

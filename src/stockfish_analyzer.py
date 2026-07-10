@@ -149,7 +149,8 @@ def _sf_solve(
         fast_step_time = PER_STEP_FAST_NON_TB
 
     try:
-        current_piece_count, temp = board.copy(), piece_count
+        temp = board.copy()
+        current_piece_count = piece_count
 
         # 阶段1，优先mate
         mate_result = _sf_mate_try(engine, temp)

@@ -308,6 +308,14 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
                      f" | {'含吃子' if node.get('is_capture_node') else '未吃子'}")
         parts.append(f"目标: {goal} | 权限: {claim}{' (禁止将杀/绝杀)' if claim != 'terminal' else ' (可宣告胜负)'}")
 
+        # 根因B修复（前置注入）：本节点起始局面双方真实子力，程序算好直接给。
+        # 此前残局正文 prompt 完全没给子力盘点，模型只能自己数，导致 KPvK 凭空
+        # 造后、KRPvKR 材料记错等硬伤。只能引用这里给出的子力，不得增删棋子。
+        wm = node.get("white_material", "")
+        bm = node.get("black_material", "")
+        if wm and bm:
+            parts.append(f"本步起始子力（只能引用，禁止凭空增删棋子）: 白方{wm}，黑方{bm}")
+
         # 当前所处的取胜阶段（让每段解说能挂到全局取胜计划上，而不是各讲各的）。
         phase = node.get("phase", "")
         phase_hint = node.get("phase_hint", "")
@@ -327,7 +335,23 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
             wa = spatial.get("weak_after")
             region = spatial.get("king_region", "")
             extra = f"，对方王已退到{region}" if region in ("边线", "角落") else ""
-            parts.append(f"空间数据: 对方王可走的安全格 {wb}→{wa}{extra}")
+            trajectory = spatial.get("trajectory") or []
+            if len(trajectory) >= 3:
+                # 根因4修复：多着节点有完整逐着轨迹时，直接给出真实数字序列，
+                # 不能再只给起止两点——否则模型会在中间插值编造数字。
+                traj_str = "→".join(str(x) for x in trajectory)
+                if all(x == trajectory[0] for x in trajectory):
+                    parts.append(
+                        f"空间数据: 本节点{len(trajectory) - 1}着，对方王安全格数全程保持{wb}不变"
+                        f"（没有实质压缩，不得描述成正在被逼退或空间锐减，只能讲成调整/试探/等招）"
+                    )
+                else:
+                    parts.append(
+                        f"空间数据: 本节点{len(trajectory) - 1}着，对方王可走的安全格依次为 {traj_str}{extra}"
+                        f"（这是逐着真实数字，讲解时必须按这个顺序如实叙述，不得编造中间过程或额外的数字变化）"
+                    )
+            else:
+                parts.append(f"空间数据: 对方王可走的安全格 {wb}→{wa}{extra}")
         must_mention = node.get("must_mention", [])
         if must_mention:
             parts.append(f"棋理观察: {'；'.join(must_mention)}")
@@ -802,6 +826,89 @@ _SUMMARY_GRAMMAR = (
 )
 
 
+# 中文棋子名 → python-chess piece_type，用于子力存在性校验（根因2修复）。
+# "王"不校验（双方永远有王，且"王"字在"对王""王翼"等短语中噪声太大）。
+_PIECE_CN_TO_TYPE = {"后": chess.QUEEN, "车": chess.ROOK, "象": chess.BISHOP, "马": chess.KNIGHT}
+
+# 单字棋子名会误命中的常见复合词（这些词里的字不指棋子）。校验前先把这些词
+# 从文本里抹掉，再判断裸棋子字是否仍然出现，避免"之后/随后/马上/象征"等误判。
+# 例："白后跃至底线" 抹词后仍含"后"→ 真提及；"黑王随后退守" 抹掉"随后"后不含
+# 裸"后"→ 非提及。
+_PIECE_CN_DECOYS = {
+    "后": ("之后", "随后", "然后", "过后", "而后", "其后", "此后", "事后",
+           "先后", "前后", "日后", "往后", "退后", "稍后", "落后", "背后",
+           "身后", "最后", "后方", "后面", "后续", "后排", "后翼", "后来",
+           "后期", "后半", "后手", "王后方"),
+    "象": ("象征", "现象", "形象", "印象", "对象", "想象", "抽象", "气象",
+           "景象", "迹象", "万象", "象棋", "好像", "图象"),
+    "马": ("马上", "马虎", "立马", "马不停蹄", "马前卒", "兵马", "人马"),
+    "车": ("塞车", "火车", "汽车", "列车", "车轮", "车厢", "堵车", "马车"),
+}
+
+
+def _mentions_piece(text: str, cn_name: str) -> bool:
+    """判断文本是否真正提及某种棋子（而非命中同字复合词）。
+
+    先把该棋子字对应的已知干扰复合词从文本里剔除，再看裸棋子字是否残留。
+    这样"随后/之后/马上/象征"等不会误判为提及后/马/象。
+    """
+    if cn_name not in text:
+        return False
+    stripped = text
+    for decoy in _PIECE_CN_DECOYS.get(cn_name, ()):  # 抹掉干扰词
+        stripped = stripped.replace(decoy, "")
+    return cn_name in stripped
+
+
+def _validate_material_existence(text: str, node: dict) -> tuple:
+    """校验 voiceover 提到的棋子种类，在节点起始局面上真实存在。
+
+    根因2修复：模型会在描述升变/机动意图时提前把"兵"讲成"后"等不存在的
+    棋子（如 KPvK 系列反复出现"白后跃至底线"，但局面里只有兵，尚未升变），
+    或在 puzzle 里凭空多造车/象（子力盘点 6/6 全错）。这里用 fen_before 解析
+    出该节点开始时盘面真实拥有的棋子种类，与文本中提到的棋子名做交叉核对；
+    若本节点内确实发生了升变（sans 中含 promotion 标记），则放行对应新棋子
+    种类的提及。
+
+    残局与 puzzle 链路共用（此前只在残局 _validate_single_segment 调用，
+    puzzle 子力捏造是审计最高频问题，必须同样拦截）。
+
+    只校验"新增"的棋子种类（如声称有后但没后），不校验"不再提及"的棋子，
+    避免误伤合理省略。失败安全：任何解析异常直接放行，不阻塞主流程。
+    """
+    fen_before = node.get("fen_before", "")
+    if not fen_before:
+        return True, ""
+    try:
+        board = chess.Board(fen_before)
+    except Exception:
+        return True, ""
+
+    # 本节点内是否发生升变：sans 里任意一着以 =Q/=R/=B/=N 结尾即视为对应
+    # 棋子类型允许被提及，即使升变前的局面上没有这枚棋子。
+    # puzzle 节点用单字段 "san"；残局节点用 "sans" 列表——两者都兼容。
+    promoted_types = set()
+    sans = node.get("sans") or ([node.get("san")] if node.get("san") else [])
+    for san in sans:
+        if not isinstance(san, str) or "=" not in san:
+            continue
+        promo_letter = san.rsplit("=", 1)[-1][:1]
+        promo_map = {"Q": chess.QUEEN, "R": chess.ROOK, "B": chess.BISHOP, "N": chess.KNIGHT}
+        if promo_letter in promo_map:
+            promoted_types.add(promo_map[promo_letter])
+
+    present_types = {p.piece_type for p in board.piece_map().values()}
+
+    for cn_name, piece_type in _PIECE_CN_TO_TYPE.items():
+        if not _mentions_piece(text, cn_name):
+            continue
+        if piece_type in present_types or piece_type in promoted_types:
+            continue
+        return False, f"提到了'{cn_name}'，但本节点起始局面上不存在该棋子（且本节点未发生对应升变）"
+
+    return True, ""
+
+
 def _validate_single_segment(seg: dict, node: dict) -> tuple:
     seg_id = seg.get("id")
     if not isinstance(seg_id, int):
@@ -831,6 +938,18 @@ def _validate_single_segment(seg: dict, node: dict) -> tuple:
     if node.get("is_checkmate_after") is False and any(word in text for word in _CHECKMATE_BANNED):
         return False, "错误宣称将杀"
 
+    # 根因5修复：将杀断言位置校验。多着节点的 is_checkmate_after 只反映
+    # "整个节点走完之后"的终态，不代表节点内每一着都已将杀。审计报告里
+    # 反复出现"第6步（仅王逼近）声称形成将杀"——模型把节点终态提前贴到了
+    # 描述中间过程的句子上。这里用一个位置启发式：多着节点若确实以将杀
+    # 收尾，将杀类断言只能出现在文本后半段（对应"最后一着"），不能出现在
+    # 描述前面机动过程的前半段。
+    if node.get("is_checkmate_after") and node.get("move_count", 1) > 1:
+        hit_positions = [text.find(w) for w in _CHECKMATE_BANNED if w in text]
+        hit_positions = [p for p in hit_positions if p >= 0]
+        if hit_positions and min(hit_positions) < len(text) * 0.5:
+            return False, "多着节点内提前宣称将杀——将杀只发生在最后一着，前面的机动过程不能提前断言"
+
     allows_check_word = node.get("is_check_after") or node.get("has_check_in_node")
     if not allows_check_word and "将军" in text:
         return False, "错误宣称将军"
@@ -843,6 +962,14 @@ def _validate_single_segment(seg: dict, node: dict) -> tuple:
 
     if not node.get("is_capture_node") and any(word in text for word in ("吃掉", "兑掉", "吞掉")):
         return False, "错误宣称吃子"
+
+    # 根因2修复：子力存在性校验。审计报告里高频出现"局面根本没有后，
+    # 却讲白后/黑后如何行动"的捏造（如 KPvK 系列把兵推进想象成后已存在）。
+    # 用 fen_before 程序化核实——本节点若不含升变走法且局面确实无后，
+    # voiceover 提到"后"就是硬性捏造，可零成本、无 LLM 依赖地拦截。
+    ok, err = _validate_material_existence(text, node)
+    if not ok:
+        return False, err
 
     if node.get("is_game_over_after") and node.get("legal_reply_count_after", 1) == 0:
         if any(word in text for word in ("黑方应", "白方应", "下一步", "随后再")):
@@ -1509,12 +1636,26 @@ def generate_structured(board: chess.Board, storyboard: dict) -> GeneratedCommen
     if all_segments and not commentary.fallback_used:
         last_node = nodes[-1] if nodes else {}
         last_seg = all_segments[-1]
-        is_terminal = last_node.get("is_checkmate_after") or last_node.get("claim_level") == "terminal"
+        # 根因5修复（关键额外发现）：原判断用 claim_level=="terminal" 兜底，
+        # 但 _assign_claim_level 对"将杀"和"逼和/僵局等任意终局"都返回同一个
+        # "terminal"值——这会导致逼和（和棋）节点也被误判为需要追加"形成将杀"
+        # 结论句，把和棋讲成了将杀。这里只认真正的将杀事实，不再用 claim_level
+        # 兜底判断胜负性质。
+        is_checkmate = bool(last_node.get("is_checkmate_after"))
         has_conclusion = any(w in last_seg.voiceover for w in ("将杀", "绝杀", "胜负已定", "胜势兑现", "终局", "结束"))
-        if is_terminal and not has_conclusion:
+        # 追加前还要求文本已经实质描述了最后一着的具体动作（吃子/将军/走子关键词），
+        # 避免在模型完全没讲清楚是哪一步、怎么将杀时，就强行贴上"形成将杀"结论标签，
+        # 制造"断言早于叙述"的矛盾（审计报告里"声称形成将杀但描述中根本没走出绝杀"）。
+        describes_final_action = any(
+            w in last_seg.voiceover for w in ("将军", "吃掉", "移动到", "走到", "退到", "逼近", "封锁"))
+        if is_checkmate and not has_conclusion and describes_final_action:
             winner = storyboard.get("winning_side", "白方")
             conclusion = f"。至此{winner}形成将杀，胜负已定。"
             last_seg.voiceover = last_seg.voiceover.rstrip("。") + conclusion
+        # 注：不再对 is_stalemate_after 追加"逼和"收束——残局 KB 局面都是必胜配置、
+        # 求解器产出的是将杀线，收官节点实际不会以逼和结束，该分支从不触发。
+        # 防止把和棋误当将杀的核心保障已由上面的 is_checkmate 硬门槛达成：
+        # 非将杀节点不会被追加"形成将杀"结论，无需再补一条未经实测的和棋输出路径。
 
     commentary.segments = all_segments
 
@@ -1696,6 +1837,22 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
             f"重点讲{puzzle_side}如何主动发现战术机会，通过强制手段获得优势或杀棋。"
         )
 
+    # 根因B修复（前置注入）：注入解题开局双方子力盘点，作为不可改写的全局事实。
+    # 此前 storyboard 已算出 white_material/black_material，却从未进入正文生成
+    # prompt——这正是 puzzle 子力捏造 6/6 全中的直接原因（模型只能自己数棋盘）。
+    white_material = storyboard.get("white_material", "")
+    black_material = storyboard.get("black_material", "")
+    if white_material and black_material:
+        lines.extend([
+            "",
+            "【解题开局子力（不可改写事实，禁止自行增减棋子种类和数量）】",
+            f"- 白方：{white_material}",
+            f"- 黑方：{black_material}",
+            f"- 解题方：{puzzle_side}；防守方：{defending_side}",
+            "只能依据上面给出的子力讲解，禁止凭空增加或减少后、车、象、马、兵；"
+            "各步的子力得失请严格依据每个节点给出的[核心]子力结论，不要自行计算净赢多少。",
+        ])
+
     # 分级约束补充：低级更强硬地禁止抽象术语，高级放开变着/计算深度
     rating_int = 0
     try:
@@ -1799,6 +1956,12 @@ def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
         captured = node.get("captured_piece_cn", "")
         if captured:
             lines.append(f"[核心] 吃掉的子力: 对方的{captured}")
+        # 前置注入：本步不可改写的子力得失结论（根因C修复）。这是根治手段——
+        # 把"吃回/兑子/真净赢"的确定判断在生成前喂给模型，而不是等生成后再拦。
+        # 直接对应 puzzle_001aK（Kxe2 吃回被误说成净赢一个车）这类高频错误。
+        material_fact = node.get("material_fact", "")
+        if material_fact:
+            lines.append(f"[不可改写] 子力结论: {material_fact}")
         reply_count = node.get("legal_reply_count_after")
         if isinstance(reply_count, int) and not node.get("is_checkmate"):
             # 用中文数字表述，避免模型照搬阿拉伯数字被 voiceover 语法卡掉
@@ -1918,6 +2081,14 @@ def _validate_puzzle_segment(seg: dict, node: dict) -> tuple:
     if not surface_ok:
         return False, surface_err
 
+    # 根因2修复（补 puzzle 链路）：子力存在性校验。puzzle 子力捏造是审计中
+    # 最高频的问题（6/6 全中，如凭空多造车/象/后），此前该校验只在残局
+    # _validate_single_segment 调用，puzzle 链路完全漏掉。这里补上——puzzle
+    # 节点带 fen_before/san 字段，与残局共用同一 _validate_material_existence。
+    mat_ok, mat_err = _validate_material_existence(voiceover.strip(), node)
+    if not mat_ok:
+        return False, mat_err
+
     # 最短长度校验
     min_len = 28 if node.get("is_checkmate_after") and len(node.get("moves", "")) <= 4 else 48
     if len(voiceover.strip()) < min_len:
@@ -1932,6 +2103,18 @@ def _validate_puzzle_segment(seg: dict, node: dict) -> tuple:
     cleaned = _reduce_cliches_puzzle(voiceover.strip())
     if len(cleaned) < len(voiceover.strip()) * 0.3:
         return False, "voiceover套话占比过高"
+
+    # 本轮实测新增：非吃子步禁止断言"本步吃掉了具体某子"。
+    # 案例 puzzle_001aK 第5步是 Kf2（白王避将后撤，非吃子），解说却说
+    # "直接吃掉这枚无主的马"——把一步非吃子讲成吃子得子。这里只拦"指向本步
+    # 的具体吃子断言"（如"这一吃""直接吃掉这枚/这个/那枚"），不拦战术定义里
+    # 泛指的"可直接吃掉而不受惩罚"这类概念叙述，避免误伤机理讲解。
+    if not node.get("is_capture"):
+        _CONCRETE_CAPTURE_CLAIMS = ("这一吃", "直接吃掉这", "直接吃掉那",
+                                    "果断吃掉这", "果断吃掉那", "吃掉这枚",
+                                    "吃掉那枚", "吃掉这个", "吃掉那个")
+        if any(w in voiceover for w in _CONCRETE_CAPTURE_CLAIMS):
+            return False, "非吃子步却断言本步吃掉了具体子力"
 
     # 确保 segment id 与节点 id 对齐（多 chunk 时 LLM 可能从 1 重新编号）
     seg["id"] = node["id"]
@@ -2274,8 +2457,10 @@ def _compose_puzzle_voiceover(node: dict, kp: dict) -> str:
 
     # 句 4：指出对方为什么难受 + 最终结果
     if defender_problem:
-        # 句中已含"对方"则不再加前缀，避免"对方…对方"重复
-        if "对方" in defender_problem:
+        # 只有当句子本身没有主语时才补"对方"前缀。此前只判"对方"，导致
+        # 以"己方/白方/黑方/双方"开头的 consequence（如 advantage 标签的
+        # "己方以优势姿态进入战术阶段…"）被硬加前缀拼出"对方己方…"的病句。
+        if defender_problem.lstrip().startswith(("对方", "己方", "白方", "黑方", "双方")):
             sent4 = f"{defender_problem}，{actual_result}"
         else:
             sent4 = f"对方{defender_problem}，{actual_result}"
