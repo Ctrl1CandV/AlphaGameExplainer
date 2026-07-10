@@ -1894,8 +1894,14 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
         turn = "白方走" if temp.turn == chess.WHITE else "黑方走"
         san = temp.san(move)
         # 本步确定性子力得失结论（不可改写事实，前置注入 prompt）
+        # P0-2：提前计算是否形成将杀，传入 per_step_material_fact 使其 short-circuit
+        # 避免 LLM 拿不到"将杀"信号后自行发明得子措辞（002rd Qh6# / 001wR Qd8#）。
+        _is_cm_board = board_before.copy()
+        _is_cm_board.push(move)
+        is_checkmate_after = _is_cm_board.is_checkmate()
         material_fact = per_step_material_fact(
-            board_before, san, puzzle_side_color, solver_start_balance)
+            board_before, san, puzzle_side_color, solver_start_balance,
+            is_checkmate_after=is_checkmate_after)
         # 抽取被吃子的具体类型（确定性事实，供解说"吃掉了什么子"而非泛泛"吃子"）
         captured_piece_cn = ""
         if is_capture:
@@ -1908,8 +1914,7 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
         temp.push(move)
         fen_after = temp.fen()
         board_after = temp.copy()
-        if temp.is_checkmate():
-            is_checkmate_after = True
+        # is_checkmate_after 已在本循环顶部通过 _is_cm_board 计算，此处无需重复。
 
         # 标签关联
         related_theme = associate_move_with_theme(
@@ -1990,16 +1995,10 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
         }
         nodes_out.append(node)
 
-    # 整串走法子力净值，只挂到最后一个节点（杀棋结尾不输出）
-    if nodes_out:
-        from src.insight_extractor import _net_material_fact
-        net_fact = _net_material_fact(
-            start_board_for_material, moves, puzzle_side_color,
-            start_balance=solver_start_balance)
-        last_node = nodes_out[-1]
-        if net_fact and not last_node.get("is_checkmate_after"):
-            net_fact = net_fact.replace("强方", puzzle_side)
-            last_node["puzzle_tactical_facts"].append(net_fact)
+    # P0-3 清理：移除旧的 _net_material_fact 整串净值追加块。
+    # 该块输出"强方净多得约X个兵的子力价值"格式，是 Phase 0 量化痼疾的
+    # 污染源（LLM 把它当模板金句拷贝进每步）。per_step_material_fact 已逐节点
+    # 提供精确的定性结论，两者冲突——保留新代码、删除旧代码。
 
     # 组装 storyboard
     theme_defs_text = get_theme_definitions_text(effective, include_en=False)

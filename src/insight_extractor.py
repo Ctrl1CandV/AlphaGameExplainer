@@ -605,7 +605,8 @@ def _material_balance(board: chess.Board, perspective_color: chess.Color) -> int
 
 def per_step_material_fact(
         board_before: chess.Board, san: str,
-        solver_color: chess.Color, start_balance: int) -> str:
+        solver_color: chess.Color, start_balance: int,
+        is_checkmate_after: bool = False) -> str:
     """本步（相对解题开局 start_balance）的确定性子力得失结论，供 prompt 前置注入。
 
     根因C修复（前置注入版）：此前净得失只在最后节点粗略总结，中间每步 LLM
@@ -616,9 +617,17 @@ def per_step_material_fact(
       - start_balance：解题局面开始时 solver 相对对方的子力差；
       - after_balance：本步走完后的子力差；
       - 结合本步是否吃子、走子方，产出一句不可改写的中文结论。
+      - is_checkmate_after (新增 P0-2)：若本步形成将杀，所有子力分析失去意义，
+        函数直接返回"将杀"锚点，调用方必须在传入前计算该布尔值。
 
     solver 视角固定为解题方，避免"谁占优"表述漂移。失败安全：异常返回空串。
     """
+    # P0-2 杀棋优先 short-circuit：将杀节点的子力得失已无意义，直接返回锚点，
+    # 避免 LLM 拿不到"本步将杀"信号后自行发明得子措辞（典型如 002rd Qh6# 被讲成
+    # "净赢一个车"、001wR Qd8# 被讲成"白吃一车一马"）。
+    if is_checkmate_after:
+        return "本步形成将杀，不要说净赢多少子力。"
+
     try:
         temp = board_before.copy()
         mover = temp.turn
@@ -643,13 +652,23 @@ def per_step_material_fact(
 
         who = "解题方" if mover == solver_color else "对方"
         # 解题方吃子：区分"吃回/兑子/真净赢"三种，杜绝把吃回讲成净赢。
+        # P0-1 修复：start_balance < 0 时（prelude 刚吃亏），即使 after_balance > 0
+        # 也是"追平后反超"，措辞上强调"弥补了此前损失"而非"自主净获利"——
+        # 避免 001aK 类case被误判为"取得了子力优势"。
         if mover == solver_color:
-            if after_balance > start_balance and after_balance > 0:
-                return (f"本步{who}吃掉对方的{captured_cn}，走完后解题方净子力领先，"
-                        f"可以说取得了子力优势。")
-            if after_balance > start_balance and after_balance <= 0:
+            if after_balance > start_balance:
+                if after_balance > 0:
+                    if start_balance < 0:
+                        # 从落后追回到领先：强调"弥补+反超"双重语义
+                        return (f"本步{who}吃掉对方的{captured_cn}，"
+                                f"走完后不仅弥补了此前的损失还形成反超。")
+                    # 本来就领先再扩大优势：真净赢
+                    return (f"本步{who}吃掉对方的{captured_cn}，走完后解题方净子力领先，"
+                            f"可以说取得了子力优势。")
+                # after_balance <= 0：吃回但尚未反超
                 return (f"本步{who}吃掉对方的{captured_cn}，但这只是把此前损失的子力吃回来，"
                         f"走完后子力尚未反超，不能说已经净赢。")
+            # after_balance <= start_balance：兑子/亏换
             return (f"本步{who}吃掉对方的{captured_cn}，属于兑子交换，"
                     f"子力关系没有变成单方白得，不要说净赢。")
         # 对方吃子：解题方本步是被吃/弃子，绝不能讲成解题方得子。
