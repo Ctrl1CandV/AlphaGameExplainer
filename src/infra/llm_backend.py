@@ -1,23 +1,20 @@
-from abc import ABC, abstractmethod
+"""LLM 后端封装（llama.cpp）。
+
+从原 src/llm_backend.py 迁移。改动：
+- 删除 LLMBackend ABC 基类（只有一个实现，YAGNI）
+- Logger 从 infra.logger 导入（不经过 common）
+- LLM_BACKEND_CACHE 全局单例保留（显存约束：4070 Ti Super 16G，模型 ~14.5GB，不能重复加载）
+"""
+from src.infra.logger import Logger
 from dotenv import load_dotenv
-from src.common import Logger
 import os
 
 load_dotenv()
 
-class LLMBackend(ABC):
-    @abstractmethod
-    def generate(self, prompt: str, grammar: str = None) -> str:
-        ...
 
-    def close(self):
-        pass
+class LlamaCppBackend:
+    """llama.cpp 后端，单例缓存在模块级 LLM_BACKEND_CACHE 中。"""
 
-    @property
-    def name(self) -> str:
-        return self.__class__.__name__
-
-class LlamaCppBackend(LLMBackend):
     def __init__(
         self,
         model_path: str = None,
@@ -113,10 +110,18 @@ class LlamaCppBackend(LLMBackend):
         except Exception:
             pass
 
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
+
+
+# 模块级单例缓存。
+# 必须单例：4070 Ti Super 16G 显存，Qwen3.6-27B 4-bit ~14.5GB 几乎占满，
+# 重复加载会导致 OOM。release_backend() 在 TTS 前释放显存。
 LLM_BACKEND_CACHE = {}
 
 
-def create_backend_from_env() -> LLMBackend:
+def create_backend_from_env() -> LlamaCppBackend:
     global LLM_BACKEND_CACHE
 
     cache_key = "llama_cpp"
@@ -126,6 +131,7 @@ def create_backend_from_env() -> LLMBackend:
     backend = LlamaCppBackend()
     LLM_BACKEND_CACHE[cache_key] = backend
     return backend
+
 
 def release_backend():
     global LLM_BACKEND_CACHE

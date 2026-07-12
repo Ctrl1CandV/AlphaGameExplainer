@@ -1,4 +1,15 @@
-from src.common import PIECE_CN as _PIECE_CN, piece_cn as _piece_cn, PIECE_VALUES as _PIECE_VALUES
+from src.chess_utils.material import (
+    PIECE_CN as _PIECE_CN, piece_cn as _piece_cn, PIECE_VALUES as _PIECE_VALUES,
+    piece_signature as _piece_signature, signature_name as _sig_name,
+    material_balance as _material_balance_impl,
+)
+from src.chess_utils.position import (
+    king_safe_squares as _king_safe_squares,
+    square_region as _square_region,
+    detect_opposition_type as _detect_opposition_type,
+    opposition_text as _opposition_text,
+    REGION_CN as _REGION_CN,
+)
 from typing import List, Optional
 import chess
 
@@ -16,62 +27,9 @@ import chess
 对外主入口：extract_for_compressed(compressed, root_board, role_meta, endgame_name)
 """
 
-_REGION_CN = {
-    "corner": "角落", "edge": "边线", "center": "中心", "near_center": "中心一带",
-}
-
-def _king_safe_squares(board: chess.Board, color: chess.Color) -> set:
-    """
-    返回color方王在当前局面下"能安全去"的相邻格集合（近似王活动度）
-    判定：相邻格中，非己方占用、不与对方王相邻、不被对方攻击
-    这是衡量"王还剩多少活动空间"的稳健指标，且不依赖轮到谁走
-    （legal_moves 只算轮走方，残局里对方王常常不是轮走方）
-    注：滑子穿过王当前格的 x 光攻击会被王自身遮挡而少算，属残局叙事可接受的近似
-    """
-    ksq = board.king(color)
-    if ksq is None:
-        return set()
-    enemy = not color
-    enemy_king = board.king(enemy)
-    enemy_king_zone = set(chess.SquareSet(chess.BB_KING_ATTACKS[enemy_king])) if enemy_king is not None else set()
-    out = set()
-    for sq in chess.SquareSet(chess.BB_KING_ATTACKS[ksq]):
-        piece = board.piece_at(sq)
-        if piece is not None and piece.color == color:
-            continue
-        if sq in enemy_king_zone:
-            continue
-        if board.is_attacked_by(enemy, sq):
-            continue
-        out.add(sq)
-    return out
-
-def _square_region(sq: int) -> str:
-    """把一个格子归到棋盘区域：corner / edge / center / near_center。"""
-    f, r = chess.square_file(sq), chess.square_rank(sq)
-    if f in (0, 7) and r in (0, 7):
-        return "corner"
-    if f in (0, 7) or r in (0, 7):
-        return "edge"
-    if f in (3, 4) and r in (3, 4):
-        return "center"
-    return "near_center"
-
+# 对王检测：用 chess_utils.position 的枚举 + 中文映射，替代本地重复实现
 def _detect_opposition(board: chess.Board) -> str:
-    """ 两王相对态势（本地最小实现，避免与 toryboard形成循环依赖） """
-    wk = board.king(chess.WHITE)
-    bk = board.king(chess.BLACK)
-    if wk is None or bk is None:
-        return ""
-    df = abs(chess.square_file(wk) - chess.square_file(bk))
-    dr = abs(chess.square_rank(wk) - chess.square_rank(bk))
-    if df == 0 and dr == 2:
-        return "正对王（竖向，逼对方让路）"
-    if df == 2 and dr == 0:
-        return "正对王（横向，逼对方让路）"
-    if df == 2 and dr == 2:
-        return "斜向对王"
-    return ""
+    return _opposition_text(_detect_opposition_type(board))
 
 def _replay_node(board_before: chess.Board, sans: List[str],
                  strong_color: Optional[chess.Color]):
@@ -216,23 +174,8 @@ def _compose_must_mention(facts: dict) -> List[str]:
             out.append(b)
     return out[:3]
 
-def _material_signature(board: chess.Board, color: chess.Color) -> tuple:
-    """ 返回 color 方除王外的子力组成 """
-    counts = {}
-    for piece in board.piece_map().values():
-        if piece.color == color and piece.piece_type != chess.KING:
-            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
-    return tuple(sorted(counts.items()))
-
-def _sig_name(sig: tuple) -> str:
-    """ 子力签名 → 中文简称 """
-    if not sig:
-        return "单王"
-    parts = []
-    for pt, cnt in sig:
-        name = _PIECE_CN.get(pt, "?")
-        parts.append(f"{cnt}{name}" if cnt > 1 else name)
-    return "".join(parts)
+# _material_signature / _sig_name 已迁移到 chess_utils.material，
+# 通过顶部 import 的 _piece_signature / _sig_name 别名调用。
 
 
 def _extract_tactical_narrative(cs, board_before, board_after, role_meta) -> List[str]:
@@ -327,10 +270,10 @@ def _extract_tactical_narrative(cs, board_before, board_after, role_meta) -> Lis
             try:
                 bf = chess.Board(cs.fen_before)
                 af = chess.Board(cs.fen_after)
-                strong_before = _material_signature(bf, strong_color)
-                strong_after = _material_signature(af, strong_color)
-                weak_before = _material_signature(bf, weak_color)
-                weak_after = _material_signature(af, weak_color)
+                strong_before = _piece_signature(bf, strong_color)
+                strong_after = _piece_signature(af, strong_color)
+                weak_before = _piece_signature(bf, weak_color)
+                weak_after = _piece_signature(af, weak_color)
 
                 # 子力组成变了 → 残局类型变了
                 if strong_before != strong_after or weak_before != weak_after:
@@ -495,112 +438,17 @@ def _net_material_fact(
         start_board: chess.Board, moves: list, strong_color: chess.Color,
         start_balance: int = 0,
     ) -> str:
-    """计算整串走法走完后，强方相对"解题开局"的子力净值，返回一句中文叙述。
+    """[已废弃·死代码] P0-3 已移除所有调用点，保留空壳避免外部 import 报错。
 
-    根因C修复（收尾结果句版）：此前只统计传入 moves 这段区间内的吃子往来，
-    完全不知道 start_board 之前（如 Lichess 预备步）是否已经发生过材料损失。
-    典型 bug 案例 puzzle_001aK：预备步黑车吃掉白方一个马（白方净亏3），
-    解题第1步白王吃回黑车（+5），moves 区间内部看是"强方净赢一个车"，
-    但把预备步的损失算进来，实际只是"先亏马、再吃回车，两笔相抵净赚约2"——
-    原来的措辞会让观众听成"白捡一个车"，严重高估战果。
-
-    start_balance：strong_color 在 start_board 局面（即解题开局，已经是预备步
-    走完之后）相对对方的子力点值差（用 _material_balance 算出，正数=占优）。
-    默认 0 保持向后兼容（残局链路无预备步概念，传 0 等价于旧行为）。
-
-    返回句子里不再使用"净赢X"这种听起来像"净得且无对应损失"的强断言，
-    而是按 start_balance 是否已经为负，分别说"扩大优势"或"由落后转为占优/
-    仍未转正"，避免把"吃回"讲成"白捡"。
+    原逻辑（整串净值计算）已被 per_step_material_fact 的逐节点判定取代。
+    后续可在确认无残留引用后彻底删除此函数。
     """
-    try:
-        strong_captured = {}   # 强方吃掉的对方子（仅真实吃子）
-        weak_captured = {}     # 弱方吃掉的强方子（仅真实吃子）
-        has_promotion = False  # 强方是否包含升变（用于纯升变文本）
-        temp = start_board.copy()
-
-        for move in moves:
-            mover = temp.turn
-
-            # 只追踪真实吃子，不混入升变
-            captured_type = None
-            if temp.is_en_passant(move):
-                captured_type = chess.PAWN
-            else:
-                victim = temp.piece_at(move.to_square)
-                if victim is not None:
-                    captured_type = victim.piece_type
-            if captured_type is not None:
-                bucket = strong_captured if mover == strong_color else weak_captured
-                bucket[captured_type] = bucket.get(captured_type, 0) + 1
-
-            # 强方升变仅标记，不混入吃子桶（升变≠吃子，混入会污染对消逻辑的文本输出）
-            if move.promotion and mover == strong_color:
-                has_promotion = True
-
-            temp.push(move)
-
-        def _value(bucket):
-            return sum(_PIECE_VALUES.get(pt, 0) * n for pt, n in bucket.items())
-
-        segment_delta = _value(strong_captured) - _value(weak_captured)
-        end_balance = start_balance + segment_delta
-
-        # 纯升变（无吃子）：区间内净点值为 0，但升变本身就是实质性收益
-        if segment_delta == 0 and has_promotion:
-            if start_balance > 0:
-                return "强方在原有优势基础上净赢了升变得来的更强子力"
-            return "强方净赢了升变得来的更强子力，缓解了此前的不利局面"
-
-        if segment_delta <= 0:
-            return ""
-
-        # 结论必须以"相对解题开局的最终子力平衡"（end_balance）为准，而不是只看
-        # 这段区间自己吃了多少——否则会把"先亏马、再吃回车"讲成"净赢一个车"
-        # （puzzle_001aK 的真实 bug）。start_balance==0（没有历史损失/增益，
-        # 典型如残局链路或无预备步的 puzzle）时，退回精确的单一棋子命名，
-        # 与原有行为完全一致；start_balance!=0 时只给可验证的点值结论，不做
-        # 精确棋子命名（因为历史那部分损益的具体棋子构成未知，命名会失真）。
-        #
-        # 返回值保持"强方+短语"的片段风格（不含句号、不含多分句），供调用方
-        # （build_puzzle_keypoint_skeleton）用固定关键词捕获后拼进模板句——
-        # 因此下面每个分支都必须至少包含"净赢/净多得"这组关键词之一。
-        if start_balance == 0:
-            remain = dict(strong_captured)
-            for pt, n in weak_captured.items():
-                remain[pt] = remain.get(pt, 0) - n
-            remain = {pt: n for pt, n in remain.items() if n > 0}
-            if len(remain) == 1:
-                pt, n = next(iter(remain.items()))
-                unit = _piece_cn(pt)
-                count_cn = "一" if n == 1 else ("两" if n == 2 else str(n))
-                return f"强方净赢{count_cn}个{unit}"
-            return f"强方净多得约{segment_delta}个兵的子力价值"
-
-        if end_balance > 0:
-            return f"强方净多得约{end_balance}个兵的子力价值"
-        if end_balance == 0:
-            # 吃回后刚好追平，不构成净赢，但仍是可核实的确定结论——
-            # 用"均势"而非"净赢"措辞，避免虚报优势。
-            return "强方吃回此前损失后与对方回到大致均势，并非净赢"
-        # end_balance < 0：追回了一部分但仍净落后，同样不构成净赢，
-        # 交由调用方走将杀/通用兜底措辞，避免断言不成立的优势。
-        return ""
-    except Exception:
-        return ""
+    return ""
 
 
 def _material_balance(board: chess.Board, perspective_color: chess.Color) -> int:
-    """perspective 方相对对方的子力点值差（不含王）。正数=占优，负数=落后。"""
-    mine = other = 0
-    for p in board.piece_map().values():
-        if p.piece_type == chess.KING:
-            continue
-        v = _PIECE_VALUES.get(p.piece_type, 0)
-        if p.color == perspective_color:
-            mine += v
-        else:
-            other += v
-    return mine - other
+    """perspective 方相对对方的子力点值差（不含王）。委托 chess_utils.material。"""
+    return _material_balance_impl(board, perspective_color)
 
 
 def per_step_material_fact(

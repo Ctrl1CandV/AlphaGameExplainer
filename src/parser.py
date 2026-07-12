@@ -1,5 +1,5 @@
 from src.common import GameData, PuzzleData, PIECE_VALUES
-from src.themes_kb import filter_themes
+from src.analysis.themes_kb import filter_themes
 import chess.pgn
 import chess
 import io

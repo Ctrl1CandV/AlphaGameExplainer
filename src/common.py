@@ -1,47 +1,16 @@
 from dataclasses import dataclass, field
-from colorama import init, Fore, Style
 from typing import List, Optional
-from datetime import datetime
 import chess
 import os
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 国际象棋材料价值评估
-PIECE_VALUES = {
-    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
-    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
-}
-
-# 棋子类型 → 中文名
-PIECE_CN = {
-    chess.KING: "王", chess.QUEEN: "后", chess.ROOK: "车",
-    chess.BISHOP: "象", chess.KNIGHT: "马", chess.PAWN: "兵",
-}
+# 常量和 Logger 的权威定义已迁移到 chess_utils.material 和 infra.logger。
+# 此处 re-export 保持现有 `from src.common import ...` 调用方不受影响。
+from src.chess_utils.material import PIECE_VALUES, PIECE_CN, piece_cn
+from src.infra.logger import Logger
 
 ALLOWED_PACING = {"fast", "normal", "slow", "pause_before", "pause_after"}
-
-init()
-class Logger:
-    @staticmethod
-    def _ts():
-        return datetime.now().strftime("%H:%M:%S")
-
-    @staticmethod
-    def info(msg):
-        print(f"{Fore.BLUE}[{Logger._ts()}] {msg}{Style.RESET_ALL}")
-
-    @staticmethod
-    def success(msg):
-        print(f"{Fore.GREEN}[{Logger._ts()}] {msg}{Style.RESET_ALL}")
-
-    @staticmethod
-    def warn(msg):
-        print(f"{Fore.YELLOW}[{Logger._ts()}] {msg}{Style.RESET_ALL}")
-
-    @staticmethod
-    def error(msg):
-        print(f"{Fore.RED}[{Logger._ts()}] {msg}{Style.RESET_ALL}")
 
 @dataclass
 class GameData:
@@ -123,9 +92,6 @@ def resolve_path(path: str) -> str:
     if not path or os.path.isabs(path):
         return path
     return os.path.normpath(os.path.join(PROJECT_ROOT, path))
-
-def piece_cn(piece_type) -> str:
-    return PIECE_CN.get(piece_type, "子")
 
 def extract_moves(board: chess.Board, analyzed: List[AnalyzedMove]) -> List[chess.Move]:
     """从 AnalyzedMove 列表提取合法走法序列"""

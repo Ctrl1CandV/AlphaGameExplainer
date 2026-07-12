@@ -1,4 +1,4 @@
-from src.common import piece_cn
+from src.chess_utils.material import piece_cn, piece_signature as _piece_signature, signature_name as _sig_name
 from typing import Optional
 import chess
 import json
@@ -10,21 +10,14 @@ _PIECE_MAP = {
 }
 
 # 残局知识库数据外置为 JSON，便于后续补充新残局而无需改动代码逻辑。
+# 注意：本文件在 src/analysis/ 下，需向上两级到项目根目录再找 data/。
 _KB_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "data", "endgame_kb.json",
 )
 
 with open(_KB_PATH, "r", encoding="utf-8") as _f:
     ENDGAME_KB = json.load(_f)
-
-def _piece_signature(board: chess.Board, color: chess.Color) -> tuple:
-    """ 获取某一方具体的棋子情况 """
-    counts = {}
-    for piece in board.piece_map().values():
-        if piece.color == color and piece.piece_type != chess.KING:
-            counts[piece.piece_type] = counts.get(piece.piece_type, 0) + 1
-    return tuple(sorted(counts.items()))
 
 def _parse_type(type_key: str):
     parts = type_key.split("v")
@@ -51,19 +44,6 @@ def match(board: chess.Board) -> Optional[dict]:
         if w_sig == b_pat and b_sig == w_pat:
             return entry
     return None
-
-def _sig_name(sig: tuple) -> str:
-    parts = []
-    sig_dict = dict(sig)
-    for pt in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN):
-        count = sig_dict.get(pt, 0)
-        if count > 0:
-            name = piece_cn(pt)
-            if count == 1:
-                parts.append(name)
-            else:
-                parts.append(f"{count}{name}")
-    return "".join(parts) if parts else "单王"
 
 def describe_endgame(board: chess.Board) -> dict:
     kb = match(board)

@@ -1,4 +1,4 @@
-from src.board_renderer import (
+from src.media.board_renderer import (
     CANVAS_W, CANVAS_H, BOARD_LEFT, BOARD_TOP, BOARD_SIZE,
     INTRO_SEC, FPS as RENDER_FPS, render_frame, IS_VERTICAL,
 )

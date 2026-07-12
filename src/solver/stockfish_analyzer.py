@@ -1,5 +1,5 @@
 from src.common import Logger, AnalyzedMove
-from src.tablebase import TablebaseSolver
+from src.solver.tablebase import TablebaseSolver
 from typing import List, Optional
 import chess.engine
 import logging
