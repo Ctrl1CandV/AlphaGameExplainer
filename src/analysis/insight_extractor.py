@@ -365,6 +365,42 @@ def _compute_importance(facts: dict, cs_is_critical: bool) -> tuple:
         return "medium", reasons
     return "low", reasons
 
+
+def _compute_tension(facts: dict, cs_is_critical: bool) -> float:
+    """计算连续张力分数（0.0-1.0），复用 _compute_importance 的评分项。
+
+    ADR-012 Narrative Planner 用此值驱动 narrative_role 判定。
+    与 _compute_importance 共享同一套评分项和权重，但返回连续值而非三档离散值，
+    使得 climax 判定有更平滑的阈值空间。
+    """
+    if facts.get("is_checkmate_after"):
+        return 1.0
+    score = 0
+    if facts.get("maneuver_label"):
+        score += 15
+    wb, wa = facts.get("weak_before"), facts.get("weak_after")
+    if facts.get("role_known") and wb is not None and wa is not None and wb > 0:
+        red = round((1 - wa / wb) * 100)
+        if red >= 50:
+            score += 25
+        elif red >= 25:
+            score += 12
+        if wa <= 1:
+            score += 20
+    if facts.get("milestone"):
+        score += 20
+    if facts.get("last_check"):
+        score += 8
+    if facts.get("opposition"):
+        score += 8
+    if cs_is_critical:
+        score += 8
+    # 归一化到 0-1：分母 80 使得单一信号（如 cs_is_critical=8）得 0.1（build_up 区间），
+    # milestone+空间锐减（20+25=45）得 0.56（接近 climax 阈值 0.6），
+    # 将杀前一步（milestone+锐减+将军+critical≈61）得 0.76（climax 区间）。
+    # 旧值 40 导致多数节点被 clamp 到 1.0，climax 档失去区分度。
+    return min(1.0, score / 80.0)
+
 def _puzzle_tactical_facts(board_before: chess.Board, cs, board_after: chess.Board,
                            role_meta: Optional[dict]) -> List[str]:
     """E 类：puzzle 战术几何事实（Phase 1：走子后攻击目标 + 悬子检测）。
@@ -627,6 +663,7 @@ def extract_for_node(
         teaching = _compose_teaching(facts, endgame_name)
         must = _compose_must_mention(facts)
         importance, reasons = _compute_importance(facts, getattr(cs, "is_critical", False))
+        tension = _compute_tension(facts, getattr(cs, "is_critical", False))
 
         # 战术叙述（D 类：puzzle 模式下保留但关闭 C 类"必胜残局"断言）
         if is_puzzle:
@@ -654,6 +691,7 @@ def extract_for_node(
             "must_mention": must,
             "importance": importance,
             "importance_reasons": reasons,
+            "tension_score": tension,
             "spatial_change": spatial,
             "tactical_narratives": tactical_narratives,
         }

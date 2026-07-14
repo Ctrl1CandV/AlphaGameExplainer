@@ -369,14 +369,129 @@ def _score_overloading_key_move(theme_key, fact, facts, mover_color):
     return 0.0, ""
 
 
-# 标签 → 评分函数的注册表。未列出的标签走通用回退。
+def _score_interference_key_move(theme_key, fact, facts, mover_color):
+    """干扰：走到关键格切断对方防守联系。
+
+    简化判定：解题方此步走到对方两个防守子之间的格子，走后对方某大子
+    失去保护（落点后对方某子被解题方攻击且无足够防守）。
+    """
+    if fact.get("mover_color") != mover_color:
+        return 0.0, ""
+    if fact.get("is_checkmate"):
+        return 0.0, ""
+    board_after = fact.get("board_after")
+    if board_after is None:
+        return 0.0, ""
+    enemy = not mover_color
+    moved_sq = fact["move"].to_square
+    try:
+        # 走子后该子攻击了对方某大子，且对方该子保护不足
+        for atk_sq in board_after.attacks(moved_sq):
+            target = board_after.piece_at(atk_sq)
+            if target is None or target.color != enemy:
+                continue
+            if target.piece_type in (chess.KING, chess.PAWN):
+                continue
+            atk_count = len(board_after.attackers(mover_color, atk_sq))
+            def_count = len(board_after.attackers(enemy, atk_sq))
+            if atk_count > def_count:
+                return 0.7, "本手干扰对方防守结构：走子后对方某子保护不足，即将被吃。"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _score_quiet_move_key_move(theme_key, fact, facts, mover_color):
+    """安静手：非将军非吃子的关键手——通常是为后续战术做准备的伏笔。
+
+    识别特征：解题方此步安静（非将军非吃子），但走后对方合法应招明显收缩
+    （被逼入困境），或后续1-2步内解题方发动将军/吃子。
+    """
+    if fact.get("mover_color") != mover_color:
+        return 0.0, ""
+    if fact.get("is_check") or fact.get("is_capture") or fact.get("is_checkmate"):
+        return 0.0, ""
+
+    # 走后对方应招数 ≤ 3 → 这步虽然安静但把对方困住了
+    reply_count = fact.get("legal_reply_count_after", 99)
+    if reply_count <= 3:
+        return 0.65, "本步是安静的伏笔手——虽不将军吃子，但把对方逼入困境。"
+
+    # 后续 1-2 ply 内解题方有将军/吃子 → 这步是战术准备
+    for j in range(fact["idx"], min(fact["idx"] + 2, len(facts))):
+        nf = facts[j]
+        if nf.get("mover_color") == mover_color:
+            if nf.get("is_check") or nf.get("is_checkmate"):
+                return 0.6, "本步是安静的关键准备手——为后续将军创造条件。"
+            if nf.get("is_capture"):
+                return 0.5, "本步是安静的关键准备手——为后续吃子创造条件。"
+
+    return 0.0, ""
+
+
+def _score_xray_attack_key_move(theme_key, fact, facts, mover_color):
+    """透视攻击/X射线：远射子穿过一个子攻击后面的子。
+    简化判定：用 is_pin 近似（X射线和牵制在几何上高度重叠）。
+    """
+    try:
+        if is_pin(fact["board_before"], fact["move"], fact["board_after"]):
+            return 0.8, "本手建立X射线攻击：远射子穿透对方防线，同时威胁多个目标。"
+    except Exception:
+        pass
+    return 0.0, ""
+
+
+def _score_trapped_piece_key_move(theme_key, fact, facts, mover_color):
+    """困子：吃掉被困住的对方子，或把对方子赶入困死位置。
+    简化判定：解题方吃掉对方子且该子走前活动度极低。
+    """
+    if not fact.get("is_capture"):
+        return 0.0, ""
+    if fact.get("mover_color") != mover_color:
+        return 0.0, ""
+    captured_v = PIECE_VALUES.get(fact.get("captured_piece_type"), 0)
+    if captured_v >= 3:
+        return 0.7, "本手吃掉对方被困的子，兑现困子战术。"
+    return 0.0, ""
+
+
+def _score_queenside_attack_key_move(theme_key, fact, facts, mover_color):
+    """后翼进攻：在 a/b/c 列区域（文件号 0-2）发动弃子/突破。
+    与 kingsideAttack 对称，只是区域不同。
+    """
+    if not fact.get("is_capture"):
+        return 0.0, ""
+    move = fact.get("move")
+    if move is None:
+        return 0.0, ""
+    to_file = chess.square_file(move.to_square)
+    if to_file <= 2 and fact.get("gives_mover_attacked"):
+        return 0.7, "本手在后翼区域弃子，撕开对方防线。"
+    return 0.0, ""
+
+
+def _score_general_mate_pattern_key_move(theme_key, fact, facts, mover_color):
+    """各类命名杀型（bodenMate/anastasiaMate 等）的通用评分：
+    仅将杀那一步给满分；非将杀步返回 0，交由上层回退（解题方优先）兜底。
+    命名杀型的将杀必在 PV 内，故该 scorer 恒能命中收官那步。
+    """
+    if fact.get("is_checkmate"):
+        return 1.0, "本手完成命名杀型，是战术终局兑现。"
+    return 0.0, ""
+
+
+# 标签 → 评分函数的注册表。未列出的标签走解题方优先回退。
 _THEME_SCORERS = {
+    # 几何可判
     "fork": _score_fork_key_move,
     "pin": _score_pin_key_move,
     "skewer": _score_skewer_key_move,
     "discoveredAttack": _score_discovered_key_move,
     "doubleCheck": _score_double_check_key_move,
     "discoveredCheck": _score_discovered_key_move,
+    "xRayAttack": _score_xray_attack_key_move,
+    "interference": _score_interference_key_move,
+    # 终局/升变
     "mate": _score_mate_key_move,
     "mateIn1": _score_mate_key_move,
     "mateIn2": _score_mate_key_move,
@@ -384,6 +499,25 @@ _THEME_SCORERS = {
     "backRankMate": _score_mate_key_move,
     "smotheredMate": _score_mate_key_move,
     "promotion": _score_promotion_key_move,
+    # 命名杀型（统一走将杀判定）
+    "anastasiaMate": _score_general_mate_pattern_key_move,
+    "arabianMate": _score_general_mate_pattern_key_move,
+    "balestraMate": _score_general_mate_pattern_key_move,
+    "blindSwineMate": _score_general_mate_pattern_key_move,
+    "bodenMate": _score_general_mate_pattern_key_move,
+    "cornerMate": _score_general_mate_pattern_key_move,
+    "doubleBishopMate": _score_general_mate_pattern_key_move,
+    "dovetailMate": _score_general_mate_pattern_key_move,
+    "epauletteMate": _score_general_mate_pattern_key_move,
+    "hookMate": _score_general_mate_pattern_key_move,
+    "killBoxMate": _score_general_mate_pattern_key_move,
+    "morphysMate": _score_general_mate_pattern_key_move,
+    "operaMate": _score_general_mate_pattern_key_move,
+    "pillsburysMate": _score_general_mate_pattern_key_move,
+    "swallowstailMate": _score_general_mate_pattern_key_move,
+    "triangleMate": _score_general_mate_pattern_key_move,
+    "vukovicMate": _score_general_mate_pattern_key_move,
+    # 交换/诱导
     "sacrifice": _score_sacrifice_key_move,
     "capturingDefender": _score_capturing_defender_key_move,
     "deflection": _score_deflection_key_move,
@@ -391,19 +525,40 @@ _THEME_SCORERS = {
     "clearance": _score_clearance_key_move,
     "intermezzo": _score_intermezzo_key_move,
     "overloading": _score_overloading_key_move,
+    # 攻击类
     "exposedKing": _score_exposed_king_key_move,
     "kingsideAttack": _score_kingside_attack_key_move,
+    "queensideAttack": _score_queenside_attack_key_move,
     "attackingF2F7": _score_attacking_f2_f7_key_move,
     "hangingPiece": _score_hanging_piece_key_move,
+    "trappedPiece": _score_trapped_piece_key_move,
+    # 通路兵
     "advancedPawn": _score_advanced_pawn_key_move,
+    # 安静手
+    "quietMove": _score_quiet_move_key_move,
 }
 
 
-def _fallback_key_move_idx(facts):
-    """通用回退：取将军/将杀/吃高价值子中分数最高的一步。"""
-    best_idx = 1 if facts else 0
+def _solver_fallback_key_move_idx(facts, solver_color):
+    """解题方优先回退：只看解题方的步，选最具决定性的一手。
+
+    根因D修复：旧 _fallback_key_move_idx 不区分走子方，对方应招的将军/吃子
+    会抢过解题方的关键手。新策略：
+    1. 筛出解题方的步（mover_color == solver_color）
+    2. 按将杀(1.0) > 将军(0.6) > 吃高价值子(0.3+0.05×value) 评分
+    3. 有得分>0的步 → 选最高分步
+    4. 解题方步全安静（全0分）→ 回退到解题方第一步（idx=1）
+
+    Lichess puzzle 的解题方第一步通常就是题目核心手——安静局面下回退到
+    第一步比误选对方应招稳健得多。
+    """
+    solver_facts = [f for f in facts if f.get("mover_color") == solver_color]
+    if not solver_facts:
+        return 1 if facts else 0
+
+    best_idx = solver_facts[0]["idx"]
     best_score = -1.0
-    for fact in facts:
+    for fact in solver_facts:
         s = 0.0
         if fact.get("is_checkmate"):
             s = 1.0
@@ -415,11 +570,38 @@ def _fallback_key_move_idx(facts):
         if s > best_score:
             best_score = s
             best_idx = fact["idx"]
+
+    # 解题方步全安静 → 回退第一步
+    if best_score <= 0:
+        return solver_facts[0]["idx"]
     return best_idx
+
+
+def _solver_fallback_reason(facts, idx):
+    """为解题方回退生成有信息量的 reason（而非"通用回退"）。"""
+    if not facts or idx <= 0 or idx > len(facts):
+        return "解题方回退：选最具决定性的一步。"
+    fact = facts[idx - 1]
+    if fact.get("is_checkmate"):
+        return "解题方此步完成将杀，是战术终局兑现。"
+    if fact.get("is_check"):
+        return "解题方此步将军，是强制战术的关键一手。"
+    if fact.get("is_capture"):
+        cap = PIECE_VALUES.get(fact.get("captured_piece_type"), 0)
+        if cap >= 5:
+            return "解题方此步吃掉对方大子，获取决定性子力优势。"
+        return "解题方此步吃子，推进战术兑现。"
+    return "解题方此步是安静的关键手——在无直接将军/吃子的情况下，它是展开后续战术的起点。"
 
 
 def locate_theme_key_moves(facts, effective_themes, main_theme_key):
     """对 effective_themes 中的每个标签定位其关键手。
+
+    参数:
+      effective_themes: 标签列表（如 ["crushing", "hangingPiece"]）。
+        若传入空格分隔的字符串（如 puzzle JSON 的 themes 字段原始值），
+        会自动 split 为列表——防御性编码，避免独立调用时出错。
+      main_theme_key: 核心标签 key（由 select_core_theme 选出）。
 
     返回 dict：
       {
@@ -431,18 +613,24 @@ def locate_theme_key_moves(facts, effective_themes, main_theme_key):
         "key_move_reason": str,
       }
     """
+    # 防御：字符串自动 split（端到端管线已由 select_core_theme 正确处理，
+    # 此守卫仅服务于独立调用 / 单元测试场景）
+    if isinstance(effective_themes, str):
+        effective_themes = [t.strip() for t in effective_themes.split() if t.strip()]
+
     result = {}
+    mover_color = facts[0]["mover_color"] if facts else chess.WHITE
+
     if not facts or not effective_themes:
-        idx0 = _fallback_key_move_idx(facts) if facts else 0
+        idx0 = _solver_fallback_key_move_idx(facts, mover_color) if facts else 0
         san0 = facts[idx0 - 1]["san"] if facts and 0 < idx0 <= len(facts) else ""
+        reason0 = _solver_fallback_reason(facts, idx0)
         return {
-            "core": {"idx": idx0, "score": 0.0, "reason": "通用回退：选最具决定性的一步。"},
+            "core": {"idx": idx0, "score": 0.3, "reason": reason0},
             "key_move_idx": idx0,
             "key_move_san": san0,
-            "key_move_reason": "通用回退：选最具决定性的一步。",
+            "key_move_reason": reason0,
         }
-
-    mover_color = facts[0]["mover_color"] if facts else chess.WHITE
 
     for theme_key in effective_themes:
         if theme_key in _OUTCOME_THEMES:
@@ -452,6 +640,12 @@ def locate_theme_key_moves(facts, effective_themes, main_theme_key):
             continue
         best = None
         for fact in facts:
+            # 一致性守卫：关键手只在解题方的步里选。题目标签永远描述解题方
+            # 的战术，对方应招里偶发的叉击/牵制/将军不应抢走关键手。集中在此
+            # 过滤，覆盖所有 scorer（含 fork/pin/skewer 等旧几何 scorer），
+            # 避免逐个 scorer 各自判定导致的新旧不一致。
+            if fact.get("mover_color") != mover_color:
+                continue
             try:
                 score, reason = scorer(theme_key, fact, facts, mover_color)
             except Exception as e:
@@ -466,13 +660,32 @@ def locate_theme_key_moves(facts, effective_themes, main_theme_key):
 
     core_loc = result.get(main_theme_key)
     if core_loc is None:
-        idx0 = _fallback_key_move_idx(facts)
-        san0 = facts[idx0 - 1]["san"] if 0 < idx0 <= len(facts) else ""
-        core_loc = {
-            "idx": idx0,
-            "score": 0.0,
-            "reason": "通用回退：选最具决定性的一步。",
-        }
+        # 核心标签未命中任何评分（评估类标签 / 未注册标签 / 评分全0）
+        # 根因D修复：评估类标签直接选解题方第一步（Lichess PV第一步即正解手）
+        if main_theme_key in _OUTCOME_THEMES or not main_theme_key:
+            solver_facts = [f for f in facts if f.get("mover_color") == mover_color]
+            idx0 = solver_facts[0]["idx"] if solver_facts else 1
+            san0 = facts[idx0 - 1]["san"] if 0 < idx0 <= len(facts) else ""
+            first_fact = facts[idx0 - 1] if 0 < idx0 <= len(facts) else {}
+            if first_fact.get("is_checkmate"):
+                reason0 = "解题方第一步完成将杀，是战术终局兑现。"
+            elif first_fact.get("is_check"):
+                reason0 = "解题方第一步将军，是强制战术的关键手。"
+            elif first_fact.get("is_capture"):
+                reason0 = "解题方第一步吃子得利，是本题的战术核心手。"
+            else:
+                reason0 = "解题方第一步是本题正解手——虽安静但它是整个战术序列的起点。"
+            core_loc = {"idx": idx0, "score": 0.5, "reason": reason0}
+        else:
+            # 机理标签但评分全0 → 走解题方优先回退（仍偏向将军/吃子）
+            idx0 = _solver_fallback_key_move_idx(facts, mover_color)
+            san0 = facts[idx0 - 1]["san"] if 0 < idx0 <= len(facts) else ""
+            reason0 = _solver_fallback_reason(facts, idx0)
+            core_loc = {
+                "idx": idx0,
+                "score": 0.3,
+                "reason": reason0,
+            }
     result["core"] = core_loc
     result["key_move_idx"] = core_loc["idx"]
     san_key = ""

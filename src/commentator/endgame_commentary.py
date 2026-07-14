@@ -397,7 +397,22 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         if drive_tag:
             parts.append(f"类型: 「{drive_tag}」叙事块 — 这是多着合并，描述整体过程，不要逐步数着")
 
-        # 详略提示：不注入"重要/不重要"的判决，只给事实性提示
+        # Narrative Planner 注入（ADR-012）：用叙事角色+字数预算+语气提示
+        # 替代旧的二元"详略"指令，让模型知道"这段用什么节奏和权重讲"。
+        role = node.get("narrative_role", "")
+        tone = node.get("tone_hint", "")
+        budget = node.get("word_budget", "")
+        if role and budget:
+            parts.append(f"叙事角色: {role}（{tone}）— 字数预算: {budget}")
+        if role == "climax":
+            parts.append("  这是高潮节点，请讲出张力——为什么这步非走不可、它解决了什么问题。")
+        elif role == "setup":
+            parts.append("  这是铺垫节点，简洁交代即可，不要展开。")
+        elif role == "resolution":
+            parts.append("  这是收官节点，点出胜负已定即可收束。")
+
+        # 详略提示：保留 summary_only/video_density 作为 narrative 之外的额外约束
+        # （summary_only 来自重复机动检测，与 narrative_role 正交）
         if summary_only or node.get("video_density") == "low":
             parts.append("详略: 过渡/重复节点 — 一句话带过即可，不要展开")
             if not node.get("is_capture_node") and not node.get("has_check_in_node"):

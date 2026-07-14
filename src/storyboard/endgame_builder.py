@@ -243,6 +243,52 @@ def _assign_video_density(node: dict, contains_rep: bool, repeat_count: int) -> 
     return {"density": "medium", "summary_only": False}
 
 
+# ============================================================
+#  Narrative Planner (ADR-012)
+#  程序化计算叙事弧线：tension_score → narrative_role → tone_hint/word_budget
+#  不引入新 LLM 调用，纯棋盘事实+位置计算
+# ============================================================
+
+_ROLE_TONE = {
+    "setup": "平稳叙述",
+    "build_up": "节奏加快",
+    "climax": "强调关键",
+    "falling_action": "舒缓解释",
+    "resolution": "总结收束",
+}
+
+_ROLE_WORD_BUDGET = {
+    "setup": "40-70字",
+    "build_up": "70-110字",
+    "climax": "110-160字",
+    "falling_action": "40-70字",
+    "resolution": "60-100字",
+}
+
+
+def _assign_narrative_role(idx: int, total: int, tension: float, node: dict) -> str:
+    """根据节点位置+张力分数+特殊事件判定叙事角色。
+
+    规则（ADR-012）：
+    - 将杀/终局 → resolution（无论位置）
+    - 第一个节点 → setup（开局铺垫）
+    - 最后一个节点（非将杀）→ falling_action（回落收束）
+    - tension >= 0.6 → climax（高潮/关键转折）
+    - 前半段非climax → build_up；后半段非climax → falling_action
+    """
+    if node.get("is_checkmate_after") or node.get("is_game_over_after"):
+        return "resolution"
+    if idx == 0:
+        return "setup"
+    if tension >= 0.6:
+        return "climax"
+    if idx == total - 1:
+        return "falling_action"
+    if idx < total * 0.5:
+        return "build_up"
+    return "falling_action"
+
+
 def build(board: chess.Board, compressed: List[CompressedStep], winner_color=None,
           enable_insight: bool = True) -> dict:
     """基于压缩节点构建叙事分镜，注入局面特征与分阶段解说提示。
@@ -414,6 +460,15 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
                 node["move_importance"] = importance
             if reasons:
                 node["importance_reasons"] = reasons
+
+            # Narrative Planner (ADR-012)：注入张力/叙事角色/字数预算/语气提示
+            tension = insight.get("tension_score")
+            if tension is not None:
+                node["tension_score"] = tension
+                role = _assign_narrative_role(idx_cs, n_compressed, tension, node)
+                node["narrative_role"] = role
+                node["tone_hint"] = _ROLE_TONE.get(role, "")
+                node["word_budget"] = _ROLE_WORD_BUDGET.get(role, "60-90字")
 
         # 引擎信号（中性观察，不给结论）：
         # 利用节点已有的 eval_delta / is_only_move 生成量化参考句。

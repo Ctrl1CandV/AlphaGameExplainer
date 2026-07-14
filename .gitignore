@@ -1,6 +1,8 @@
 __pycache__/
 .vscode/
+.claude/
 .idea/
+.zcode/
 .env
 .git/
 *.exe
@@ -8,7 +10,6 @@ output/
 *.mp4
 *.srt
 *.log
-.claude
 *test*
 docs/
 *quality_benchmark*
