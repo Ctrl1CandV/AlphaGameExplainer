@@ -20,6 +20,7 @@ from src.commentator.validators import (
     validate_puzzle_chunk, validate_puzzle_voiceover_surface,
 )
 from src.commentator.json_utils import parse_single_segment, INVALID_JSON_SENTINEL
+from src.commentator.examples import commentary_example_mode, get_commentary_example
 from src.analysis.themes_kb import get_theme
 from typing import Optional
 import re
@@ -55,11 +56,10 @@ def _get_depth_instruction(rating: int) -> str:
     else:
         return (
             "深度讲解，面向有较强计算力的棋手，重点讲清「怎么发现」：\n"
-            "- 战术嗅觉：如何在实战中发现这类机会？从哪个信号看出战术存在？\n"
-            "- 计算深度：需要看到几步之后？关键变化是什么？\n"
-            "- 变着分析：如果这步之后对方不走正解，最强的变着是什么？走错会怎样？\n"
-            "- 相关战术：这个战术与其他战术有什么关联？本步的战术本质是什么？\n"
-            "- 每步100-180字，可深入拆解计算线路，适合有一定基础的棋手"
+            "- 战术嗅觉：如何在实战中发现这类机会？从哪个已提供的信号看出战术存在？\n"
+            "- 计算深度：只解释程序已给出的关键变化和确定结果，不自行补算分支\n"
+            "- 相关战术：这个战术与已选协同战术有什么关联？本步的战术本质是什么？\n"
+            "- 每步100-180字，可深入拆解已验证线路，适合有一定基础的棋手"
         )
 
 
@@ -92,10 +92,11 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         "",
         "你的讲解信条：",
         "1. 深入浅出：用清晰的语言解释复杂的战术概念",
-        "2. 焦点突出：每段优先讲清两件事——这个战术标签的本质，以及它在本步如何具体落实；其余信息点到为止",
-        "3. 实战导向：帮助观众培养战术嗅觉，学会在实战中发现类似机会",
-        "4. 专业准确：使用正确的棋术术语，避免模糊表述",
-        "5. 叙事自然：用连贯的段落串联信息，不要逐条罗列'第一层...第二层...'，禁止出现层号或编号词",
+        "2. 焦点突出：每段优先讲清两件事——核心战术的本质，以及它在本步如何具体落实；其余信息点到为止",
+        "3. 事实优先：程序标注的主主题、关键手和确定结果不可改写；信息不足时不自行补算变着",
+        "4. 叙事自然：用连贯的段落串联信息，不要逐条罗列层号或编号词",
+        "5. 具体表达：首句直接写棋子动作、战术问题或局面变化，每段至少解释一个已提供的具体因果",
+        "6. 避免空话：不用「看似平淡实则」「胜利的天平」「致命一击」或泛泛的「为后续做准备」；相邻段不要重复同一开头和比喻",
         "",
         f"【战术主题】{tactic_name}",
     ]
@@ -205,9 +206,9 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         lines.extend([
             "",
             "【难度约束·高级】本题面向有经验的棋手，你应当：",
-            "- 在关键步讲清计算线路：如果对方走了X，己方如何应对Y，最终得到Z",
-            "- 可以提变着：「如果对方不走X，而是走Y，则…」",
-            "- 每步100-180字，允许深入拆解，适合有一定基础的棋手",
+            "- 在关键步讲清程序已提供的战术依据、强制性和确定结果",
+            "- 只有节点明确提供替代变化时才能分析变着；未提供时不得自行编造线路",
+            "- 每步100-180字，允许深入拆解已验证信息，适合有一定基础的棋手",
         ])
 
     lines.extend([
@@ -261,11 +262,33 @@ def _san_piece_to_chinese(moves_str: str) -> str:
     return "兵"
 
 
+def _puzzle_example_role(chunk_nodes: list) -> str:
+    if any(node.get("is_core_theme_key_move") for node in chunk_nodes):
+        return "climax"
+    if chunk_nodes and chunk_nodes[0].get("id") == 1:
+        return "setup"
+    return "resolution"
+
+
 def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
-                                total_chunks: int) -> str:
+                                total_chunks: int, primary_theme: str = "") -> str:
     """构建 puzzle 分块 prompt。"""
     is_last = (chunk_idx == total_chunks - 1)
     lines = [header]
+
+    use_example = chunk_idx == 0 or any(
+        node.get("is_core_theme_key_move") for node in chunk_nodes)
+    if (use_example and commentary_example_mode() == "matched"
+            and primary_theme):
+        role = _puzzle_example_role(chunk_nodes)
+        example = get_commentary_example("puzzle", primary_theme, role)
+        if example:
+            lines.extend([
+                "【表达范例】",
+                "只模仿信息密度、组织和口语节奏；范例中的棋子、战术和结果不是当前棋局事实。",
+                example,
+                "",
+            ])
 
     chunk_rule = ""
     if total_chunks > 1:
@@ -841,10 +864,13 @@ def _puzzle_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:
     return chunk_segments
 
 
-def _puzzle_chunk_prompt_wrapper():
+def _puzzle_chunk_prompt_wrapper(storyboard: dict):
     """构造 Puzzle 版 build_chunk_prompt 闭包，适配 generator 的统一签名。"""
+    primary_theme = (storyboard.get("tactic_focus", {}) or {}).get("primary_theme", "")
+
     def wrapper(header, chunk_nodes, chunk_idx, total_chunks, all_nodes):
-        return _build_puzzle_chunk_prompt(header, chunk_nodes, chunk_idx, total_chunks)
+        return _build_puzzle_chunk_prompt(
+            header, chunk_nodes, chunk_idx, total_chunks, primary_theme)
     return wrapper
 
 
@@ -858,7 +884,7 @@ def generate_puzzle_structured(board, storyboard: dict) -> GeneratedCommentary:
     backend = create_backend_from_env()
     config = CommentaryConfig(
         build_header=_build_puzzle_json_header,
-        build_chunk_prompt=_puzzle_chunk_prompt_wrapper(),
+        build_chunk_prompt=_puzzle_chunk_prompt_wrapper(storyboard),
         build_grammar=build_puzzle_chunk_grammar,
         validate_chunk=validate_puzzle_chunk,
         auto_fix_voiceover=_auto_fix_puzzle_voiceover,

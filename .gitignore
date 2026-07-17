@@ -11,5 +11,5 @@ output/
 *.srt
 *.log
 *test*
-docs/
 *quality_benchmark*
+docs/

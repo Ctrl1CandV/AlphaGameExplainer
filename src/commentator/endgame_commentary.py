@@ -15,6 +15,7 @@ from src.commentator.text_filters import (
 from src.commentator.grammar import build_chunk_grammar, build_retry_prompt, SEGMENT_GRAMMAR
 from src.commentator.validators import validate_single_segment, validate_storyboard_chunk
 from src.commentator.json_utils import parse_single_segment
+from src.commentator.examples import commentary_example_mode, get_commentary_example
 from typing import Optional
 import re
 
@@ -71,8 +72,8 @@ def _build_header(storyboard: dict) -> str:
     node_count = len(storyboard.get("nodes", []))
 
     parts = [
-        "你是会自己看棋的国际象棋教练。你不需要被告知哪一步重要——你会从棋理事实中自己判断。"
-        "请输出专业、以棋理为核心的中文解说，纯文本输出。",
+        "你是国际象棋残局教练。程序标注的关键手和棋理事实优先；未标注重要程度时，"
+        "也只能依据给定事实安排详略。请输出专业、以棋理为核心的中文解说，纯文本输出。",
         "只依据给定走法和局面信息解说，禁止虚构剧情，禁止空泛比喻。",
         "",
         f"【起始残局类型】{endgame_name}",
@@ -161,18 +162,16 @@ def _build_json_header(storyboard: dict) -> str:
     node_count = len(storyboard.get("nodes", []))
 
     parts = [
-        "你是一位会自己看棋的国际象棋教练。你不是在复述走法，而是在分析每一步背后的棋理。"
-        "只输出合法JSON，不加任何解释或markdown标记。",
+        "你是一位国际象棋残局教练。程序标注的关键手、状态和棋理事实优先。"
+        "你不是在复述走法，而是在解释这些事实之间的因果。只输出合法JSON，不加任何解释或markdown标记。",
         "",
         "你的讲解信条：",
-        "- 当节点标注了「关键手判定」时，请围绕判定依据把这一步为什么关键讲深讲透；"
-        "未标注时，从棋理事实中自己判断重要程度。",
-        "- 当你在「棋理分析」或「引擎数据」中看到一着同时做了多件事、让对方无法两全、"
-        "或改变了残局结构时，你会自然地讲出它为什么是全局的胜负手。",
-        "- 你的判断来自对棋局结构的理解，而不是对指令的服从。",
-        "- 把每段残局讲成一个有逻辑的推进故事：先讲清这一步做了什么、局面因此发生了什么变化，再讲它为什么有用。",
-        "- 关键步骤自己判断、自己写出张力；过渡步骤一笔带过。",
-        "- 你没有事实支撑时宁可朴素也不要空洞——没有事实支撑的形容词一个都不要用。",
+        "- 节点标注了「关键手判定」时，围绕给定依据讲深讲透；未标注时，只按已提供事实安排详略，不自行补算。",
+        "- 棋理分析和引擎数据是程序提供的参考事实；只讲其中有明确支撑的结构变化与对手困境。",
+        "- 每段按动作 → 变化 → 已验证结果组织，至少解释一个给定事实之间的具体因果。",
+        "- 首句直接进入棋子动作、局面任务或限制变化，相邻段避免重复同一开头。",
+        "- 不写「看似平淡实则」「胜利的天平」「囊中之物」「致命一击」「步步为营」或泛泛的「为后续做准备」。",
+        "- 没有事实支撑时宁可朴素、少说，也不要用空洞形容词填充。",
         _DIFFICULTY_TONE[_rate_difficulty(endgame_name)],
         "",
         f"【残局类型】{endgame_name}",
@@ -215,7 +214,7 @@ def _build_json_header(storyboard: dict) -> str:
         "forcing→可以讲强制/被迫  terminal→才能说将杀/绝杀",
         "",
         "节点可能标注「将军驱赶」或「反复试探等待」→ 这种节点是多着合并的叙事块，你要用流畅的段落描述这段过程，而不是逐步数着。",
-        "节点可能带「棋理事实」「棋理观察」「棋理分析」「引擎数据」→ 这些都是从棋盘或引擎算出的真实事实，不是判决。请你阅读后自己形成判断，用自己的话融进解说。",
+        "节点可能带「棋理事实」「棋理观察」「棋理分析」「引擎数据」→ 这些是程序提供的真实事实或量化参考。只依据它们组织解释，不得自行补算变化或改写状态。",
         "",
         "【关键：解说要贴合画面的推进过程，不要一上来就报终点】",
         "每段解说在视频里是和这个节点的多步走子「同步播放」的——你写第一句时，画面才刚走第一步；",
@@ -287,7 +286,12 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
     is_last = (chunk_idx == total_chunks - 1)
     parts = [header]
     if chunk_idx == 0 and example:
-        parts.extend(["【输出示例】", example, ""])
+        parts.extend([
+            "【表达范例】",
+            "只模仿信息密度、组织和口语节奏；范例中的棋子、战术和结果不是当前棋局事实。",
+            example,
+            "",
+        ])
 
     chunk_rule = ""
     if total_chunks > 1:
@@ -302,6 +306,18 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         _build_chunk_outline(chunk_nodes),
         "写作要求：第一个segment先承接上一段落点；后续segment承接本块上一节点已经形成的局面结果。",
     ])
+
+    # E2（ADR-017）：禁止概念是按子力存在性算出的负面约束，本块内基本不变，
+    # 因此在块级注入一次（取块内各节点并集、去重保序），不在每个节点重复。
+    # 「允许概念」不再在此注入——它与 header 的【可用术语】同源于 motifs，重复注入
+    # 只是徒增 token，正向术语引导已由 header 承担。
+    chunk_forbidden = []
+    for _n in chunk_nodes:
+        for _c in _n.get("forbidden_concepts", []) or []:
+            if _c not in chunk_forbidden:
+                chunk_forbidden.append(_c)
+    if chunk_forbidden:
+        parts.append("【本段禁止概念】" + "；".join(chunk_forbidden))
     parts.append("")
 
     for node in chunk_nodes:
@@ -404,12 +420,15 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         budget = node.get("word_budget", "")
         if role and budget:
             parts.append(f"叙事角色: {role}（{tone}）— 字数预算: {budget}")
-        if role == "climax":
-            parts.append("  这是高潮节点，请讲出张力——为什么这步非走不可、它解决了什么问题。")
-        elif role == "setup":
-            parts.append("  这是铺垫节点，简洁交代即可，不要展开。")
-        elif role == "resolution":
-            parts.append("  这是收官节点，点出胜负已定即可收束。")
+        role_guidance = {
+            "setup": "交代当前局面的任务和本步作用，不提前宣布结局。",
+            "build_up": "说明本步新增了哪项限制、改善了什么配合，以及局面如何向关键点推进。",
+            "climax": "围绕给定依据讲清关键机理、对手的确定困境和已经发生的后果，不用赞美词代替分析。",
+            "falling_action": "说明主动方如何兑现已有优势或消除反击资源，不再制造新的悬念。",
+            "resolution": "依据终态收束；若给定事实足以支持，再提炼一条可复用原则，否则只总结终态，不引入新事实。",
+        }
+        if role in role_guidance:
+            parts.append(f"  角色写法: {role_guidance[role]}")
 
         # 详略提示：保留 summary_only/video_density 作为 narrative 之外的额外约束
         # （summary_only 来自重复机动检测，与 narrative_role 正交）
@@ -1111,6 +1130,31 @@ def _endgame_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:
     return chunk_segments
 
 
+def _select_endgame_example(storyboard: dict, chunk_nodes: list, chunk_idx: int) -> str:
+    """按实验分组为首块精确选择至多一个短范例。"""
+    if chunk_idx != 0:
+        return ""
+    mode = commentary_example_mode()
+    if mode == "fixed":
+        return _JSON_EXAMPLE
+    if mode != "matched" or not chunk_nodes:
+        return ""
+
+    # 取块内信息需求最高的角色，而不是固定用首节点——首节点几乎恒为 setup，
+    # 否则 climax/resolution 范例永远命不中。类别优先用命中该角色的那个节点的
+    # sub_endgame_name，退化到 storyboard 级 endgame_name。
+    _priority = {"climax": 5, "build_up": 4, "setup": 3, "falling_action": 2, "resolution": 1}
+    dominant_node = max(
+        chunk_nodes,
+        key=lambda n: _priority.get(n.get("narrative_role", ""), 0),
+    )
+    role = dominant_node.get("narrative_role", "")
+    if not role:
+        return ""
+    category = dominant_node.get("sub_endgame_name", "") or storyboard.get("endgame_name", "")
+    return get_commentary_example("endgame", category, role)
+
+
 def _endgame_chunk_prompt_wrapper(storyboard: dict):
     """构造残局版 build_chunk_prompt 闭包，适配 generator 的统一签名。
 
@@ -1124,7 +1168,7 @@ def _endgame_chunk_prompt_wrapper(storyboard: dict):
         start = chunk_idx * 4  # CHUNK_SIZE = 4
         if start > 0:
             prev_context = _build_prev_context(all_nodes[start - 1])
-        example = _JSON_EXAMPLE if chunk_idx == 0 else ""
+        example = _select_endgame_example(storyboard, chunk_nodes, chunk_idx)
         return _build_chunk_prompt(header, chunk_nodes, chunk_idx, total_chunks,
                                    example, prev_context=prev_context)
     return wrapper

@@ -1,7 +1,7 @@
 from src.common import CompressedStep, Logger, AnalyzedMove, PIECE_VALUES, piece_cn
 from src.chess_utils.material import material_score as _material_score, material_balance as _material_balance, side_material_desc as _side_material_desc
 from src.chess_utils.tactic import is_fork as _is_fork, is_pin as _is_pin, is_skewer as _is_skewer, is_discovered as _is_discovered
-from src.analysis.themes_kb import get_theme, select_core_theme, select_narrative_stance, related_intersection, get_theme_definitions_text
+from src.analysis.themes_kb import get_theme, select_core_theme, select_narrative_stance, related_intersection
 from src.analysis.insight_extractor import extract_for_compressed, per_step_material_fact
 from src.storyboard.key_move_locator import collect_puzzle_move_facts as _collect_puzzle_move_facts, locate_theme_key_moves as _locate_theme_key_moves
 from typing import List
@@ -10,10 +10,11 @@ import chess
 
 def associate_move_with_theme(board_before: chess.Board, move: chess.Move,
                                board_after: chess.Board,
-                               effective_themes: List[str]) -> str:
-    """确定走法与哪个标签最相关（仅在 effective_themes 集合内择一，决策三）。
+                               effective_themes: List[str],
+                               main_theme_key: str = "") -> str:
+    """确定走法与哪个标签最相关（仅在候选标签集合内择一，决策三）。
 
-    优先级：终局杀型 → 叉击 → 牵制 → 串击 → 闪击 → 主标签兜底。
+    优先级：终局杀型 → 叉击 → 牵制 → 串击 → 闪击 → 程序选定的主标签兜底。
     """
     # 1. 终局：从 effective_themes 反查杀型标签
     if board_after.is_checkmate():
@@ -33,7 +34,9 @@ def associate_move_with_theme(board_before: chess.Board, move: chess.Move,
     if "discoveredAttack" in effective_themes and _is_discovered(board_before, move, board_after):
         return "discoveredAttack"
 
-    # 3. 兜底：主标签
+    # 3. 兜底：使用程序选出的主标签，不依赖原始标签顺序
+    if main_theme_key in effective_themes:
+        return main_theme_key
     return effective_themes[0] if effective_themes else ""
 
 
@@ -65,7 +68,7 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
     main_theme = get_theme(main_theme_key) or {}
     # 次要标签 + 与核心存在联动关系的标签（供组合叙事）
     secondary_keys = [k for k in effective if k != main_theme_key]
-    synergy_keys = related_intersection(main_theme_key, secondary_keys)
+    synergy_keys = related_intersection(main_theme_key, secondary_keys)[:2]
 
     # 关键手定位：复盘整条解法 → 对每个机理类标签用棋盘事实评分 → 选最高分。
     # 解决"核心标签选对了但关键手讲错"（如 sacrifice 被误选成前面那步将军）。
@@ -178,16 +181,11 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
 
         # 标签关联
         related_theme = associate_move_with_theme(
-            board_before, move, board_after, effective)
+            board_before, move, board_after, effective, main_theme_key)
         theme_entry = get_theme(related_theme) or {}
 
-        # 标签上下文
+        # 标签上下文稍后按节点在解法中的角色选择，避免每步重复整份知识库。
         theme_context = ""
-        if theme_entry:
-            theme_context = (
-                f"本步涉及【{theme_entry.get('cn', related_theme)}】："
-                f"{theme_entry.get('definition', '')}"
-            )
 
         # 关键手定位结果回灌：本步属于哪些标签的关键手、是不是核心关键手
         step_idx = i + 1
@@ -201,6 +199,21 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
         elif roles_here:
             # 取第一个次要标签的理由
             key_move_reason = key_move_map[roles_here[0]].get("reason", "")
+
+        # 节点知识按叙事作用选择：关键手讲机理，前置步讲识别/前提，
+        # 后续步仍只给概念定义；本局结果由 material_fact、关键手理由等确定性字段提供。
+        if theme_entry:
+            theme_cn = theme_entry.get("cn", related_theme)
+            if is_core_key:
+                selected_theme_text = theme_entry.get("definition", "")
+            elif step_idx < (key_move_map.get("key_move_idx", 0) or 1):
+                selected_theme_text = (theme_entry.get("recognition", "")
+                                       or theme_entry.get("prerequisite", "")
+                                       or theme_entry.get("definition", ""))
+            else:
+                selected_theme_text = theme_entry.get("definition", "")
+            if selected_theme_text:
+                theme_context = f"本步关联【{theme_cn}】：{selected_theme_text}"
 
         # 注入洞察
         insight = insights[i] if i < len(insights) else {}
@@ -261,11 +274,20 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
     # 提供精确的定性结论，两者冲突——保留新代码、删除旧代码。
 
     # 组装 storyboard
-    theme_defs_text = get_theme_definitions_text(effective, include_en=False)
+    # Header 只注入主主题及最多两个真正联动的协同主题，而且只保留定义；
+    # 关键手信号和结果由后续主主题锚点按需注入，不在这里重复整份知识库。
+    prompt_theme_keys = [main_theme_key] if main_theme_key else []
+    prompt_theme_keys.extend(k for k in synergy_keys if k not in prompt_theme_keys)
+    theme_def_lines = []
+    for key in prompt_theme_keys:
+        theme = get_theme(key)
+        if theme:
+            theme_def_lines.append(f"【{theme['cn']}】{theme.get('definition', '')}")
+    theme_defs_text = "\n".join(theme_def_lines)
     tactic_name = main_theme.get("cn", "战术练习")
-    if secondary_keys:
+    if synergy_keys:
         other_names = []
-        for k in secondary_keys:
+        for k in synergy_keys:
             t = get_theme(k)
             if t:
                 other_names.append(t["cn"])

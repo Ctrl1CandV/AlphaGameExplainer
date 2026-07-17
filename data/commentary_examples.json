@@ -1,0 +1,122 @@
+[
+  {
+    "id": "endgame-setup-direct",
+    "pipeline": "endgame",
+    "category_or_theme": "单车杀王",
+    "narrative_role": "setup",
+    "text": "主动方先用车划出控制线，再让王从另一侧靠近。这里不急着宣布结果，重点是看清双方分工：车负责限制活动范围，王负责夺取近身关键格，后面的收网才有稳定基础，也让观众知道当前任务是什么。",
+    "style_tags": ["计划先行", "因果清楚"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "endgame-setup-teaching",
+    "pipeline": "endgame",
+    "category_or_theme": "单兵残局",
+    "narrative_role": "setup",
+    "text": "开局先判断王能否站到兵的前方，而不是马上推动兵。王抢到关键位置，才能挡住对方王并给兵留出通路；这一步讲的是取胜任务和站位次序，不提前把升变当成既成事实，也不省略王兵配合的原因。",
+    "style_tags": ["教学口吻", "任务导向"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "endgame-climax-mechanism",
+    "pipeline": "endgame",
+    "category_or_theme": "单车杀王",
+    "narrative_role": "climax",
+    "text": "这一手真正改变的是控制边界：车封住横向退路，己方王又卡住近身逃格，对方王的选择因此同时减少。关键不在走法是否漂亮，而在两道限制恰好衔接，让原来的包围转成可以收官的局面。",
+    "style_tags": ["机理展开", "限制变化"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "endgame-climax-conversion",
+    "pipeline": "endgame",
+    "category_or_theme": "车兵对车",
+    "narrative_role": "climax",
+    "text": "转折来自防守结构被具体拆开：进攻方的车切断侧面联络，王和兵便能继续向前，防守王无法同时守住兵前和侧翼。把这个两难讲清楚，比笼统称赞关键手更能说明局面为何在此改变。",
+    "style_tags": ["对手困境", "结构转折"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "endgame-resolution-principle",
+    "pipeline": "endgame",
+    "category_or_theme": "单车杀王",
+    "narrative_role": "resolution",
+    "text": "最后一步只依据终态收束：控制线已经封住退路，己方王守住近身逃格，收网条件全部到位。可复用的原则是先限制、再靠王、最后完成配合，不能把尚未发生的结果提前说出来，收尾也要服从当前状态。",
+    "style_tags": ["终态收束", "原则提炼"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "endgame-resolution-pawn",
+    "pipeline": "endgame",
+    "category_or_theme": "单兵残局",
+    "narrative_role": "resolution",
+    "text": "局面走到这里，王已经完成护送和隔离任务，兵的推进结果才可以落定。总结时抓住次序即可：先争关键格，再用王挡住对手，最后推动兵兑现优势，不额外补充棋盘上没有发生的变化。",
+    "style_tags": ["次序总结", "保守陈述"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "puzzle-setup-fork",
+    "pipeline": "puzzle",
+    "category_or_theme": "fork",
+    "narrative_role": "setup",
+    "text": "先找同一枚棋子能否同时攻击两个目标，再核对落点是否安全。这里的铺垫不是泛讲局势，而是指出战术成立所需的具体条件；只有这些条件在当前事实中出现，后面的双重攻击才值得重点展开。",
+    "style_tags": ["识别信号", "条件检查"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "puzzle-setup-sacrifice",
+    "pipeline": "puzzle",
+    "category_or_theme": "sacrifice",
+    "narrative_role": "setup",
+    "text": "看到主动送子时，先别急着称赞精妙，而要检查它打开了哪条线路、引走了哪个防守子。开头只交代程序已经给出的战术问题和局面弱点，不自行添加对方可能选择的其他变化，并明确当前需要验证的交换目标。",
+    "style_tags": ["问题导向", "拒绝空赞"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "puzzle-climax-fork",
+    "pipeline": "puzzle",
+    "category_or_theme": "fork",
+    "narrative_role": "climax",
+    "text": "关键手落下后，同一枚棋子同时制造两项具体攻击，对方只能处理其中一处，这就是双重攻击的机理。解说要继续落到本题已验证的吃子或得子结果，而不是只说这一步很强、很精准。",
+    "style_tags": ["机理落地", "确定结果"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "puzzle-climax-sacrifice",
+    "pipeline": "puzzle",
+    "category_or_theme": "sacrifice",
+    "narrative_role": "climax",
+    "text": "这一步先付出子力，换来的不是抽象攻势，而是程序已经确认的线路打开、守子偏离或强制结果。讲清投入与回报之间的因果，再指出对方的确定困境，观众才能看懂弃子为何成立。",
+    "style_tags": ["投入回报", "困境解释"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "puzzle-resolution-fork",
+    "pipeline": "puzzle",
+    "category_or_theme": "fork",
+    "narrative_role": "resolution",
+    "text": "后续步骤只说明双重攻击如何兑现成题目给出的确定收益：对方处理一个目标，另一个目标随即失守。收束时提炼识别方法即可，不再发明新的攻击对象，也不把典型后果当成本局事实。",
+    "style_tags": ["结果兑现", "识别总结"],
+    "reviewed": true,
+    "source": "project-authored"
+  },
+  {
+    "id": "puzzle-resolution-sacrifice",
+    "pipeline": "puzzle",
+    "category_or_theme": "sacrifice",
+    "narrative_role": "resolution",
+    "text": "弃子的价值要由后续确定结果来证明：被打开的线路或被引离的防守子已经让战术兑现。总结只回扣这一条因果，并提醒先计算回报再投入子力，不把知识库中的常见结局硬套到当前题目。",
+    "style_tags": ["因果回扣", "原则提炼"],
+    "reviewed": true,
+    "source": "project-authored"
+  }
+]
