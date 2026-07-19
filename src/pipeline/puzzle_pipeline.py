@@ -12,6 +12,7 @@ from src.media.subtitle_gen import generate as gen_subtitles, build_cues
 from src.media.board_renderer import render_animated_frames
 from src.commentator.puzzle_commentary import generate_puzzle_structured
 from src.parser import parse_puzzle_input
+from src.infra.llm_backend import release_backend
 
 import chess
 import sys
@@ -59,6 +60,25 @@ def _run_puzzle_pipeline(input_text: str):
     except Exception as e:
         Logger.error(f"Puzzle解说生成失败: {e}")
         return None
+
+    # SPEC §8：内容级失败即舍弃——generator 标记 aborted 时放弃本片，走 return None 通道，
+    # 不产出废片。
+    if getattr(commentary, "aborted", False):
+        Logger.warn(
+            f"内容级失败，放弃本片生成（chunk {commentary.aborted_chunk}：{commentary.aborted_reason}）"
+        )
+        try:
+            release_backend()
+        except Exception:
+            pass
+        return None
+
+    # 解说生成完成后释放 LLM 后端（与 endgame_pipeline 对称），
+    # 为 TTS/Lc0 腾出显存。API happy path 是 no-op，本地降级时回收 14.5GB。
+    try:
+        release_backend()
+    except Exception:
+        pass
 
     # 纯模板生成预备着旁白
     prelude_narration = ""

@@ -12,7 +12,7 @@ from src.common import GeneratedCommentary, Logger
 from src.infra.llm_backend import create_backend_from_env
 from src.commentator.endgame_commentary import _generate_chunk_fallback, _split_fallback_text
 from src.commentator.text_filters import (
-    strip_thinking, reduce_cliches_puzzle, strip_coordinates,
+    strip_thinking, reduce_cliches_puzzle, strip_coordinates, digits_to_cn,
     dedupe_across_segments, expand_inline_brackets, safe_puzzle_seed_text,
 )
 from src.commentator.grammar import build_puzzle_chunk_grammar, PUZZLE_PLAIN_CN_GRAMMAR, build_retry_prompt
@@ -406,6 +406,11 @@ def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
 
     # 坐标兜底清洗
     fixed = strip_coordinates(fixed)
+
+    # 阿拉伯数字转中文：cnstring 在采样期已锁中文，但 API 模式 cnstring 降级，
+    # 模型可能输出数字；逐字转中文保语义，TTS/字幕不出现数字字符。
+    fixed = digits_to_cn(fixed)
+    fixed = fixed.replace("%", "").replace("％", "")
 
     # 删除标签标记泄漏（如【优势】【叉击】等被模型原样输出的内容）
     fixed = re.sub(r"[【][^】]{1,20}[】]", "", fixed)
@@ -838,30 +843,12 @@ def _build_puzzle_fallback_voiceover(text_output: str, fallback_parts: dict,
 def _puzzle_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:
     """generator 的 build_fallback_voiceover 回调适配器。
 
-    从 generate_puzzle_structured 的 fallback 块（行 2682-2706）提取。
+    **SPEC §8（2026-07-19）后已废弃**：内容级失败不再模板兜底，generator 改为
+    标记 aborted 并中止本片。本函数保留仅为维持 CommentaryConfig 回调签名兼容，
+    generator 不再调用它；若意外被调到，记录警告并返回空列表，绝不产出模板句。
     """
-    from src.common import StoryboardSegment, normalize_pacing
-    from src.commentator.text_filters import strip_thinking
-    from src.commentator.generator import MAX_CHARS
-
-    text_output = ""
-    try:
-        text_output = strip_thinking(_generate_chunk_fallback(json_prompt))
-    except Exception:
-        pass
-    fallback_parts = _split_fallback_text(text_output, chunk_nodes) if text_output else {}
-
-    chunk_segments = []
-    for node in chunk_nodes:
-        voice = _build_puzzle_fallback_voiceover(
-            text_output, fallback_parts, node, chunk_nodes, MAX_CHARS)
-        chunk_segments.append(StoryboardSegment(
-            id=node["id"],
-            sub_endgame="",
-            voiceover=voice,
-            pacing=normalize_pacing(node.get("suggested_pacing", "normal")),
-        ))
-    return chunk_segments
+    Logger.warn("_puzzle_fallback_wrapper 在 SPEC §8 后不应被调用（已废弃），返回空列表")
+    return []
 
 
 def _puzzle_chunk_prompt_wrapper(storyboard: dict):

@@ -90,7 +90,11 @@ def generate_commentary(storyboard: dict, backend, config: CommentaryConfig) -> 
 
         success = False
         err_msg = "首次尝试失败"
-        for attempt in range(MAX_RETRIES + 1):
+        # 内容重试预算：API 模式 backend 声明 content_retry_limit（默认2，含首试共3次），
+        # 本地模式无该属性时沿用模块常量 MAX_RETRIES（=1，含首试共2次）。
+        # REVIEW-002 澄清 #1：仅作用于主 chunk JSON 循环；其它调用点形态不变。
+        retry_budget = getattr(backend, "content_retry_limit", MAX_RETRIES)
+        for attempt in range(retry_budget + 1):
             if attempt == 0:
                 prompt = json_prompt
             else:
@@ -153,10 +157,18 @@ def generate_commentary(storyboard: dict, backend, config: CommentaryConfig) -> 
                         break
 
         if not success:
-            Logger.warn(f"  块{chunk_idx + 1}结构化生成失败，回退文本模式")
-            commentary.fallback_used = True
-            chunk_segments = config.build_fallback_voiceover(chunk_nodes, json_prompt)
-            all_segments.extend(chunk_segments)
+            # SPEC §8（内容级失败即舍弃，方案 A）：任一 chunk 重试耗尽仍无法通过 validator，
+            # 不再用模板句/安全句兜底进入产出，标记 aborted 中止本片生成。
+            # 传输级失败（API 挂）已由 FallbackBackend 在 backend.generate() 内即时切本地处理，
+            # 走到这里说明"无论 API 还是本地，内容经重试仍不合格"——按用户意图舍弃，不硬给答案。
+            commentary.aborted = True
+            commentary.aborted_chunk = chunk_idx + 1
+            commentary.aborted_reason = err_msg or "内容级失败"
+            Logger.warn(
+                f"  块{chunk_idx + 1}内容级失败（{err_msg}），重试耗尽仍不合格，"
+                f"按 SPEC §8 放弃本片生成（不模板兜底）"
+            )
+            return commentary
 
     commentary.segments = all_segments
 

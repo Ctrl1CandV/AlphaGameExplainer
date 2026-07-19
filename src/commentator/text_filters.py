@@ -226,6 +226,53 @@ _DIGIT_CN = {
     "5": "五", "6": "六", "7": "七", "8": "八", "9": "九",
 }
 
+# 连续阿拉伯数字匹配，供 digits_to_cn 整段读法转换
+_DIGITS_TO_CN = re.compile(r"[0-9]+")
+
+
+def digits_to_cn(text: str) -> str:
+    """把口播文本中的阿拉伯数字转中文，连续数字按数位整体读（33→三十三，5→五）。
+
+    用于残局/Puzzle voiceover 后处理：GBNF 的 cnstring 只在 Puzzle chunk 采样期锁中文，
+    残局 chunk 与 fallback 文本路径不锁，API 模式下模型偶尔输出"5个减到4个""33%"等
+    阿拉伯数字，TTS/字幕不能出现数字字符。
+
+    读法规则（覆盖 voiceover 实际场景：活动格数、百分比、倍数、年份/编号）：
+    - 1 位：直接读（5→五、9→九）
+    - 2 位：按中文数位（12→十二、33→三十三、10→十、20→二十）
+    - 3 位及以上：逐字读（2026→二零二六，符合年份/编号口播习惯；避免引入万/亿复杂度）
+
+    不处理小数点/百分号等附带符号，由调用方其他规则清理。
+    """
+    if not text:
+        return text
+    return _DIGITS_TO_CN.sub(_replace_digits, text)
+
+
+def _replace_digits(match) -> str:
+    """正则回调：把一段连续阿拉伯数字按上述读法转中文。"""
+    digits = match.group(0)
+    n = len(digits)
+    if n == 1:
+        return _DIGIT_CN[digits]
+    if n == 2:
+        return _two_digits_to_cn(digits)
+    # 3 位及以上逐字读（年份、编号、大数避免错误读法）
+    return "".join(_DIGIT_CN[ch] for ch in digits)
+
+
+def _two_digits_to_cn(two: str) -> str:
+    """两位数按中文数位读：10→十、20→二十、33→三十三、12→十二、05→零五。"""
+    tens, ones = two[0], two[1]
+    if tens == "0":
+        return ("零" if ones != "0" else "零零") + (_DIGIT_CN[ones] if ones != "0" else "")
+    if ones == "0":
+        # 整十：10→十（不读「一十」）、20→二十、90→九十
+        return ("十" if tens == "1" else _DIGIT_CN[tens] + "十")
+    if tens == "1":
+        return "十" + _DIGIT_CN[ones]
+    return _DIGIT_CN[tens] + "十" + _DIGIT_CN[ones]
+
 
 def expand_inline_brackets(text: str) -> str:
     """把括号内容融入句子，避免口播/字幕出现括号停顿。

@@ -8,7 +8,7 @@
 from src.common import GeneratedCommentary, Logger
 from src.infra.llm_backend import create_backend_from_env
 from src.commentator.text_filters import (
-    strip_thinking, reduce_cliches, strip_coordinates,
+    strip_thinking, reduce_cliches, strip_coordinates, digits_to_cn,
     dedupe_across_segments, clean_cjk_text, clean_summary_text, clean_opening_text,
     has_forbidden_chars,
 )
@@ -23,6 +23,14 @@ CHUNK_SIZE = 4
 MAX_CHARS = 1800
 MAX_RETRIES = 1
 MIN_VOICEOVER_LEN = 48
+
+# fallback 安全兜底句：纯中文、≥48 字、不含将杀/将军/吃子/均势等会触发 validator 的断言。
+# 用于 fallback 路径所有非首节点 + transition_summary 清洗后仍非法时的最终兜底。
+# 长度刻意超过 MIN_VOICEOVER_LEN，避免触发 validate_single_segment 的"过短"校验。
+SAFE_FALLBACK_VOICEOVER = (
+    "这一步解说未能成功生成，但局面上强方继续稳步推进，保持已有的优势与节奏，"
+    "为后续收尾做准备，整体走势没有发生变化。"
+)
 
 _EXAMPLE_BY_ENDGAME = {
     "单车杀王": (
@@ -526,6 +534,12 @@ def _auto_fix_voiceover(text: str, node: dict) -> str:
 
     # 坐标兜底：清除 prompt 未能压住的泄漏坐标（须在依赖坐标的"叫杀"规则之后）
     fixed = strip_coordinates(fixed)
+
+    # 阿拉伯数字转中文：残局 chunk grammar 用通用 string 不锁中文，API 模式下
+    # 模型偶尔输出"5个减到4个""33%"，TTS/字幕不能出现数字字符。连续数字按数位读
+    # （33→三十三），保留语义；百分号一并清除（"三十三%"→"三十三"）。
+    fixed = digits_to_cn(fixed)
+    fixed = fixed.replace("%", "").replace("％", "")
 
     fixed = re.sub(r"[，,]{2,}", "，", fixed)
     fixed = re.sub(r"。{2,}", "。", fixed)
@@ -1093,41 +1107,62 @@ def _build_endgame_fallback_voiceover(text_output: str, fallback_parts: dict, no
 
     从 generate_structured 提取。优先用 split 切出的对应步骤内容；切不出时，
     第一个节点用整段输出截断兜底，其余节点用 transition_summary 或步骤标号兜底。
+
+    API 模式安全门：text_output 经清洗后仍含英文/数字（典型为原始 JSON 片段或坐标），
+    视为非法输入，回退到 transition_summary 安全兜底，禁止垃圾文本进入 TTS。
     """
     nid = node["id"]
+    # 安全兜底：纯中文、≥48 字、不含数字/坐标/将杀断言，过 validate_single_segment 长度校验。
+    # transition_summary 是 storyboard 上游字段，可能含原始坐标（如「白王d4→c5」），
+    # 作为安全兜底返回前必须先清洗，否则坐标直接进入 TTS。
+    safe_default_raw = _sanitize_fallback_text(node.get("transition_summary", ""))
+    if safe_default_raw and not has_forbidden_chars(safe_default_raw) and len(safe_default_raw) >= MIN_VOICEOVER_LEN:
+        safe_default = safe_default_raw
+    else:
+        safe_default = SAFE_FALLBACK_VOICEOVER
+
     if nid in fallback_parts:
-        return fallback_parts[nid]
-    if text_output:
+        candidate = fallback_parts[nid]
+        # split 片段经清洗后仍含禁用字符，视为非法，回安全兜底
+        if candidate and not has_forbidden_chars(candidate):
+            return candidate
+        return safe_default
+
+    cleaned = _sanitize_fallback_text(text_output) if text_output else ""
+    if cleaned and not has_forbidden_chars(cleaned):
         # 只有该 chunk 的第一个节点用整段兜底，避免多节点复制同一段
-        return text_output[:MAX_CHARS] if nid == chunk_nodes[0]["id"] else node.get("transition_summary", f"第{nid}步")
-    return node.get("transition_summary", f"第{nid}步（解说生成失败）")
+        return cleaned[:MAX_CHARS] if nid == chunk_nodes[0]["id"] else safe_default
+    return safe_default
+
+
+def _sanitize_fallback_text(text: str) -> str:
+    """对 fallback 文本模式输出做与主路径等价的清洗：去坐标、数字转中文。
+
+    fallback 路径不经过 _auto_fix_voiceover（它针对 JSON segment），故单独清洗，
+    保证 API 在 JSON 失败后走文本模式时，输出与主路径同样干净。
+    """
+    if not text:
+        return ""
+    fixed = strip_coordinates(text)
+    fixed = digits_to_cn(fixed)
+    fixed = fixed.replace("%", "").replace("％", "")
+    # 清除箭头/分号/顿点残留：坐标被 strip 后常留下「白王→；白象、」骨架，
+    # 这些符号无口播意义，连同多余标点一起收敛。
+    fixed = fixed.replace("→", "，").replace("；", "，")
+    fixed = re.sub(r"[、，][、，]+", "，", fixed)
+    fixed = re.sub(r"^[、，]+|[、，]+$", "", fixed)
+    return fixed
 
 
 def _endgame_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:
     """generator 的 build_fallback_voiceover 回调适配器。
 
-    从 generate_structured 的 fallback 块（行 1608-1634）提取。
-    逐节点构造 StoryboardSegment。
+    **SPEC §8（2026-07-19）后已废弃**：内容级失败不再模板兜底，generator 改为
+    标记 aborted 并中止本片。本函数保留仅为维持 CommentaryConfig 回调签名兼容，
+    generator 不再调用它；若意外被调到，记录警告并返回空列表，绝不产出模板句。
     """
-    from src.common import StoryboardSegment, normalize_pacing
-    from src.commentator.text_filters import strip_thinking
-    text_output = ""
-    try:
-        text_output = strip_thinking(_generate_chunk_fallback(json_prompt))
-    except Exception:
-        pass
-    fallback_parts = _split_fallback_text(text_output, chunk_nodes) if text_output else {}
-
-    chunk_segments = []
-    for node in chunk_nodes:
-        voice = _build_endgame_fallback_voiceover(text_output, fallback_parts, node, chunk_nodes)
-        chunk_segments.append(StoryboardSegment(
-            id=node["id"],
-            sub_endgame=node.get("sub_endgame_name", ""),
-            voiceover=voice,
-            pacing=normalize_pacing(node.get("suggested_pacing", "normal")),
-        ))
-    return chunk_segments
+    Logger.warn("_endgame_fallback_wrapper 在 SPEC §8 后不应被调用（已废弃），返回空列表")
+    return []
 
 
 def _select_endgame_example(storyboard: dict, chunk_nodes: list, chunk_idx: int) -> str:

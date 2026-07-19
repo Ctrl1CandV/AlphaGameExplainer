@@ -18,7 +18,7 @@
 - **Playbook 进化 / QLoRA 阶段性固化**（**已废弃，ADR-014**）：曾计划人工门控解说模式库+QLoRA固化。废弃——重且有把错误模式固化进context/权重的风险，性价比低。
 - **提示词工程深化 / KB知识立体化利用**（**首要主线，ADR-017**）：在上游信息已充分为真的前提下，深化利用KB（json）知识构造提示词——负面约束注入（把套话词表写进prompt禁用清单）+ KB知识按局面立体化组织 + 可选全局润色Pass。无大结构改动，是当前最高ROI优化。
 - **知识库扩容 + 优质范例库**（**必须做，ADR-018**）：扩容 endgame_kb/puzzle_themes，并新建解说范例库锚定「怎么说」的风格（非内容，区别于已废弃ADR-011）。范例经爬取 + 强模型API（Claude Opus 4.8/GPT-5.6）离线生成，非人工手写。
-- **云端 API 并行生成后端**（**方向确定，后续深挖，ADR-019**）：保留本地llama.cpp形式，引入云端API（DeepSeek V4/GLM-4.7）作为另一种可选解说生成后端。JSON Schema strict 替代 GBNF 结构约束，纯中文降级为prompt+后处理。本阶段不深挖。
+- **云端 API 并行生成后端**（**首要实施，ADR-019**）：DeepSeek API 为主 + 本地 llama.cpp 兜底（单次调用失败即切本地，带连续失败熔断）。客户端用 OpenAI SDK 指向 OpenAI 兼容端点 `https://api.deepseek.com`（非 /anthropic、非原生 requests），模型id/base_url 经 env 可配置，默认 `deepseek-v4-flash`。**关键约束：HTTP API 无法用 GBNF，Puzzle 采样期 `cnstring` 中文锁定丢失，纯中文/JSON 结构完全落到既有 validator+retry+后处理**，须先冒烟验证通过率再全量接入。方案见 docs/plans/PLAN-002。
 - **多战略计划讲解**（**长期方向，非当前主线**）：给定中局局面，引擎产出多条导向不同终局的走法分支，事后命名对比讲解。不追求算法找到「真正的人类战略意图」，只追求「不同分支→不同终局」可量化验证。
 - **终局差异化gate / 事后命名 / 融入式解说**（**长期方向**）：多战略计划链路的子组件，随 ADR-006~009 一起暂缓。
 - **项目结构重构**（**已完成，ADR-016**）：按管线分层将 commentator.py(2752行)/storyboard.py(2078行) 拆分为 8 个子包（infra/chess_utils/analysis/solver/storyboard/commentator/pipeline/media），消除12+处函数级重复，单向依赖。重构不改运行时行为，用回归样本验证逐段语义等价。
@@ -40,7 +40,7 @@
 ## 硬约束
 
 - **硬件**：4070 Ti Super 16G 显存。Qwen3.6-27B 4-bit（~14.5GB）几乎占满显存，**无法与 Lc0 BT3（~2.6GB）或 ChatTTS（~2GB）同时驻留**，必须串行加载/释放（管线已用 `release_backend()` 在 TTS 前释放 LLM）。多战略计划链路（ADR-007 需 Lc0）与 LLM 生成需分阶段错峰用显存。
-- **n_ctx=4096**：受 Qwen3.6-27B 4-bit 占满显存后 KV cache 余量所限的生成上下文窗口上限，prompt 需严格预算控制。加大 n_ctx 需以更激进量化（如 IQ3）换取显存，属质量/长度权衡。
+- **n_ctx=4096**：本地 llama.cpp 当前默认生成上下文窗口，受 Qwen3.6-27B 4-bit 占满显存后 KV cache 余量所限，可经 `LLAMA_CPP_N_CTX` 覆盖。非硬产品上限；prompt 仍需预算控制。切到 API 后端后此约束不适用于 API 路径（DeepSeek 128k 窗口），仅本地兜底路径受限。
 - **讲解词中文纯净化**：voiceover 禁止英文/数字/坐标/Markdown。已有 `_strip_coordinates` / `_clean_cjk_text` 兜底。
 - **Syzygy 表库覆盖 3-6 子**：超出范围的残局走 Stockfish 求解。
 
@@ -61,75 +61,33 @@
 
 **第三阶段已启动**（2026-07-16，解说生成层优化）：上游真值已稳、Planner已减负，瓶颈转移到"把正确事实转化为优质解说词"。本阶段决策：
 - 废弃 ADR-011（证据路径）/013（BoN选优）/014（Playbook进化）——边际收益低或有固化错误风险
-- ADR-017 提示词工程与KB利用深化=首要主线（负面约束注入 + KB知识立体化 + 可选润色Pass）
-- ADR-018 知识库扩容 + 范例库建设=必须做（爬取 + 强模型API离线生成）
-- ADR-019 云端API并行生成后端=方向确定、后续深挖
+- ADR-017 提示词工程与KB利用深化=首要主线（E1 主动约束 + E2 选择性知识注入，已落地）
+- ADR-018 范例库=最小人工审核范例集试验，默认关闭，待消融验证
 
-**工具链**：`tools/quality_audit/` 下四阶段质量审计工具（test 分支）。
+**Phase 3 首轮基线 + reviewer 复盘（2026-07-17）**：`data/quality_benchmark_phase3/` 69 样本（none/4096），58 SUCCESS / 11 FALLBACK。reviewer 路径 B 判定不通过——3 个 Endgame 原始 JSON 泄漏进配音、8 个 Puzzle 通用 fallback 无区分度、审计指标失真（forbidden 69/69 误报、Puzzle 套话漏检）、逐调用可观测性缺失。二次方案 `docs/plans/PLAN-001-Phase3解说质量修复与验证闭环.md`（草案）。
+
+**当前首要实施=API 后端（ADR-019 提前动工）**：上司已批准 API 方案与风险。`docs/plans/PLAN-002-DeepSeek-API为主本地兜底后端.md`（草案）——DeepSeek API 为主 + 本地 llama.cpp 单次调用兜底（2 次重试 + 连续失败熔断），模型 id/base_url env 可配置。**排序：PLAN-002 先行，PLAN-001 在新后端下再推进**。PLAN-002 阶段 0 为强制冒烟闸门：实测去 GBNF 后中文纯净率/JSON 通过率，不达标不进入全量接入。
+
+**工具链**：`tools/quality_audit/` 质量审计工具（默认流程已取消 AI 标注，仅生成 + 人工查看）。
 
 ## 项目结构
 
-```
-AlphaGameExplainer/
-├── data/
-│   ├── endgame_kb.json           # 残局知识库（6类：KRvK/KQvK/KBBvK/KBNvK/KPvK/KRPvKR）
-│   ├── puzzle_themes.json        # Puzzle 战术标签定义
-│   └── quality_benchmark/        # 质量审计基准（txt + annotation.json + 报告）
-├── src/
-│   ├── parser.py                 # PGN/FEN/Puzzle 输入解析（Lichess约定）
-│   ├── common.py                 # 公共数据结构/常量
-│   ├── infra/                    # 基础设施层
-│   │   ├── llm_backend.py        # llama.cpp 后端 + token 统计
-│   │   └── logger.py             # 日志
-│   ├── chess_utils/              # 棋具工具层（消除函数级重复）
-│   │   ├── material.py           # 子力盘点/吃子判定
-│   │   ├── position.py           # 局面/坐标工具
-│   │   └── tactic.py             # 战术判定
-│   ├── analysis/                 # 棋理分析层（上游优化重点）
-│   │   ├── insight_extractor.py  # 棋理事实提取 + Narrative Planner _compute_tension
-│   │   ├── endgame_kb.py         # 残局 KB 匹配（按子力签名）
-│   │   └── themes_kb.py          # Puzzle 主题知识库
-│   ├── solver/                   # 引擎求解层
-│   │   ├── stockfish_analyzer.py # 引擎分析（单线求解，三阶段：mate/fast/heavy）
-│   │   └── tablebase.py          # Syzygy 表库封装
-│   ├── storyboard/               # 分镜构建层
-│   │   ├── compressor.py         # 走法压缩（语义边界）
-│   │   ├── key_move_locator.py   # 关键手定位器（含 _solver_fallback 系列函数）
-│   │   ├── endgame_builder.py    # 残局分镜 + Narrative Planner _assign_narrative_role
-│   │   ├── puzzle_builder.py     # Puzzle 分镜
-│   │   └── prelude.py            # 前奏段处理
-│   ├── commentator/              # 解说生成层（残局+Puzzle双链路，当前单Pass flat generation）
-│   │   ├── endgame_commentary.py # 残局解说生成（Narrative Planner prompt注入）
-│   │   ├── puzzle_commentary.py  # Puzzle 解说生成
-│   │   ├── generator.py          # 生成主流程
-│   │   ├── validators.py         # 后验硬事实核查
-│   │   ├── text_filters.py       # 讲解词中文纯净化（_strip_coordinates/_clean_cjk_text）
-│   │   ├── grammar.py            # GBNF 语法约束
-│   │   └── json_utils.py         # JSON 解析工具
-│   ├── pipeline/                 # 主管线层
-│   │   ├── endgame_pipeline.py   # 残局管线（5步）
-│   │   └── puzzle_pipeline.py    # Puzzle 管线（4步）
-│   └── media/                    # 媒体合成层
-│       ├── board_renderer.py     # 棋盘动画渲染
-│       ├── tts_engine.py         # 语音合成
-│       ├── subtitle_gen.py       # 字幕生成
-│       └── video_composer.py     # 视频合成
-├── syzygy/                       # Syzygy 表库（3-6 子）
-├── tools/
-│   ├── quality_audit/            # 质量审计工具套件（fetch/generate/annotate/report）
-│   └── lc0/                      # Lc0 v0.32.1 CUDA12 + BT3 权重（多战略计划方向，暂不部署）
-├── main.py                       # CLI 入口（残局/Puzzle 双模式，--text/--puzzle）
-└── docs/
-    ├── SPEC.md                   # 当前执行方案
-    ├── REFACTORING_PLAN.md       # 全项目结构重构详细设计方案
-    ├── Phase0质量审计报告.md      # Phase 0 审计结论
-    └── adr/                      # 架构决策记录（ADR-006~019）
-```
+按管线单向分层（ADR-016），详细目录读代码为准，不在此复制。核心层：
+- `src/infra/`：`llm_backend.py`(后端抽象+单例+release)、`logger.py`
+- `src/chess_utils/`：material/position/tactic（消除函数级重复）
+- `src/analysis/`：`insight_extractor.py`(棋理事实+_compute_tension)、`endgame_kb.py`、`themes_kb.py`
+- `src/solver/`：`stockfish_analyzer.py`(单线三阶段)、`tablebase.py`(Syzygy)
+- `src/storyboard/`：compressor/`key_move_locator.py`/`endgame_builder.py`(_assign_narrative_role)/puzzle_builder/prelude
+- `src/commentator/`：endgame/puzzle 解说、`generator.py`(主流程)、`validators.py`、`text_filters.py`、`grammar.py`(GBNF)、`json_utils.py`
+- `src/pipeline/`：endgame(5步)/puzzle(4步) 管线；`src/media/`：渲染/TTS/字幕/合成
+- `data/`(endgame_kb/puzzle_themes/commentary_examples/quality_benchmark_phaseN)、`syzygy/`、`tools/quality_audit/`、`tools/lc0/`、`main.py`、`docs/`(SPEC/plans/adr)
 
 ## 文档与记忆系统
 
+- 四层文档职责：CLAUDE.md=长期领域语言/架构决策索引/硬约束/当前状态；docs/adr/=决策论证；docs/SPEC.md=行为契约+高层状态（不存详细施工步骤）；docs/plans/PLAN-XXX=详细实施路线与全过程证据。
 - **CLAUDE.md**（本文件）：项目当前状态。每次会话开始先读。
-- **docs/SPEC.md**：当前执行方案（第三阶段：解说生成层优化）。
+- **docs/SPEC.md**：行为契约+高层状态；当前指针指向 PLAN-002（API 后端）。
+- **docs/plans/**：PLAN-001（Phase 3 质量修复，reviewer 二次方案，待裁决）、PLAN-002（DeepSeek API 为主本地兜底后端，草案，首要实施）。
 - **docs/REFACTORING_PLAN.md**：全项目结构重构详细设计方案（ADR-016，已实施）。
 - **docs/Phase2 Review Findings.md**：Phase 2 代码审查发现（4个问题已全部修复）。
 - **docs/adr/ADR-XXX.md**：架构决策完整论证（注意状态字段：已采纳/暂缓/已废弃）。

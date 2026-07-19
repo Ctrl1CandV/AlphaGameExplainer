@@ -67,6 +67,9 @@ class GeneratedCommentary:
     chunks_succeeded: int = 0
     retries_total: int = 0
     fallback_used: bool = False         # 是否回退到了纯文本模式
+    aborted: bool = False               # 内容级失败舍弃标记（SPEC §8）：任一 chunk 重试耗尽仍不合格时置 True，pipeline 检测后放弃本片
+    aborted_chunk: int = 0              # 触发舍弃的 chunk 序号（诊断用，1-based）
+    aborted_reason: str = ""            # 触发舍弃的最后一条校验错误（诊断用）
 
 @dataclass
 class PuzzleData:

@@ -12,4 +12,6 @@ output/
 *.log
 *test*
 *quality_benchmark*
+# 冒烟/回归产物（含真实 API 调用记录，不入库）
+tools/quality_audit/*result*.json
 docs/

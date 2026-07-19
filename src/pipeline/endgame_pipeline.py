@@ -70,6 +70,20 @@ def _run_pipeline(input_text: str):
         Logger.warn(f"结构化生成失败")
         sys.exit(1)
 
+    # SPEC §8：内容级失败即舍弃——generator 标记 aborted 时放弃本片，走 return None 通道
+    # （与上游 if not analyzed_moves: return None 一致），不产出废片。
+    if getattr(commentary, "aborted", False):
+        Logger.warn(
+            f"内容级失败，放弃本片生成（chunk {commentary.aborted_chunk}：{commentary.aborted_reason}）"
+        )
+        try:
+            release_backend()
+            if tablebase_solver:
+                tablebase_solver.close()
+        except Exception:
+            pass
+        return None
+
     try:
         release_backend()
         if tablebase_solver:
