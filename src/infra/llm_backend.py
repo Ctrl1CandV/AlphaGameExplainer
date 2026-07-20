@@ -1,21 +1,11 @@
-"""LLM 后端封装（llama.cpp）。
-
-从原 src/llm_backend.py 迁移。改动：
-- 删除 LLMBackend ABC 基类（只有一个实现，YAGNI）
-- Logger 从 infra.logger 导入（不经过 common）
-- LLM_BACKEND_CACHE 全局单例保留（显存约束：4070 Ti Super 16G，模型 ~14.5GB，不能重复加载）
-- SYSTEM_MESSAGE 提取为模块常量，供 DeepSeekBackend 共享（PLAN-002 ADR-019）
-- create_backend_from_env 按 LLM_BACKEND 分派：缺省 llama_cpp（行为不变），deepseek 见 DeepSeekBackend
-"""
 from src.infra.logger import Logger
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-
-# 共享 system message：两后端共用同一事实边界（ADR-015）。
-# 提取自原 LlamaCppBackend.generate 内联字符串，逐字节等价，保证本地行为不变。
+# 共享system message：两后端共用同一事实边界
+# 提取自原LlamaCppBackend.generate内联字符串，逐字节等价，保证本地行为不变
 SYSTEM_MESSAGE = (
     "你是一位国际象棋教练。程序标注的关键手、状态和确定性棋理事实是当前棋局的唯一真值；"
     "引擎数据等量化信息只作参考，不得据此改写状态。未标注重要程度时，也只能依据已提供事实组织详略。"
@@ -25,9 +15,8 @@ SYSTEM_MESSAGE = (
     "不要复述提示词。"
 )
 
-
 class LlamaCppBackend:
-    """llama.cpp 后端，单例缓存在模块级 LLM_BACKEND_CACHE 中。"""
+    """ llama.cpp后端，单例缓存在模块级LLM_BACKEND_CACHE中 """
 
     def __init__(
         self,
@@ -61,7 +50,6 @@ class LlamaCppBackend:
         Logger.info(f"加载 LLM 模型: {os.path.basename(self.model_path)}")
 
         from llama_cpp import Llama
-
         self._llm = Llama(
             model_path=self.model_path,
             n_gpu_layers=self.n_gpu_layers,
@@ -122,44 +110,40 @@ class LlamaCppBackend:
     def name(self) -> str:
         return self.__class__.__name__
 
-    # generator 读取此属性决定主 chunk JSON 的内容重试预算。
-    # 本地模式沿用既有 MAX_RETRIES（含首试 2 次），与 generator.py 常量一致。
+    # generator读取此属性决定主chunk JSON的内容重试预算，本地模式沿用既有MAX_RETRIES
     content_retry_limit = 1
 
 
 class DeepSeekBackend:
-    """DeepSeek API 后端（OpenAI SDK 兼容），实现 generate(prompt, grammar)->str 契约。
+    """
+    DeepSeek API后端（OpenAI SDK兼容），实现generate(prompt, grammar)->str契约
 
-    职责（PLAN-002 行为规约）：
-    - 只负责一次 HTTP 传输 + 响应提取 + 输出模式适配，不判内容/schema/事实合法性。
-    - SDK max_retries=0，一次 generate() 最多一个 API HTTP 请求。
-    - 只把异常/不可用状态/None/空白/null/undefined 判为 ""（传输级失败）；
-      任何其他非空内容原样返回，由 generator 的 parser/validator 判定。
-    - grammar 经 GrammarConstraint.output_mode 标签映射 response_format：
+    职责：
+    - 只负责一次HTTP 传输 + 响应提取 + 输出模式适配，不判内容/schema/事实合法性
+    - SDK max_retries=0，一次generate()最多一个API HTTP请求
+    - 只把异常/不可用状态/None/空白/null/undefined判为""（传输级失败）；
+      任何其他非空内容原样返回，由generator的parser/validator判定
+    - grammar GrammarConstraint.output_mode标签映射response_format：
       JSON → json_object；PURE_CN → 不设 response_format，追加纯中文格式约束；
-      None → 普通文本；未知非空 grammar → fail closed（返回 ""，由 FallbackBackend 兜底本地）。
+      None → 普通文本；未知非空 grammar → fail closed
 
-    content_retry_limit=2：API 模式内容重试两次（含首试共 3 次生成），由 generator 读取。
+    content_retry_limit=2：API模式内容重试两次，由generator读取
     """
 
-    # 推理模型：reasoning_tokens 在 content 之前消耗，本地 1400 全被推理吃光（阶段0实测）。
-    # DeepSeek flash 极便宜，按用户授权放宽到阶段0验证值(8192)的4倍。
+    # 推理模型：reasoning_tokens在content之前消耗，本地1400全被推理吃光
     DEFAULT_MAX_TOKENS = 32768
 
     def __init__(self):
-        api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        self.api_key = api_key
+        self.api_key = os.getenv("DEEPSEEK_API_KEY", "")
         self.base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-        # 阶段0探测确认 deepseek-v4-flash 有效（ADR-019 可靠性更正：经实测后方可作默认）
         self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
         self.timeout = float(os.getenv("LLM_API_TIMEOUT", "120"))
         self.max_tokens = int(os.getenv("DEEPSEEK_MAX_TOKENS", str(self.DEFAULT_MAX_TOKENS)))
         self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.2"))
         self._client = None
-        # 永久失败标记：缺 key 或鉴权 401/403 时置 True，FallbackBackend 据此立即开路。
-        # 缺 key 在构造期即可判定（PLAN-002 行为规约 §6）。
-        self.is_permanently_broken = not bool(api_key)
-        # 可观测统计：供冒烟/回归记录 token 开销与 finish_reason（PLAN-002 §13/REV-003）
+        # 永久失败标记：缺ke或鉴权401/403时置True，FallbackBackend据此立即开路
+        self.is_permanently_broken = not bool(self.api_key)
+        # 可观测统计：供冒烟/回归记录token开销与finish_reason
         self.http_call_count = 0
         self.last_finish_reason = None
         self.last_reasoning_tokens = None
@@ -177,7 +161,7 @@ class DeepSeekBackend:
             api_key=self.api_key,
             base_url=self.base_url,
             timeout=self.timeout,
-            max_retries=0,  # PLAN-002 行为规约 §7：传输层不叠乘，由 generator 业务重试
+            max_retries=0
         )
 
     def generate(self, prompt: str, grammar: str = None) -> str:
@@ -229,7 +213,7 @@ class DeepSeekBackend:
         return text
 
     def _record_usage(self, resp) -> None:
-        """从响应提取 finish_reason 与 usage，供观测 max_tokens 是否截断。失败安全。"""
+        """ 从响应提取finish_reason与 usage，供观测max_tokens是否截断，失败安全 """
         try:
             self.last_finish_reason = getattr(resp.choices[0], "finish_reason", None)
         except Exception:
@@ -244,15 +228,15 @@ class DeepSeekBackend:
 
     @staticmethod
     def _is_auth_error(e) -> bool:
-        """识别 401/403 鉴权失败（OpenAI SDK 的 APIStatusError 带 status_code）。"""
+        """ 识别401/403鉴权失败 """
         status = getattr(e, "status_code", None)
         return status in (401, 403)
 
     def _resolve_output_mode(self, grammar) -> str:
-        """从 grammar 解析输出模式。返回 'json' / 'pure_cn' / 'text' / 'unknown'。"""
+        """ 从grammar解析输出模式，返回'json'/'pure_cn'/'text'/'unknown' """
         if not grammar:
             return "text"
-        # GrammarConstraint 带 output_mode 标签（PLAN-002 行为规约 §11）
+        # GrammarConstraint带output_mode标签
         output_mode = getattr(grammar, "output_mode", None)
         if output_mode is not None:
             from src.commentator.grammar import OutputMode
@@ -261,11 +245,10 @@ class DeepSeekBackend:
             if output_mode == OutputMode.PURE_CN:
                 return "pure_cn"
             return "unknown"
-        # 兼容兜底：裸 str（理论上生产路径不应出现，grammar 构建器都返回 GrammarConstraint）
         return "unknown"
 
     def _build_messages(self, prompt: str, mode: str) -> list:
-        """构造 messages。PURE_CN 追加格式约束（不改变事实载荷）。"""
+        """ 构造messages，PURE_CN追加格式约束 """
         system = SYSTEM_MESSAGE
         if mode == "pure_cn":
             system = (
@@ -279,7 +262,7 @@ class DeepSeekBackend:
 
     @staticmethod
     def _extract_content(resp) -> str:
-        """从 SDK 响应提取 content。任何结构异常返回 None（视为传输级失败）。"""
+        """ 从SDK响应提取content。任何结构异常返回None """
         try:
             choice = resp.choices[0]
             return choice.message.content
@@ -288,15 +271,13 @@ class DeepSeekBackend:
 
     @staticmethod
     def _sanitize_err(e) -> str:
-        """脱敏异常文本：剔除 key 与 Authorization 头，避免凭据/隐私入日志。
-
-        先脱敏再截断，避免把脱敏后的占位符切掉。
+        """
+        脱敏异常文本：剔除key与Authorization头，避免凭据/隐私入日志
+        先脱敏再截断，避免把脱敏后的占位符切掉
         """
         import re as _re
         msg = str(e)
-        # DeepSeek/OpenAI key 形如 sk-xxxx
         msg = _re.sub(r"sk-[A-Za-z0-9]{4,}", "sk-***", msg)
-        # Authorization 头（Bearer token）
         msg = _re.sub(r"Bearer\s+[A-Za-z0-9_\-]+", "Bearer ***", msg)
         return msg[:200]
 
@@ -318,27 +299,26 @@ class DeepSeekBackend:
     def name(self) -> str:
         return self.__class__.__name__
 
-    # API 模式内容重试预算：含首试共 3 次生成（PLAN-002 行为规约 §2/§7）
+    # API模式内容重试预算：含首试共3次生成
     content_retry_limit = 2
 
-
 class FallbackBackend:
-    """主后端失败时按调用即时降级到次后端，带运行级传输熔断。
+    """
+    主后端失败时按调用即时降级到次后端，带运行级传输熔断
+    职责：
+    - 主=API、次=本地懒加载；API传输级失败（返回空串）→ 本次调用立即走本地
+    - 内容/schema/事实不合格不切本地：API返回非空内容（即便校验失败）也算成功，
+      重置失败计数，由generator的retry/repair/fallback链处理
+    - 连续传输失败达阈值后熔断开路，本次运行余下调用直接走本地
+    - 缺key/鉴权失败视为永久错误，立即开路不重复请求
+    - 双后端都失败返回""，交既有generator/fallback链处理，不承诺必然非空
 
-    职责（PLAN-002 行为规约 §3-§7）：
-    - 主=API、次=本地懒加载；API 传输级失败（返回空串）→ 本次调用立即走本地。
-    - 内容/schema/事实不合格不切本地：API 返回非空内容（即便校验失败）也算成功，
-      重置失败计数，由 generator 的 retry/repair/fallback 链处理。
-    - 连续传输失败达阈值（默认 3 次）后熔断开路，本次运行余下调用直接走本地。
-    - 缺 key / 鉴权失败视为永久错误，立即开路不重复请求。
-    - 双后端都失败返回 ""，交既有 generator/fallback 链处理，不承诺必然非空。
-
-    次后端通过 local_factory 延迟创建，仅在首次降级时加载本地模型（显存约束）。
+    次后端通过local_factory延迟创建，仅在首次降级时加载本地模型
     """
 
     def __init__(self, primary, local_factory, failure_threshold: int = None):
         self._primary = primary
-        self._local_factory = local_factory  # callable() -> LlamaCppBackend，延迟创建
+        self._local_factory = local_factory
         self._local = None
         self._failure_count = 0
         self._circuit_open = False
@@ -349,14 +329,13 @@ class FallbackBackend:
         )
 
     def _get_local(self):
-        """懒加载本地后端。仅在首次降级时构造，避免 happy path 占显存。"""
+        """ 懒加载本地后端。仅在首次降级时构造，避免happy path占显存 """
         if self._local is None:
             self._local = self._local_factory()
         return self._local
 
     def generate(self, prompt: str, grammar: str = None) -> str:
-        # 同步主后端的永久失败标记（缺 key / 鉴权 401/403 / 构造期失败）：
-        # 一旦主后端标记，立即开路，本次运行余下调用直接走本地（PLAN-002 §6）
+        # 同步主后端的永久失败标记，一旦主后端标记，立即开路，本次运行余下调用直接走本地
         if getattr(self._primary, "is_permanently_broken", False):
             self._permanent_failure = True
             self._circuit_open = True

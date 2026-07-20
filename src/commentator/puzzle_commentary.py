@@ -1,39 +1,31 @@
-"""Puzzle 战术讲解解说生成（专用函数集合）。
-
-从 commentator.py 拆分而来。本模块只含 Puzzle 链路特有的逻辑：
-分层讲解指令、JSON header 构建、双关键点骨架/评分/模板/润色、
-关键手诊断与强约束执行、自动修复与开场白模板。
-
-通用工具（反套话、坐标清洗、括号展开、JSON 解析、校验器）已迁出到
-text_filters / grammar / validators / json_utils，本模块通过公共名引用。
 """
+Puzzle战术讲解解说生成
 
-from src.common import GeneratedCommentary, Logger
-from src.infra.llm_backend import create_backend_from_env
-from src.commentator.endgame_commentary import _generate_chunk_fallback, _split_fallback_text
+从commentator.py拆分而来。本模块只含Puzzle链路特有的逻辑：
+分层讲解指令、JSON header 构建、双关键点骨架/评分/模板/润色、关键手诊断与强约束执行、自动修复与开场白模板
+通用工具已迁出到text_filters / grammar / validators / json_utils，本模块通过公共名引用
+"""
 from src.commentator.text_filters import (
     strip_thinking, reduce_cliches_puzzle, strip_coordinates, digits_to_cn,
     dedupe_across_segments, expand_inline_brackets, safe_puzzle_seed_text,
 )
 from src.commentator.grammar import build_puzzle_chunk_grammar, PUZZLE_PLAIN_CN_GRAMMAR, build_retry_prompt
-from src.commentator.validators import (
-    validate_puzzle_chunk, validate_puzzle_voiceover_surface,
-)
-from src.commentator.json_utils import parse_single_segment, INVALID_JSON_SENTINEL
+from src.commentator.validators import validate_puzzle_chunk, validate_puzzle_voiceover_surface
 from src.commentator.examples import commentary_example_mode, get_commentary_example
+from src.commentator.json_utils import parse_single_segment, INVALID_JSON_SENTINEL
+from src.infra.llm_backend import create_backend_from_env
+from src.common import GeneratedCommentary, Logger
 from src.analysis.themes_kb import get_theme
 from typing import Optional
-import re
 import hashlib
+import re
 
-
-# ============================================================
-#  Puzzle 战术讲解解说生成（新增，不改原有函数）
-# ============================================================
-
+# Puzzle战术讲解解说生成
 def _get_depth_instruction(rating: int) -> str:
-    """三档分层（决策二）：<1500 / 1500-2200 / >2200。
-    三档在内容焦点、句式约束、字数预算、可讲深度上做硬区分，避免趋同。"""
+    """
+    三档分层：<1500 / 1500-2200 / >2200
+    三档在内容焦点、句式约束、字数预算、可讲深度上做硬区分，避免趋同
+    """
     if rating < 1500:
         return (
             "基础讲解，面向完全没有战术经验的初学者，重点讲清「是什么」：\n"
@@ -62,9 +54,8 @@ def _get_depth_instruction(rating: int) -> str:
             "- 每步100-180字，可深入拆解已验证线路，适合有一定基础的棋手"
         )
 
-
 def _build_puzzle_json_header(storyboard: dict) -> str:
-    """战术分析专家人设 + 四层框架要求 + 标签定义注入 + depth_instruction。"""
+    """ 战术分析专家人设 + 四层框架要求 + 标签定义注入 + depth_instruction """
     tactic_name = storyboard.get("tactic_name", "战术练习")
     tactic_focus = storyboard.get("tactic_focus", {})
     theme_defs = tactic_focus.get("theme_definitions", "")
@@ -108,8 +99,8 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
             theme_defs,
         ])
 
-    # 主战术深度锚点：单独拎出主标签的机理与关键手，作为「讲透」的抓手。
-    # 信息来自知识库，模型据此把抽象概念落地到本局这几步，而非泛泛而谈。
+    # 主战术深度锚点：单独拎出主标签的机理与关键手，作为讲透的抓手
+    # 信息来自知识库，模型据此把抽象概念落地到本局这几步，而非泛泛而谈
     primary_key = tactic_focus.get("primary_theme", "")
     if primary_key:
         try:
@@ -123,23 +114,21 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
                 f"  1. 机理：{pt['cn']}为什么能成立——{pt.get('definition', '')}",
             ]
             if pt.get("key_move_signal"):
-                anchor.append(f"  2. 关键手：在本局，{pt['cn']}的关键手表现为——{pt['key_move_signal']}"
-                              "。请结合给定走法，明确指出哪一步是这个关键手，它具体做了什么。")
+                anchor.append(f"  2. 关键手：在本局，{pt['cn']}的关键手表现为——{pt['key_move_signal']}。请结合给定走法，明确指出哪一步是这个关键手，它具体做了什么。")
             if pt.get("typical_consequence"):
-                anchor.append(f"  3. 结果：{pt['cn']}得手后的典型收益是——{pt['typical_consequence']}"
-                              "。请说明本局实际兑现了什么（净赢的子力／被控的线路／对方的困境）。")
-            anchor.append("至少要有一处把这个战术概念与本局的具体走法结合起来讲清楚，"
-                          "不要只复述定义，也不要只描述走法，要让观众看懂「概念如何在这盘棋里发生」。")
+                anchor.append(f"  3. 结果：{pt['cn']}得手后的典型收益是——{pt['typical_consequence']}。请说明本局实际兑现了什么（净赢的子力／被控的线路／对方的困境）。")
+            anchor.append("至少要有一处把这个战术概念与本局的具体走法结合起来讲清楚，不要只复述定义，也不要只描述走法，要让观众看懂「概念如何在这盘棋里发生」。")
+            
             # 联动叙事：核心战术与次要战术存在辅助关系时，提示组合讲解
             synergy = tactic_focus.get("synergy_themes", [])
             if synergy:
                 anchor.append(
                     f"本题还涉及与【{pt['cn']}】相互辅助的战术：{'、'.join(synergy)}。"
                     f"请把它们作为{pt['cn']}的配合手段串起来讲——说明它们如何服务于核心战术，"
-                    "而不是各讲各的、平行罗列。")
+                    "而不是各讲各的、平行罗列。"
+                )
 
-            # 关键手定位（已用棋盘事实算好）：直接把"哪一步是关键手 + 理由"喂给模型，
-            # 避免模型把第一步将军/吃子讲成核心战术。
+            # 关键手定位：直接把哪一步是关键手 + 理由喂给模型，避免模型把第一步将军/吃子讲成核心战术
             key_idx = tactic_focus.get("key_move_idx") or 0
             key_san = tactic_focus.get("key_move_san", "") or ""
             key_reason = tactic_focus.get("key_move_reason", "") or ""
@@ -148,7 +137,8 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
                     f"【已算出的关键手】本题核心战术的关键手是第{key_idx}手 {key_san}。"
                     f"理由：{key_reason or '由棋盘事实算出'}。"
                     f"讲解时务必让观众看到「这一步才是核心」，"
-                    f"不要把任何其他子（如纯将军、过渡吃子）误讲成核心战术。")
+                    f"不要把任何其他子（如纯将军、过渡吃子）误讲成核心战术。"
+                )
             lines.extend(anchor)
 
     if assertions:
@@ -172,9 +162,8 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
             f"重点讲{puzzle_side}如何主动发现战术机会，通过强制手段获得优势或杀棋。"
         )
 
-    # 根因B修复（前置注入）：注入解题开局双方子力盘点，作为不可改写的全局事实。
-    # 此前 storyboard 已算出 white_material/black_material，却从未进入正文生成
-    # prompt——这正是 puzzle 子力捏造 6/6 全中的直接原因（模型只能自己数棋盘）。
+    # 前置注入：注入解题开局双方子力盘点，作为不可改写的全局事实
+    # 此前storyboard已算出 white_material/black_material，却从未进入正文生成
     white_material = storyboard.get("white_material", "")
     black_material = storyboard.get("black_material", "")
     if white_material and black_material:
@@ -246,12 +235,9 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
     ])
     return "\n".join(lines)
 
-
 _SAN_PIECE_MAP = {'N': '马', 'B': '象', 'R': '车', 'Q': '后', 'K': '王'}
-
-
 def _san_piece_to_chinese(moves_str: str) -> str:
-    """将 SAN 走法中的棋子字母转为中文。如 'Nf6'→'马'，无棋子字母时（兵走法）返回'兵'。"""
+    """ 将SAN走法中的棋子字母转为中文，如'Nf6'→'马'，无棋子字母时返回'兵' """
     if moves_str.startswith("O-O-O"):
         return "后翼易位"
     if moves_str.startswith("O-O"):
@@ -261,7 +247,6 @@ def _san_piece_to_chinese(moves_str: str) -> str:
             return _SAN_PIECE_MAP[piece]
     return "兵"
 
-
 def _puzzle_example_role(chunk_nodes: list) -> str:
     if any(node.get("is_core_theme_key_move") for node in chunk_nodes):
         return "climax"
@@ -269,25 +254,23 @@ def _puzzle_example_role(chunk_nodes: list) -> str:
         return "setup"
     return "resolution"
 
-
-def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
-                                total_chunks: int, primary_theme: str = "") -> str:
-    """构建 puzzle 分块 prompt。"""
+def _build_puzzle_chunk_prompt(
+        header: str, chunk_nodes: list, chunk_idx: int,
+        total_chunks: int, primary_theme: str = ""
+    ) -> str:
+    """ 构建puzzle分块prompt """
     is_last = (chunk_idx == total_chunks - 1)
     lines = [header]
 
-    use_example = chunk_idx == 0 or any(
-        node.get("is_core_theme_key_move") for node in chunk_nodes)
-    if (use_example and commentary_example_mode() == "matched"
-            and primary_theme):
+    use_example = chunk_idx == 0 or any(node.get("is_core_theme_key_move") for node in chunk_nodes)
+    if (use_example and commentary_example_mode() == "matched" and primary_theme):
         role = _puzzle_example_role(chunk_nodes)
         example = get_commentary_example("puzzle", primary_theme, role)
         if example:
             lines.extend([
                 "【表达范例】",
                 "只模仿信息密度、组织和口语节奏；范例中的棋子、战术和结果不是当前棋局事实。",
-                example,
-                "",
+                example, "",
             ])
 
     chunk_rule = ""
@@ -305,32 +288,34 @@ def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
         nid = node["id"]
         lines.append(f"--- 节点{nid} ---")
         lines.append(f"走法: {_san_piece_to_chinese(node['moves'])}（{node.get('turn', '')}）")
-        lines.append(f"状态: {'将军' if node.get('is_check') else '非将军'}"
-                     f" | {'吃子' if node.get('is_capture') else '未吃子'}"
-                     f" | {'已将杀' if node.get('is_checkmate') else '未将杀'}")
+        lines.append(
+            f"状态: {'将军' if node.get('is_check') else '非将军'}"
+            f" | {'吃子' if node.get('is_capture') else '未吃子'}"
+            f" | {'已将杀' if node.get('is_checkmate') else '未将杀'}"
+        )
 
-        # 确定性事实：吃掉的具体子力、对方应招数（让解说有硬料可写，挤掉套话）
+        # 确定性事实：吃掉的具体子力和对方应招数，让解说有硬料可写，挤掉套话
         captured = node.get("captured_piece_cn", "")
         if captured:
             lines.append(f"[核心] 吃掉的子力: 对方的{captured}")
-        # 前置注入：本步不可改写的子力得失结论（根因C修复）。这是根治手段——
-        # 把"吃回/兑子/真净赢"的确定判断在生成前喂给模型，而不是等生成后再拦。
-        # 直接对应 puzzle_001aK（Kxe2 吃回被误说成净赢一个车）这类高频错误。
+
+        # 前置注入：本步不可改写的子力得失结论，这是根治手段——
+        # 把"吃回/兑子/真净赢"的确定判断在生成前喂给模型，而不是等生成后再拦
         material_fact = node.get("material_fact", "")
         if material_fact:
             lines.append(f"[不可改写] 子力结论: {material_fact}")
         reply_count = node.get("legal_reply_count_after")
         if isinstance(reply_count, int) and not node.get("is_checkmate"):
-            # 用中文数字表述，避免模型照搬阿拉伯数字被 voiceover 语法卡掉
+            # 用中文数字表述，避免模型照搬阿拉伯数字被voiceover语法卡掉
             cn_num = "零一二三四五六七八九"[reply_count] if 0 <= reply_count < 10 else str(reply_count)
             if reply_count == 0:
-                pass  # 0 应招即将杀，上一行已标注
+                pass
             elif reply_count <= 3:
                 lines.append(f"[核心] 走后对方仅剩{cn_num}个合法应招，回旋余地极小")
             elif reply_count <= 8:
                 lines.append(f"[核心] 走后对方合法应招收缩到{cn_num}个，明显受限")
 
-        # —— 核心材料（必须讲清）——
+        # 核心材料
         theme_ctx = node.get("theme_context", "")
         if theme_ctx:
             lines.append(f"[核心] 战术关联: {node.get('related_theme', '')} — {theme_ctx}")
@@ -359,7 +344,7 @@ def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
             roles_cn = "、".join(roles)
             lines.append(f"[参考] 本步承担标签角色({roles_cn})：{key_reason}")
 
-        # —— 参考材料（自然时一笔带过，不展开）——
+        # 参考材料
         prereq = node.get("prerequisite_facts", "")
         if prereq:
             lines.append(f"[参考] 战术前提: {prereq}")
@@ -374,7 +359,7 @@ def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
             for tn in tactical:
                 lines.append(f"  · {tn}")
 
-        # pacing 提示
+        # pacing提示
         pacing = node.get("suggested_pacing", "normal")
         if pacing in ("slow", "pause_before", "pause_after"):
             lines.append(f"节奏: {pacing} — 这是关键节点，请重点展开讲解")
@@ -383,12 +368,8 @@ def _build_puzzle_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
 
     return "\n".join(lines)
 
-
 def _score_puzzle_depth(text: str, kp: dict) -> bool:
-    """关键手段落的深度校验：至少覆盖 2/3 类关键词（原因/变化/困境）。
-
-    单一关键词（如仅含"迫使"）不足以证明深度，必须同时包含至少两类。
-    """
+    """ 关键手段落的深度校验：至少覆盖2到3类关键词，单一关键词不足以证明深度，必须同时包含至少两类 """
     cause_words = ("因为", "所以", "正是", "从而", "导致", "意味着", "因此")
     change_words = ("之前", "之后", "一旦", "不同于", "改变")
     constraint_words = ("迫使", "无法", "必须", "不能", "只能", "否则")
@@ -399,29 +380,25 @@ def _score_puzzle_depth(text: str, kp: dict) -> bool:
     ])
     return categories >= 2
 
-
 def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
-    """puzzle 专用自动修复：坐标清洗 + 标签标记删除 + 括号展开 + 轻量反套话 + 标点收敛。"""
+    """ puzzle专用自动修复：坐标清洗、标签标记删除、括号展开、轻量反套话、标点收敛 """
     fixed = text
 
     # 坐标兜底清洗
     fixed = strip_coordinates(fixed)
-
-    # 阿拉伯数字转中文：cnstring 在采样期已锁中文，但 API 模式 cnstring 降级，
-    # 模型可能输出数字；逐字转中文保语义，TTS/字幕不出现数字字符。
     fixed = digits_to_cn(fixed)
     fixed = fixed.replace("%", "").replace("％", "")
 
-    # 删除标签标记泄漏（如【优势】【叉击】等被模型原样输出的内容）
+    # 删除标签标记泄漏
     fixed = re.sub(r"[【][^】]{1,20}[】]", "", fixed)
 
     # 括号展开：把括号内容融入句子，避免口播出现括号停顿
     fixed = expand_inline_brackets(fixed)
 
-    # 不完整句子修复：删除「这步X。」后面直接接另一句的残句结构
+    # 不完整句子修复
     fixed = re.sub(r"(这步[^。]{0,6})。(实战|这是|这步|黑方|白方|面对|面对)", r"\1，\2", fixed)
 
-    # 轻量反套话（不做形容词删除，保留'精准/精确'等战术语义词）
+    # 轻量反套话，不做形容词删除，保留'精准/精确'等战术语义词
     fixed = reduce_cliches_puzzle(fixed)
 
     # 标点收敛
@@ -435,26 +412,26 @@ def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
     return fixed
 
 
-# ============================================================
-#  Puzzle 双关键点强约束（对应实施文档 §3.2）
-#  谜题链路必须且只须讲透两个关键点：
-#    关键点1（机理）：标签代表的战术策略是什么、为什么成立
-#    关键点2（落地）：该战术在本局如何兑现——哪步是关键手、做了什么、什么结果
-#  其余效果可让步，但这两点必须覆盖。下方为骨架提取 / 评分 / 模板 / 润色四件套。
-# ============================================================
+"""
+Puzzle双关键点强约束，谜题链路必须且只须讲透两个关键点：
+    关键点1（机理）：标签代表的战术策略是什么、为什么成立
+    关键点2（落地）：该战术在本局如何兑现——哪步是关键手、做了什么、什么结果
+其余效果可让步，但这两点必须覆盖，下方为骨架提取/评分/模板/润色四件套
+"""
 
 # 落地层「确定结果」判定词：解说命中其一即视为讲到了战术兑现的结果
-_PUZZLE_RESULT_WORDS = ("赢", "得子", "得回", "多子", "失", "丢", "被迫", "无法",
-                        "困", "杀", "优势", "子力", "胜势", "制胜", "致胜")
+_PUZZLE_RESULT_WORDS = (
+    "赢", "得子", "得回", "多子", "失", "丢", "被迫", "无法",
+    "困", "杀", "优势", "子力", "胜势", "制胜", "致胜"
+)
 
 _DIGIT_CN = {
     "0": "零", "1": "一", "2": "二", "3": "三", "4": "四",
     "5": "五", "6": "六", "7": "七", "8": "八", "9": "九",
 }
 
-
 def _describe_key_move(node: dict) -> tuple:
-    """从节点生成无坐标的关键手描述。返回 (描述句, 棋子中文名)。"""
+    """ 从节点生成无坐标的关键手描述，返回 (描述句, 棋子中文名) """
     piece = _san_piece_to_chinese(node.get("moves", ""))
     turn = node.get("turn", "")
     side = "黑方" if "黑" in turn else "白方"
@@ -469,11 +446,10 @@ def _describe_key_move(node: dict) -> tuple:
     action_text = "、".join(actions) if actions else "走到关键位置"
     return f"{side}用{piece}{action_text}", piece
 
-
 def _resolve_key_move_idx(nodes: list, primary_key: str):
-    """定位关键手节点 id。
-
-    优先级：关联到主标签的节点 → 首个将杀/将军/吃子节点 → 首个节点。
+    """
+    定位关键手节点id
+    优先级：关联到主标签的节点 → 首个将杀/将军/吃子节点 → 首个节点
     """
     if not nodes:
         return None
@@ -482,20 +458,20 @@ def _resolve_key_move_idx(nodes: list, primary_key: str):
         for node in nodes:
             if node.get("related_theme") == primary_key:
                 return node["id"]
-    # 2. 首个将杀 / 将军 / 吃子节点
+    # 2. 首个将杀/将军/吃子节点
     for node in nodes:
-        if (node.get("is_checkmate_after") or node.get("is_check")
-                or node.get("is_capture")):
+        if (
+            node.get("is_checkmate_after") or node.get("is_check") or node.get("is_capture")
+        ):
             return node["id"]
     # 3. 兜底首个节点
     return nodes[0]["id"]
 
-
 def build_puzzle_keypoint_skeleton(storyboard: dict) -> dict:
-    """构建谜题双关键点骨架（对应 §6.2.1）。
-
-    数据来源：主标签知识库字段（机理）+ 本局实际走法与净子力事实（落地）。
-    返回的骨架供评分器、模板、润色器共用；缺失主标签时返回空 dict。
+    """
+    构建谜题双关键点骨架
+    数据来源：主标签知识库字段（机理）+ 本局实际走法与净子力事实（落地）
+    返回的骨架供评分器、模板、润色器共用；缺失主标签时返回空dict
     """
     nodes = storyboard.get("nodes", [])
     if not nodes:
@@ -513,8 +489,8 @@ def build_puzzle_keypoint_skeleton(storyboard: dict) -> dict:
     if not theme:
         return {}
 
-    # 优先使用 storyboard 阶段已算好的关键手定位（用棋盘事实评分），
-    # 兜底才用旧的 _resolve_key_move_idx（基于将军/吃子等简单信号）。
+    # 优先使用storyboard阶段已算好的关键手定位
+    # 兜底才用旧的_resolve_key_move_idx
     key_move_idx = tactic_focus.get("key_move_idx") or 0
     if not key_move_idx:
         key_move_idx = _resolve_key_move_idx(nodes, primary_key)
@@ -575,15 +551,13 @@ def build_puzzle_keypoint_skeleton(storyboard: dict) -> dict:
         "defender_problem": defender_problem,
     }
 
-
 def _score_puzzle_keypoints(text: str, kp: dict) -> dict:
-    """谜题双关键点覆盖评分（一票否决，对应 §7.2.1）。
-
-    两个关键点都覆盖才 pass=True；任一缺失即判不合格。
-    """
+    """ 谜题双关键点覆盖评分，两个关键点都覆盖才pass=True，任一缺失即判不合格 """
     if not text or not kp:
-        return {"kp1_covered": False, "kp2_covered": False,
-                "pass": False, "issues": ["缺少文本或骨架"]}
+        return {
+            "kp1_covered": False, "kp2_covered": False,
+            "pass": False, "issues": ["缺少文本或骨架"]
+        }
 
     issues = []
 
@@ -610,10 +584,10 @@ def _score_puzzle_keypoints(text: str, kp: dict) -> dict:
 
 
 def _compose_puzzle_voiceover(node: dict, kp: dict) -> str:
-    """谜题关键手节点的模板填空（4 句固定结构，保底，对应 §9.6）。
-
-    4 句结构：机理 → 证据 → 变化 → 困境/结果。
-    保证纯模板下也 100% 覆盖双关键点 + 有具体棋理深度。
+    """
+    谜题关键手节点的模板填空
+    4句结构：机理 → 证据 → 变化 → 困境/结果
+    保证纯模板下也100%覆盖双关键点 + 有具体棋理深度
     """
     tactic_cn = kp.get("tactic_cn", "该战术")
     definition = kp.get("tactic_definition", "")
@@ -655,9 +629,10 @@ def _compose_puzzle_voiceover(node: dict, kp: dict) -> str:
     return f"{sent1}。{sent2}。{sent3}。{sent4}。"
 
 
-def _polish_puzzle_voiceover(node: dict, kp: dict, prev_context: str,
-                             backend) -> str:
-    """谜题关键手节点的 LLM 润色（双关键点强约束，对应 §10.3.1）。"""
+def _polish_puzzle_voiceover(
+    node: dict, kp: dict, prev_context: str, backend
+) -> str:
+    """ 谜题关键手节点的LLM润色 """
     prompt = f"""你在讲解一道国际象棋战术题。请用自然口语化的中文写这一步的解说。
 
 【本题战术】{kp.get('tactic_cn', '')}
@@ -681,13 +656,13 @@ def _polish_puzzle_voiceover(node: dict, kp: dict, prev_context: str,
 - 120-200字，自然口语，禁止棋子英文、坐标、套话模板词
 - 禁止编造走法"""
     return strip_thinking(
-        backend.generate(prompt, grammar=PUZZLE_PLAIN_CN_GRAMMAR)).strip()
-
+        backend.generate(prompt, grammar=PUZZLE_PLAIN_CN_GRAMMAR)
+    ).strip()
 
 def _compose_puzzle_intro(kp: dict, storyboard: dict) -> str:
-    """谜题开场白模板：3 套自然半模板轮换，稳定不依赖 LLM。
-
-    字段来自 keypoint_skeleton（确定性），不出现坐标/英文/Markdown。
+    """
+    谜题开场白模板：3套自然半模板轮换，稳定不依赖LLM
+    字段来自keypoint_skeleton，不出现坐标/英文/Markdown
     """
     tactic_cn = kp.get("tactic_cn", "战术")
     puzzle_side = storyboard.get("puzzle_side", "")
@@ -817,27 +792,6 @@ def _puzzle_post_process(commentary: GeneratedCommentary, all_segments: list,
             commentary.opening = _compose_puzzle_intro(kp_for_intro, storyboard)
     except Exception:
         pass
-
-
-def _build_puzzle_fallback_voiceover(text_output: str, fallback_parts: dict,
-                                     node: dict, chunk_nodes: list,
-                                     max_chars: int) -> str:
-    """Puzzle 块回退时的单节点口播文案（对应原 2688-2706 节点循环体）。
-
-    text_output / fallback_parts 任一缺失则走硬编码兜底文案。
-    返回的文案过一层表层校验，非法字符则降级为安全兜底句。
-    """
-    nid = node["id"]
-    if nid in fallback_parts:
-        voice = fallback_parts[nid]
-    elif text_output:
-        voice = text_output[:max_chars] if nid == chunk_nodes[0]["id"] else node.get("san", f"第{nid}步")
-    else:
-        voice = "这一步继续推进战术思路，配合前后手形成压力，为关键手兑现战术效果做铺垫。"
-    surface_ok, _ = validate_puzzle_voiceover_surface(voice)
-    if not surface_ok:
-        voice = "这一步继续推进战术思路，配合前后手形成压力，为关键手兑现战术效果做铺垫。"
-    return voice
 
 
 def _puzzle_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:

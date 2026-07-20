@@ -1,12 +1,9 @@
-"""残局专用解说生成函数。
-
-从 commentator.py 提取。包含残局链路的 prompt 构建、auto-fix、开场白/总结词生成、
-以及 generate_structured 的残局后处理与 fallback 逻辑。
-
-公共入口 generate_endgame_commentary 将在 generator.py 中实现，通过回调注入本模块的函数。
 """
-from src.common import GeneratedCommentary, Logger
-from src.infra.llm_backend import create_backend_from_env
+残局专用解说生成函数
+
+从commentator.py提取，包含残局链路的prompt构建、auto-fix、开场白/总结词生成，以及generate_structured的残局后处理与fallback逻辑
+公共入口generate_endgame_commentary将在generator.py中实现，通过回调注入本模块的函数
+"""
 from src.commentator.text_filters import (
     strip_thinking, reduce_cliches, strip_coordinates, digits_to_cn,
     dedupe_across_segments, clean_cjk_text, clean_summary_text, clean_opening_text,
@@ -14,8 +11,10 @@ from src.commentator.text_filters import (
 )
 from src.commentator.grammar import build_chunk_grammar, build_retry_prompt, SEGMENT_GRAMMAR
 from src.commentator.validators import validate_single_segment, validate_storyboard_chunk
-from src.commentator.json_utils import parse_single_segment
 from src.commentator.examples import commentary_example_mode, get_commentary_example
+from src.commentator.json_utils import parse_single_segment
+from src.infra.llm_backend import create_backend_from_env
+from src.common import GeneratedCommentary, Logger
 from typing import Optional
 import re
 
@@ -23,14 +22,6 @@ CHUNK_SIZE = 4
 MAX_CHARS = 1800
 MAX_RETRIES = 1
 MIN_VOICEOVER_LEN = 48
-
-# fallback 安全兜底句：纯中文、≥48 字、不含将杀/将军/吃子/均势等会触发 validator 的断言。
-# 用于 fallback 路径所有非首节点 + transition_summary 清洗后仍非法时的最终兜底。
-# 长度刻意超过 MIN_VOICEOVER_LEN，避免触发 validate_single_segment 的"过短"校验。
-SAFE_FALLBACK_VOICEOVER = (
-    "这一步解说未能成功生成，但局面上强方继续稳步推进，保持已有的优势与节奏，"
-    "为后续收尾做准备，整体走势没有发生变化。"
-)
 
 _EXAMPLE_BY_ENDGAME = {
     "单车杀王": (
@@ -572,28 +563,6 @@ def _build_segment_repair_prompt(node: dict, error_msg: str) -> str:
     return "\n".join(parts)
 
 
-def _split_fallback_text(text: str, chunk_nodes: list) -> dict:
-    parts = re.split(r"第\s*(\d+)\s*步[：:\s]*", text)
-    result = {}
-    for i in range(1, len(parts), 2):
-        try:
-            step_id = int(parts[i])
-        except ValueError:
-            continue
-        content = parts[i + 1].strip() if i + 1 < len(parts) else ""
-        result[step_id] = content
-    return result
-
-
-def _generate_chunk_fallback(prompt: str) -> str:
-    try:
-        backend = create_backend_from_env()
-        return strip_thinking(backend.generate(prompt))
-    except Exception:
-        pass
-    return ""
-
-
 def _repair_failed_segments(backend, segments: list, chunk_nodes: list) -> Optional[dict]:
     repaired_any = False
     for i, seg in enumerate(segments):
@@ -1100,58 +1069,6 @@ def _endgame_post_process(commentary: GeneratedCommentary, all_segments: list,
     except Exception as e:
         Logger.warn(f"开场白生成异常，使用模板兜底: {e}")
         commentary.opening = _compose_opening(storyboard)
-
-
-def _build_endgame_fallback_voiceover(text_output: str, fallback_parts: dict, node: dict, chunk_nodes: list) -> str:
-    """残局 fallback voiceover 生成：从文本模式输出中切分出该节点的解说。
-
-    从 generate_structured 提取。优先用 split 切出的对应步骤内容；切不出时，
-    第一个节点用整段输出截断兜底，其余节点用 transition_summary 或步骤标号兜底。
-
-    API 模式安全门：text_output 经清洗后仍含英文/数字（典型为原始 JSON 片段或坐标），
-    视为非法输入，回退到 transition_summary 安全兜底，禁止垃圾文本进入 TTS。
-    """
-    nid = node["id"]
-    # 安全兜底：纯中文、≥48 字、不含数字/坐标/将杀断言，过 validate_single_segment 长度校验。
-    # transition_summary 是 storyboard 上游字段，可能含原始坐标（如「白王d4→c5」），
-    # 作为安全兜底返回前必须先清洗，否则坐标直接进入 TTS。
-    safe_default_raw = _sanitize_fallback_text(node.get("transition_summary", ""))
-    if safe_default_raw and not has_forbidden_chars(safe_default_raw) and len(safe_default_raw) >= MIN_VOICEOVER_LEN:
-        safe_default = safe_default_raw
-    else:
-        safe_default = SAFE_FALLBACK_VOICEOVER
-
-    if nid in fallback_parts:
-        candidate = fallback_parts[nid]
-        # split 片段经清洗后仍含禁用字符，视为非法，回安全兜底
-        if candidate and not has_forbidden_chars(candidate):
-            return candidate
-        return safe_default
-
-    cleaned = _sanitize_fallback_text(text_output) if text_output else ""
-    if cleaned and not has_forbidden_chars(cleaned):
-        # 只有该 chunk 的第一个节点用整段兜底，避免多节点复制同一段
-        return cleaned[:MAX_CHARS] if nid == chunk_nodes[0]["id"] else safe_default
-    return safe_default
-
-
-def _sanitize_fallback_text(text: str) -> str:
-    """对 fallback 文本模式输出做与主路径等价的清洗：去坐标、数字转中文。
-
-    fallback 路径不经过 _auto_fix_voiceover（它针对 JSON segment），故单独清洗，
-    保证 API 在 JSON 失败后走文本模式时，输出与主路径同样干净。
-    """
-    if not text:
-        return ""
-    fixed = strip_coordinates(text)
-    fixed = digits_to_cn(fixed)
-    fixed = fixed.replace("%", "").replace("％", "")
-    # 清除箭头/分号/顿点残留：坐标被 strip 后常留下「白王→；白象、」骨架，
-    # 这些符号无口播意义，连同多余标点一起收敛。
-    fixed = fixed.replace("→", "，").replace("；", "，")
-    fixed = re.sub(r"[、，][、，]+", "，", fixed)
-    fixed = re.sub(r"^[、，]+|[、，]+$", "", fixed)
-    return fixed
 
 
 def _endgame_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:
