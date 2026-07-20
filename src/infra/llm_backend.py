@@ -403,28 +403,33 @@ LLM_BACKEND_CACHE = {}
 def create_backend_from_env():
     """按 LLM_BACKEND 环境变量分派后端。
 
-    - 缺省或 `llama_cpp`：返回 LlamaCppBackend 单例（旧行为，未配置时零变化）
-    - `deepseek`：返回 FallbackBackend（主=DeepSeek API，次=本地懒加载），
-      详见 PLAN-002 阶段 2/3。该分支在阶段 1 只占位，阶段 2 接入。
-    - 其它值：warn 并回退本地，避免未知配置导致崩溃。
+    缺省（未配置 / 空 / `deepseek`）：返回 FallbackBackend（主=DeepSeek API，
+    次=本地懒加载）。这是 ADR-019 的产品意图--API 为主，传输失败即时降级本地，
+    无需用户配置即生效。`llama_cpp` 历史遗留值（当年区分 llama.cpp vs ollama，
+    ollama 已废弃）现降级为"显式强制纯本地"逃生口：API 完全不可用或离线场景
+    下用它 opt-out API。其它未知值 warn 并回退缺省（API 为主）。
+
+    - 缺省 / `deepseek`：FallbackBackend（API 为主 + 本地兜底）
+    - `llama_cpp`：LlamaCppBackend 单例（纯本地，不走 API）
+    - 其它：warn 并回退缺省（API 为主）
     """
     global LLM_BACKEND_CACHE
 
-    backend_kind = os.getenv("LLM_BACKEND", "llama_cpp").strip().lower() or "llama_cpp"
+    backend_kind = os.getenv("LLM_BACKEND", "deepseek").strip().lower() or "deepseek"
     cache_key = backend_kind
 
     if cache_key in LLM_BACKEND_CACHE:
         return LLM_BACKEND_CACHE[cache_key]
 
     if backend_kind == "llama_cpp":
+        # 显式纯本地逃生口（离线 / API 完全不可用 / 调试本地模型）
         backend = LlamaCppBackend()
     elif backend_kind == "deepseek":
-        # 阶段 2 接入；阶段 1 先占位，避免提前引入 openai 依赖。
         backend = _create_deepseek_fallback_backend()
     else:
-        Logger.warn(f"未知 LLM_BACKEND={backend_kind!r}，回退 llama_cpp")
-        backend = LlamaCppBackend()
-        cache_key = "llama_cpp"
+        Logger.warn(f"未知 LLM_BACKEND={backend_kind!r}，回退缺省（deepseek：API 为主+本地兜底）")
+        backend = _create_deepseek_fallback_backend()
+        cache_key = "deepseek"
 
     LLM_BACKEND_CACHE[cache_key] = backend
     return backend
