@@ -21,7 +21,8 @@ import re
 CHUNK_SIZE = 4
 MAX_CHARS = 1800
 MAX_RETRIES = 1
-MIN_VOICEOVER_LEN = 48
+# 与 validators.MIN_VOICEOVER_LEN 同步（PLAN-003 B2 宽松化 48→44）。真值源在 validators.py。
+MIN_VOICEOVER_LEN = 44
 
 _EXAMPLE_BY_ENDGAME = {
     "单车杀王": (

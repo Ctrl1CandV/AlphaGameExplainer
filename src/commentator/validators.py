@@ -7,7 +7,12 @@ import chess
 # 最短解说词长度：概括模式节点 28 字，其余取该常量。
 # 原定义于 commentator.py 模块级（行 13），仅 _validate_single_segment 使用，
 # 随校验器一起迁入本模块。
-MIN_VOICEOVER_LEN = 48
+#
+# PLAN-003 B2（2026-07-21 宽松化）：48 → 44。Phase 4.2 实测 3 个过短失败
+# 全卡在 46（KBBvK_3/KPvK_3/004kB，仅差 2 字），46 字一段口播可接受；
+# 44 留 2 字安全边际覆盖所有已知"差2字"失败。真·内容不足（如 KRPvK_2 19 字）
+# 仍远低于阈值被拦——降阈值不救内容空洞，只放过"差几个字但够用"的边缘。
+MIN_VOICEOVER_LEN = 44
 
 # 中文棋子名 → python-chess piece_type，用于子力存在性校验（根因2修复）。
 # "王"不校验（双方永远有王，且"王"字在"对王""王翼"等短语中噪声太大）。
@@ -258,7 +263,7 @@ def validate_puzzle_segment(seg: dict, node: dict) -> tuple:
         return False, mat_err
 
     # 最短长度校验
-    min_len = 28 if node.get("is_checkmate_after") and len(node.get("moves", "")) <= 4 else 48
+    min_len = 28 if node.get("is_checkmate_after") and len(node.get("moves", "")) <= 4 else MIN_VOICEOVER_LEN
     if len(voiceover.strip()) < min_len:
         return False, f"voiceover过短({len(voiceover.strip())}<{min_len})"
 

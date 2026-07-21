@@ -15,7 +15,10 @@ import re
 CHUNK_SIZE = 4
 MAX_CHARS = 1800
 MAX_RETRIES = 1
-MIN_VOICEOVER_LEN = 48
+# 与 validators.MIN_VOICEOVER_LEN 同步（PLAN-003 B2 宽松化 48→44）。本模块未直接
+# 使用该值做长度判定，仅为避免外部 from generator import MIN_VOICEOVER_LEN 出现
+# 不一致而保留同步；真值源在 validators.py。
+MIN_VOICEOVER_LEN = 44
 
 @dataclass
 class CommentaryConfig:
