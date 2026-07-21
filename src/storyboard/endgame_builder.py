@@ -332,6 +332,11 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
     prev_endgame_name = ""
     prev_endgame_type = ""
     n_compressed = len(compressed)
+    # PLAN-003 B+：累计「截至当前节点、前序所有节点被吃过的棋子类型集合」。
+    # 供 validator 的 validate_material_existence 作为第三个放行来源——解决
+    # 「前序节点吃了大子、后续节点回顾该子战术成果却被判捏造」的假阳性。
+    # endgame 节点的 captured_piece_types 来自 _collect_node_move_info（枚举列表）。
+    captured_types_sofar = set()
 
     for idx_cs, cs in enumerate(compressed):
         board_before = chess.Board(cs.fen_before)
@@ -414,6 +419,11 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             "moved_piece_types": move_info["moved_piece_types"],
             "checking_piece_types": move_info["checking_piece_types"],
             "captured_piece_types": move_info["captured_piece_types"],
+            # PLAN-003 B+：截至本节点的前序累计被吃棋子类型快照（供 validator 放行合理回顾）。
+            # 与 puzzle_builder 对齐：只累计 validator 实际校验的四种大子（后车象马），
+            # 兵不在 PIECE_CN_TO_TYPE 校验范围，排除以统一两条链路口径。
+            "previously_captured_piece_types": sorted(
+                pt for pt in captured_types_sofar if pt != chess.PAWN),
             "contains_repetition_maneuver": contains_rep,
             "repeat_count": rep_count,
             "maneuver_pattern": rep_pattern,
@@ -491,6 +501,11 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
         if eval_signals:
             node["eval_signals"] = eval_signals
 
+        # PLAN-003 B+：本节点吃掉的棋子类型累加进全局集，供后续节点的放行快照使用。
+        # captured_piece_types 是 chess.PieceType 枚举列表，直接 union；兵会被自然纳入
+        # 但 PIECE_CN_TO_TYPE 不校验兵，无副作用。
+        for pt in move_info["captured_piece_types"]:
+            captured_types_sofar.add(pt)
         nodes_out.append(node)
         prev_phase = cs.phase
 

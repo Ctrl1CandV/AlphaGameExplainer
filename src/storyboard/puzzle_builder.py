@@ -148,6 +148,14 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
     # 根因C修复（前置注入）：解题开局时解题方相对对方的子力差，作为每步
     # per-step material fact 的基线，用于区分"吃回/兑子/真净赢"（见 puzzle_001aK）。
     solver_start_balance = _material_balance(board, puzzle_side_color)
+    # PLAN-003 B+：累计「截至当前节点、前序所有节点被吃过的棋子类型集合」。
+    # 供 validator 的 validate_material_existence 作为第三个放行来源——解决
+    # 「前序节点吃了大子、后续节点回顾该子战术成果却被判捏造」的假阳性
+    # （实测样本 puzzle_002Hv 节点1吃马、后续提马被判失败）。注意只记类型
+    # 不记数量/时间线，这是 validator 固有局限（见 validators.py 注释）。
+    captured_types_sofar = set()
+    _CN_TO_PIECE_TYPE = {"后": chess.QUEEN, "车": chess.ROOK,
+                         "象": chess.BISHOP, "马": chess.KNIGHT}
     for i, move in enumerate(moves):
         board_before = temp.copy()
         is_check = temp.gives_check(move)
@@ -240,6 +248,11 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
             "is_capture_node": is_capture,
             "has_check_in_node": is_check,
             "captured_piece_cn": captured_piece_cn,
+            # PLAN-003 B+：截至本节点的前序累计被吃棋子类型（snapshot，供 validator 放行合理回顾）。
+            # 注意是「注入前」的快照——本节点自己吃的子不计入本节点的放行集（本节点吃子后该子
+            # 理应在 fen_before 里或被 material_fact 覆盖，不需走此通道）。
+            # 用 sorted(list) 而非 set，与 captured_piece_types 等字段惯例一致（JSON 可序列化）。
+            "previously_captured_piece_types": sorted(captured_types_sofar),
             "material_fact": material_fact,
             "legal_reply_count_after": sum(1 for _ in board_after.legal_moves),
             # 关键手定位（新增）
@@ -266,6 +279,10 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
             "phase_hint": "",
             "claim_level": "terminal" if is_checkmate_after else "forcing" if is_check else "positioning",
         }
+        # PLAN-003 B+：本节点吃掉的棋子类型累加进全局集，供后续节点的放行快照使用。
+        # 兵不校验（PIECE_CN_TO_TYPE 不含兵），跳过；中文反查枚举。
+        if captured_piece_cn in _CN_TO_PIECE_TYPE:
+            captured_types_sofar.add(_CN_TO_PIECE_TYPE[captured_piece_cn])
         nodes_out.append(node)
 
     # P0-3 清理：移除旧的 _net_material_fact 整串净值追加块。

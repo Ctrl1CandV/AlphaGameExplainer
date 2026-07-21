@@ -58,6 +58,23 @@ def validate_material_existence(text: str, node: dict) -> tuple:
 
     只校验"新增"的棋子种类（如声称有后但没后），不校验"不再提及"的棋子，
     避免误伤合理省略。失败安全：任何解析异常直接放行，不阻塞主流程。
+
+    PLAN-003 B+（第三个放行来源）：node 携带 `previously_captured_piece_types`
+    （截至本节点、前序所有节点累计被吃过的棋子类型集合，由 builder 预填）。
+    当前节点回顾「前序被吃的大子」是合理的战术叙述（如吃马后讲马的战术作用），
+    不应判为捏造。三类放行来源取并集：present_types | promoted_types |
+    previously_captured_types，任一命中即放行。
+    固有局限（不处理）：
+    1. 本函数只校验棋子「类型」不校验数量/时间线/颜色，无法区分「合理回顾」
+       与「把已吃子当成还在棋盘上的活子」——后者由上游 material_fact 注入
+       与 prompt 约束兜底，非 validator 职责。
+    2. 放行集是 per-type、color-agnostic、永久累积的：一旦某类大子在前序任一
+       节点被吃，后续所有节点对该类子的提及永久放行。在长残局/多吃子 puzzle
+       中，累计集合可能覆盖全部四种被校验类型 {后,车,象,马}，使本校验对后续
+       节点接近失效。这是为修复「跨节点历史叙述假阳性」刻意接受的放宽边界——
+       实测真幻觉（如 0039T/0048h/004Lu 造后）都是造「从未在棋盘出现过的子」，
+       不在前序被吃集合内，仍被正确拦截。若未来出现「造一个前序已被吃过的
+       同型子」的幻觉新模式，需收紧为按颜色累计或加时间衰减。
     """
     fen_before = node.get("fen_before", "")
     if not fen_before:
@@ -82,12 +99,17 @@ def validate_material_existence(text: str, node: dict) -> tuple:
 
     present_types = {p.piece_type for p in board.piece_map().values()}
 
+    # PLAN-003 B+：前序累计被吃棋子类型（builder 预填，缺失时退化为空集，保持向后兼容）
+    previously_captured_types = set(node.get("previously_captured_piece_types") or [])
+
     for cn_name, piece_type in PIECE_CN_TO_TYPE.items():
         if not mentions_piece(text, cn_name):
             continue
         if piece_type in present_types or piece_type in promoted_types:
             continue
-        return False, f"提到了'{cn_name}'，但本节点起始局面上不存在该棋子（且本节点未发生对应升变）"
+        if piece_type in previously_captured_types:
+            continue
+        return False, f"提到了'{cn_name}'，但本节点起始局面上不存在该棋子（且本节点未发生对应升变，前序节点也未吃过该类子）"
 
     return True, ""
 
@@ -111,9 +133,11 @@ def validate_single_segment(seg: dict, node: dict) -> tuple:
     if pacing not in ALLOWED_PACING:
         return False, f"pacing='{pacing}'不合法"
 
-    sub_endgame = seg.get("sub_endgame")
-    if not isinstance(sub_endgame, str) or not sub_endgame.strip():
-        return False, f"sub_endgame为空"
+    # PLAN-003 B1：去除 sub_endgame 非空门。该字段在媒体/TTS/字幕层无消费者
+    # （仅 generator 写入），puzzle 链路本就允许为空且无害，endgame 链路保留
+    # 此门只会把模型偶尔输出空串的样本误杀整片（实测 KBBvK_3 类）。
+    # 字段仍允许存在，只是不再因空值判失败；如需回填，由 generator/auto-fix
+    # 用 node.sub_endgame_name 补，而非在 validator 拦截。
 
     text = voiceover.strip()
     _CHECKMATE_BANNED = ("将杀", "绝杀", "杀王", "无路可走", "无路可逃",
