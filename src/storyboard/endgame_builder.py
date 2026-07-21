@@ -1,7 +1,7 @@
 from src.analysis.endgame_kb import describe_endgame, get_forbidden_concepts, match as match_endgame
 from src.common import CompressedStep, Logger, AnalyzedMove, PIECE_VALUES, piece_cn
 from src.chess_utils.position import piece_square as _piece_square, piece_squares as _piece_squares
-from src.chess_utils.material import material_score as _material_score, color_name as _color_name, side_material_desc as _side_material_desc
+from src.chess_utils.material import material_score as _material_score, color_name as _color_name, side_material_desc as _side_material_desc, absent_major_pieces as _absent_major_pieces
 from src.analysis.insight_extractor import extract_for_compressed
 from src.storyboard.compressor import _role_meta
 from typing import List, Optional, Tuple
@@ -409,6 +409,13 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
             # 杜绝"兵残局里凭空造后"这类捏造（KPvK 系列高频）。是不可改写事实。
             "white_material": _side_material_desc(board_before, chess.WHITE),
             "black_material": _side_material_desc(board_before, chess.BLACK),
+            # PLAN-004 阶段 B：本节点起始局面上不存在的大子种类（中文棋子名列表）。
+            # 供 prompt 负面事实注入，消除"提后但局面无后"这类真幻觉。升变走法
+            # （sans 含 =Q/=R/=B/=N）对应新棋子不计 absent。兵/王不标。
+            # previously_captured_types 传入对齐 validator B+（peer_review O1 修复）：
+            # 前序被吃的大子允许回顾，不计 absent，避免 prompt 禁令压制合法历史叙述。
+            "absent_pieces": _absent_major_pieces(
+                board_before, cs.sans, captured_types_sofar),
             "is_check_after": board_after.is_check(),
             "is_checkmate_after": board_after.is_checkmate(),
             "is_stalemate_after": board_after.is_stalemate(),

@@ -172,6 +172,10 @@ def _build_json_header(storyboard: dict) -> str:
         "- 首句直接进入棋子动作、局面任务或限制变化，相邻段避免重复同一开头。",
         "- 不写「看似平淡实则」「胜利的天平」「囊中之物」「致命一击」「步步为营」或泛泛的「为后续做准备」。",
         "- 没有事实支撑时宁可朴素、少说，也不要用空洞形容词填充。",
+        "- 讲清因果而非结论：不要用「完全掌握主动权」「锁死」「彻底封锁」「大局已定」这类空泛结论句收尾，"
+        "而要说清「哪一步把对方王从几个逃格压到几个、白方哪个子换到了什么位置」这样可验证的具体过程。",
+        "- 落到棋盘具体事实：每段至少让观众看到一个可指认的画面变化——某个子换到了哪条线、"
+        "对方王少了哪个方向的逃路、安全格从几减到几；禁止只用「控制局面」「胜势已成」这类无落点的形容词。",
         _DIFFICULTY_TONE[_rate_difficulty(endgame_name)],
         "",
         f"【残局类型】{endgame_name}",
@@ -342,6 +346,25 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         bm = node.get("black_material", "")
         if wm and bm:
             parts.append(f"本步起始子力（只能引用，禁止凭空增删棋子）: 白方{wm}，黑方{bm}")
+
+        # PLAN-004 阶段 B：本节点不存在的大子负面事实。模型在缺少"本节点无某子"
+        # 显式约束时会凭空捏造（如 KBNvK 造后、KPvK 把未升变的兵讲成后）。
+        absent = node.get("absent_pieces") or []
+        if absent:
+            parts.append(
+                f"本节点无：{('、'.join(absent))}——禁止讲该子已存在、正在行动或已升变出来；"
+                f"若讲到升变，只能描述兵到达底线之后"
+            )
+
+        # 升变时间线约束：解法线不含升变时，禁止描述升变后的局面（消除时间线错位幻觉）
+        node_sans = node.get("sans") or []
+        has_promotion = any(isinstance(s, str) and "=" in s for s in node_sans)
+        if not has_promotion:
+            # 仅当盘面有兵时才提示（避免无兵残局无意义提示）。空 fen_before 守卫对齐 puzzle 版本。
+            fen_before = node.get("fen_before", "")
+            placement = fen_before.split()[0] if fen_before else ""
+            if "P" in placement or "p" in placement:
+                parts.append("本段走法不含升变，禁止描述升变之后才会出现的局面")
 
         # 当前所处的取胜阶段（让每段解说能挂到全局取胜计划上，而不是各讲各的）。
         phase = node.get("phase", "")

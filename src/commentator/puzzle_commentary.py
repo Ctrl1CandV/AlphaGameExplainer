@@ -88,6 +88,10 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         "4. 叙事自然：用连贯的段落串联信息，不要逐条罗列层号或编号词",
         "5. 具体表达：首句直接写棋子动作、战术问题或局面变化，每段至少解释一个已提供的具体因果",
         "6. 避免空话：不用「看似平淡实则」「胜利的天平」「致命一击」或泛泛的「为后续做准备」；相邻段不要重复同一开头和比喻",
+        "7. 讲清因果而非结论：不要用「稳获子力」「转化为胜势」「力量对比悬殊」「完全掌握主动权」这类"
+        "空泛结论句收尾，而是说清「哪一步吃掉了什么子、对方为什么无法应、净赚了什么」这样可验证的具体过程",
+        "8. 落到棋盘具体事实：每段至少让观众看到一个可指认的画面变化——某个子从哪类位置换到了哪类位置、"
+        "某个格子被谁控制、对方少了哪个逃路；禁止只用「确立优势」「局面占优」这类无落点的形容词",
         "",
         f"【战术主题】{tactic_name}",
     ]
@@ -304,6 +308,22 @@ def _build_puzzle_chunk_prompt(
         material_fact = node.get("material_fact", "")
         if material_fact:
             lines.append(f"[不可改写] 子力结论: {material_fact}")
+
+        # PLAN-004 阶段 B：本节点不存在的大子负面事实（消除"提后但局面无后"真幻觉）。
+        # 与 endgame 对齐；puzzle 主题带 advancedPawn 且兵近底线时模型易提前讲升变后的子。
+        absent = node.get("absent_pieces") or []
+        if absent:
+            lines.append(
+                f"[不可改写] 本节点无：{'、'.join(absent)}——禁止讲该子已存在、正在行动"
+                f"或已升变出来；若讲到升变，只能描述兵到达底线之后"
+            )
+        # 升变时间线约束：本步走法不含升变（san 无 =X）时，禁止描述升变后局面
+        node_san = node.get("san", "") or ""
+        if "=" not in node_san:
+            fen_before = node.get("fen_before", "")
+            placement = fen_before.split()[0] if fen_before else ""
+            if "P" in placement or "p" in placement:
+                lines.append("[不可改写] 本步不含升变，禁止描述升变之后才会出现的局面")
         reply_count = node.get("legal_reply_count_after")
         if isinstance(reply_count, int) and not node.get("is_checkmate"):
             # 用中文数字表述，避免模型照搬阿拉伯数字被voiceover语法卡掉
@@ -667,9 +687,12 @@ def _compose_puzzle_intro(kp: dict, storyboard: dict) -> str:
     tactic_cn = kp.get("tactic_cn", "战术")
     puzzle_side = storyboard.get("puzzle_side", "")
     key_move_piece = kp.get("key_move_piece", "")
-    recognition = kp.get("tactic_recognition", "")
-    # 去掉尾部标点，避免与模板自带句号拼成"。。"
-    consequence = kp.get("defender_problem", "").rstrip("。！？，、；：")
+    # recognition/consequence 都 rstrip 尾部标点：模板 A 会在 recognition 后接"，接下来"，
+    # 若 recognition 末尾带句号会拼出"优势。，接下来"病句（advantage 类实测命中）。
+    # 覆盖全角/ASCII 标点 + 省略号(U+2026 单字符和双字符) + 尾随空白。
+    _strip_tail = "。！？，、；：.!?,;:…\u2026 "
+    recognition = kp.get("tactic_recognition", "").rstrip(_strip_tail)
+    consequence = kp.get("defender_problem", "").rstrip(_strip_tail)
 
     # 模板 A：问题导向
     intro_a = f"这道题的重点不是先算很长的变化，而是先发现{tactic_cn}这个战术信号。"

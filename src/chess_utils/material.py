@@ -98,3 +98,45 @@ def side_material_desc(board: chess.Board, color: chess.Color) -> str:
         if c > 0:
             parts.append(f"{cn_num.get(c, str(c))}{piece_cn(pt)}")
     return "".join(parts) if parts else "单王"
+
+
+# 大子（后/车/象/马）类型，用于 absent_pieces 计算。兵/王不标 absent。
+MAJOR_PIECE_TYPES = (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT)
+
+
+def absent_major_pieces(board: chess.Board, sans=None, previously_captured_types=None) -> List[str]:
+    """本局面上不存在的大子中文名列表（不分颜色），供 prompt 负面事实注入。
+
+    PLAN-004 阶段 B：消除"提后但局面无后"这类真幻觉。模型在 prompt 中缺少
+    "本节点无某子"的显式负面事实时会凭空捏造（KPvK 把兵讲成后、KBNvK 造后等）。
+    这里从 board 程序化解析盘面真实拥有的棋子种类，返回不存在的大子中文名。
+
+    升变放行：若本节点 sans 含 =Q/=R/=B/=N，对应新棋子种类视为"存在"
+    （即使升变前盘面无该子，本节点内会产生），不计入 absent。
+
+    前序被吃放行（PLAN-004 B peer_review O1 修复，对齐 validator B+）：若某大子类型
+    在前序节点被吃过（previously_captured_types），后续节点允许回顾该子的战术成果，
+    不计入 absent——否则 prompt 禁令会让模型回避合法的历史叙述（如"白方已吃掉黑后"），
+    与 validator 的 B+ 放行逻辑语义错位。
+
+    兵不标（存在性普遍，标注无信息量）。王不标（双方永远有王）。
+    """
+    present = {p.piece_type for p in board.piece_map().values()}
+
+    promoted = set()
+    if sans:
+        for san in sans:
+            if isinstance(san, str) and "=" in san:
+                letter = san.rsplit("=", 1)[-1][:1]
+                promo = {"Q": chess.QUEEN, "R": chess.ROOK,
+                         "B": chess.BISHOP, "N": chess.KNIGHT}
+                if letter in promo:
+                    promoted.add(promo[letter])
+
+    captured_before = set(previously_captured_types or [])
+
+    absent = []
+    for pt in MAJOR_PIECE_TYPES:
+        if pt not in present and pt not in promoted and pt not in captured_before:
+            absent.append(piece_cn(pt))
+    return absent

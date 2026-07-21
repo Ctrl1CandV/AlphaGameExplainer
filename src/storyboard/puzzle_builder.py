@@ -1,5 +1,5 @@
 from src.common import CompressedStep, Logger, AnalyzedMove, PIECE_VALUES, piece_cn
-from src.chess_utils.material import material_score as _material_score, material_balance as _material_balance, side_material_desc as _side_material_desc
+from src.chess_utils.material import material_score as _material_score, material_balance as _material_balance, side_material_desc as _side_material_desc, absent_major_pieces as _absent_major_pieces
 from src.chess_utils.tactic import is_fork as _is_fork, is_pin as _is_pin, is_skewer as _is_skewer, is_discovered as _is_discovered
 from src.analysis.themes_kb import get_theme, select_core_theme, select_narrative_stance, related_intersection
 from src.analysis.insight_extractor import extract_for_compressed, per_step_material_fact
@@ -248,6 +248,13 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
             "is_capture_node": is_capture,
             "has_check_in_node": is_check,
             "captured_piece_cn": captured_piece_cn,
+            # PLAN-004 阶段 B：本节点起始局面上不存在的大子种类（中文棋子名列表）。
+            # 供 prompt 负面事实注入，消除"提后但局面无后"这类真幻觉。puzzle 用单字段 san，
+            # 升变走法（san 含 =Q/=R/=B/=N）对应新棋子不计 absent。兵/王不标。
+            # previously_captured_types 传入对齐 validator B+（peer_review O1 修复）：
+            # 前序被吃的大子允许回顾，不计 absent，避免 prompt 禁令压制合法历史叙述。
+            "absent_pieces": _absent_major_pieces(
+                board_before, [san] if san else None, captured_types_sofar),
             # PLAN-003 B+：截至本节点的前序累计被吃棋子类型（snapshot，供 validator 放行合理回顾）。
             # 注意是「注入前」的快照——本节点自己吃的子不计入本节点的放行集（本节点吃子后该子
             # 理应在 fen_before 里或被 material_fact 覆盖，不需走此通道）。
