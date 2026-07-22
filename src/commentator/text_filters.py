@@ -70,7 +70,23 @@ def reduce_cliches(text: str) -> str:
     out = text
     for pat, repl in _CLICHE_PATTERNS:
         out = re.sub(pat, repl, out)
-    return out
+    return _fix_dangling_connectives(out)
+
+
+# PLAN-004 阶段C C1：套话删除后残句清理。
+# phase5 抽验发现删除类套话（空串替换）会留下悬空连接词：
+#   "逼入窘境，同时。" "退守，并且。" "调整阵型或。"
+# 这些连接词在原句衔接套话短语，套话被删后变成无依悬空，形成病句。
+# 清理策略：句尾（句号前）的悬空连接词/副词整组删除，保留句号。
+# 注意：只清理句尾，不动句中（句中"同时"等仍可能承载并列语义）。
+_DANGLING_CONNECTIVE_RE = re.compile(
+    r"[，,]\s*(?:同时|并且|而且|或|从而|进而|因此|所以|于是|然后|接着)[。！？]"
+)
+
+
+def _fix_dangling_connectives(text: str) -> str:
+    """清理套话删除后遗留的句尾悬空连接词（"，同时。"→"。"）。"""
+    return _DANGLING_CONNECTIVE_RE.sub(lambda m: m.group(0)[-1], text)
 
 
 # ── Puzzle 专用轻量反套话表 ───────────────────────────────────────────
@@ -110,7 +126,7 @@ def reduce_cliches_puzzle(text: str) -> str:
     out = text
     for pat, repl in _PUZZLE_CLICHE_PATTERNS:
         out = re.sub(pat, repl, out)
-    return out
+    return _fix_dangling_connectives(out)
 
 
 # 坐标兜底清洗：prompt 已要求"禁坐标"，但 LLM 偶尔仍会吐出 e8/f8 这类格子名。
