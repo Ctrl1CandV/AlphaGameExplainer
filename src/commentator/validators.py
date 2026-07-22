@@ -177,6 +177,14 @@ def validate_single_segment(seg: dict, node: dict) -> tuple:
     voiceover = seg.get("voiceover")
     if not isinstance(voiceover, str) or not voiceover.strip():
         return False, f"voiceover为空"
+
+    # PLAN-004 收尾修复：endgame 表层字符/思考泄漏硬闸（对齐 puzzle）。
+    # 此前 endgame 链路无此闸，phase5 实测 KBNvK_5("B限制了")/KRvK_2("a线")
+    # 真实泄漏溜进终稿。SPEC §8 要求英文/数字/坐标泄漏为零，这里硬拦截。
+    surface_ok, surface_err = validate_voiceover_surface(voiceover.strip())
+    if not surface_ok:
+        return False, surface_err
+
     min_len = 28 if node.get("summary_only") else MIN_VOICEOVER_LEN
     if len(voiceover.strip()) < min_len:
         return False, f"voiceover过短({len(voiceover.strip())}<{min_len})"
@@ -282,6 +290,21 @@ def validate_puzzle_voiceover_surface(text: str) -> tuple:
         return False, "voiceover含思考过程泄漏"
 
     return True, ""
+
+
+# PLAN-004 收尾修复：endgame 链路补表层字符/思考泄漏闸。
+# 此前 endgame 的 validate_single_segment 无坐标/ASCII/Markdown 硬闸，
+# 仅靠后处理 _strip_coordinates/_clean_cjk_text 清洗——这是"尽力删除"而非
+# "零容忍"。phase5 抽验证实真实泄漏已溜进终稿（KBNvK_5 "B限制了黑王"、
+# KRvK_2 "黑王在a线"），SPEC §8 要求"最终进入字幕/TTS 的英文/数字/坐标必须为零"。
+# 复用 puzzle 的 surface 逻辑（同一套字符集 + 思考泄漏词），统一两条链路口径。
+def validate_voiceover_surface(text: str) -> tuple:
+    """通用表层字符与思考泄漏校验（endgame + puzzle 共用）。
+
+    与 validate_puzzle_voiceover_surface 行为一致，统一为单一事实来源。
+    保留 puzzle 专用名作为既有调用方的稳定别名。
+    """
+    return validate_puzzle_voiceover_surface(text)
 
 
 def validate_puzzle_segment(seg: dict, node: dict) -> tuple:
