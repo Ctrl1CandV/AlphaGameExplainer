@@ -144,6 +144,16 @@ def run_puzzle_video(input_text: str, voice_prompt: str = "") -> str:
         insert_pos = 0 if not (prelude_san and puzzle.prelude_move is not None) else 1
         segments.insert(insert_pos, intro_segment)
 
+    # PLAN-005 调试：视频生成前把完整解说词打印到终端，便于人工审阅解说质量
+    Logger.info("===== 解说词预览（视频生成前）=====")
+    if prelude_san and prelude_narration:
+        Logger.info(f"[预备着旁白] {prelude_narration}")
+    if commentary.opening:
+        Logger.info(f"[开场白] {commentary.opening}")
+    for ss in commentary.segments:
+        Logger.info(f"[节点{ss.id}] {ss.voiceover}")
+    Logger.info("===== 解说词预览结束 =====")
+
     segments = tts_synthesize(segments, voice_prompt=voice_prompt)
 
     # 生成视频

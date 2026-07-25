@@ -136,6 +136,17 @@ def run_video(input_text: str, voice_prompt: str = "", endgame_name: str = "") -
             pacing="slow",
             moves=[],
         ))
+
+    # PLAN-005 调试：视频生成前把完整解说词打印到终端，便于人工审阅解说质量
+    Logger.info("===== 解说词预览（视频生成前）=====")
+    if commentary.opening:
+        Logger.info(f"[开场白] {commentary.opening}")
+    for ss in commentary.segments:
+        Logger.info(f"[节点{ss.id}] {ss.voiceover}")
+    if commentary.summary:
+        Logger.info(f"[总结] {commentary.summary}")
+    Logger.info("===== 解说词预览结束 =====")
+
     segments = tts_synthesize(segments, voice_prompt=voice_prompt)
 
     # [7/7] 生成视频

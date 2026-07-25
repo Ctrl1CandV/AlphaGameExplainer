@@ -1,4 +1,4 @@
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from typing import List, Tuple, Optional
 from src.common import Segment, Logger
 from dotenv import load_dotenv
@@ -62,6 +62,7 @@ PIECE_MAP = {
 }
 
 _piece_cache: dict = {}
+_piece_shadow_cache: dict = {}
 _font_cache: dict = {}
 
 def _load_piece(char: str) -> Image.Image:
@@ -69,6 +70,30 @@ def _load_piece(char: str) -> Image.Image:
         path = os.path.join(PIECES_DIR, PIECE_MAP[char])
         _piece_cache[char] = Image.open(path).convert("RGBA").resize((SQUARE, SQUARE))
     return _piece_cache[char]
+
+def _get_piece_shadow(char: str) -> Optional[Image.Image]:
+    """棋子投影精灵缓存：取棋子 alpha 剪影填深色后高斯模糊，一次生成、每帧粘贴。
+    与棋盘投影共用右下偏移的单光源约定。"""
+    if not ENABLE_PIECE_SHADOW:
+        return None
+    if char in _piece_shadow_cache:
+        return _piece_shadow_cache[char]
+    piece = _load_piece(char)
+    alpha = piece.split()[-1]
+    shadow = Image.new("RGBA", piece.size, (0, 0, 0, 0))
+    shadow.putalpha(alpha.point(lambda a: int(a * 0.45)))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=3))
+    _piece_shadow_cache[char] = shadow
+    return shadow
+
+def _paste_piece(img: Image.Image, piece_img: Image.Image, x: int, y: int,
+                 shadow_char: Optional[str] = None):
+    """粘贴棋子；若提供 shadow_char 则先在右下粘贴投影（光源左上）。"""
+    if shadow_char is not None:
+        sh = _get_piece_shadow(shadow_char)
+        if sh is not None:
+            img.paste(sh, (x + 4, y + 6), sh)
+    img.paste(piece_img, (x, y), piece_img)
 
 def _get_font(size: int) -> ImageFont.FreeTypeFont:
     if size not in _font_cache:
@@ -110,6 +135,47 @@ def _get_background(width: int, height: int) -> Image.Image:
         _bg_cache[key] = img
     return _bg_cache[key].copy()
 
+# ============================================================
+# PLAN-005 Core 2 视觉质量开关与缓存（B1~B5）
+# 每项可独立关闭以做前后对照；棋盘/棋子投影一次生成、每帧仅粘贴。
+# ============================================================
+ENABLE_BOARD_SHADOW = True      # B1: 棋盘投影
+ENABLE_AA_ARROWS = True         # B2: 箭头 2x overlay 抗锯齿
+ENABLE_SOFT_GLOW = True         # B3: glow 高斯柔光（替代同心矩形）
+ENABLE_SOFT_HIGHLIGHT = True    # B4: 格子高亮柔和圆角内嵌环
+ENABLE_PIECE_SHADOW = True      # B5: 棋子投影精灵缓存
+
+_board_shadow_cache: dict = {}
+
+def _get_board_shadow() -> Optional[Image.Image]:
+    """棋盘投影缓存：在棋盘矩形下方画一块模糊的深色阴影，让棋盘浮起。
+    一次生成、每帧粘贴；阴影略大于棋盘并向右下偏移，模拟单一光源。"""
+    if not ENABLE_BOARD_SHADOW:
+        return None
+    key = ("board_shadow",)
+    if key in _board_shadow_cache:
+        return _board_shadow_cache[key]
+    # 投影画布比棋盘大一圈以容纳模糊扩散
+    pad = 24
+    w, h = BOARD_SIZE + pad * 2, BOARD_SIZE + pad * 2
+    shadow = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle([pad - 6, pad - 6, pad + BOARD_SIZE + 6, pad + BOARD_SIZE + 6],
+                         radius=12, fill=(0, 0, 0, 150))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=12))
+    _board_shadow_cache[key] = shadow
+    return shadow
+
+def _paste_board_shadow(img: Image.Image):
+    """把棋盘投影粘贴到画布上（背景之上、棋盘格之下）。向右下偏移模拟光源。"""
+    shadow = _get_board_shadow()
+    if shadow is None:
+        return
+    # 投影中心对齐棋盘中心，整体向右下偏移（光源在左上）
+    offset_x = BOARD_LEFT - 24 + 8
+    offset_y = BOARD_TOP - 24 + 8
+    img.paste(shadow, (offset_x, offset_y), shadow)
+
 #  绘制函数
 
 def _draw_board(draw: ImageDraw.ImageDraw):
@@ -148,67 +214,218 @@ def _draw_coordinates(draw: ImageDraw.ImageDraw):
         )
 
 def _draw_highlight(img: Image.Image, sq: int, color: tuple):
-    """ 格子高亮 """
+    """ 格子高亮：柔和圆角内填 + 内嵌描边环（B4），可关闭回退整格平铺 alpha。"""
     x, y = _sq_xy(sq)
-    overlay = Image.new("RGBA", (SQUARE, SQUARE), color)
+    if not ENABLE_SOFT_HIGHLIGHT:
+        overlay = Image.new("RGBA", (SQUARE, SQUARE), color)
+        img.paste(overlay, (x, y), overlay)
+        return
+    # 圆角内填：alpha 取 color 第 4 分量，略降到 70% 避免压住棋子辨识
+    base_a = color[3] if len(color) >= 4 else 110
+    fill_a = int(base_a * 0.7)
+    rgb = color[:3]
+    inset = 6
+    overlay = Image.new("RGBA", (SQUARE, SQUARE), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    od.rounded_rectangle(
+        [inset, inset, SQUARE - inset, SQUARE - inset], radius=10,
+        fill=rgb + (fill_a,), outline=rgb + (min(255, base_a + 40),), width=2,
+    )
     img.paste(overlay, (x, y), overlay)
 
 def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
-    """ 落子后辉光脉冲 """
+    """ 落子后辉光脉冲：高斯柔光（B3）替代 5 层同心矩形；可关闭回退原阶梯式。"""
     if intensity <= 0:
         return
     intensity = max(0.0, min(1.0, intensity))
     x, y = _sq_xy(sq)
-    overlay = Image.new("RGBA", (SQUARE, SQUARE), (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    layers = 5
-    for i in range(layers):
-        a = int(150 * intensity * (1 - i / layers))
-        if a <= 0:
-            continue
-        od.rectangle([i, i, SQUARE - 1 - i, SQUARE - 1 - i],
-                     outline=color + (a,), width=2)
-    img.paste(overlay, (x, y), overlay)
+    rgb = color[:3]
+    if not ENABLE_SOFT_GLOW:
+        # 原阶梯式（保留作前后对照）
+        overlay = Image.new("RGBA", (SQUARE, SQUARE), (0, 0, 0, 0))
+        od = ImageDraw.Draw(overlay)
+        layers = 5
+        for i in range(layers):
+            a = int(150 * intensity * (1 - i / layers))
+            if a <= 0:
+                continue
+            od.rectangle([i, i, SQUARE - 1 - i, SQUARE - 1 - i],
+                         outline=rgb + (a,), width=2)
+        img.paste(overlay, (x, y), overlay)
+        return
+    # 柔光：亮色圆角块经高斯模糊得连续衰减光晕，亮度随 intensity 脉冲
+    glow = Image.new("RGBA", (SQUARE, SQUARE), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.rounded_rectangle([4, 4, SQUARE - 5, SQUARE - 5], radius=8,
+                         fill=rgb + (int(180 * intensity),))
+    glow = glow.filter(ImageFilter.GaussianBlur(radius=5))
+    img.paste(glow, (x, y), glow)
 
 def _draw_arrow(
-    draw: ImageDraw.ImageDraw, from_sq: int, to_sq: int,
+    img: Image.Image, from_sq: int, to_sq: int,
     color=(255, 80, 80), progress: Optional[float] = None
     ):
-    """ 绘制战术箭头,progress非None时在箭头上叠加移动指示圆点（滑动阶段使用） """
+    """绘制战术箭头，progress 非 None 时叠加移动指示圆点（滑动阶段）。
+
+    B2：画到 2x 放大的局部 overlay，LANCZOS 缩回 1x 再合成，消除锯齿；
+    关闭 ENABLE_AA_ARROWS 时回退 1x 直接绘制。overlay 范围取起终点外扩一格，
+    避免箭头尖/圆点被裁。
+    """
     fx, fy = _sq_center(from_sq)
     tx, ty = _sq_center(to_sq)
+    rgb = color[:3]
 
-    # 主线（半透明）
-    draw.line([(fx, fy), (tx, ty)], fill=color + (150,), width=5)
+    if not ENABLE_AA_ARROWS:
+        draw = ImageDraw.Draw(img)
+        draw.line([(fx, fy), (tx, ty)], fill=rgb + (150,), width=5)
+        angle = math.atan2(ty - fy, tx - fx)
+        al, aa = 14, math.pi / 6
+        p1 = (int(tx - al * math.cos(angle - aa)), int(ty - al * math.sin(angle - aa)))
+        p2 = (int(tx - al * math.cos(angle + aa)), int(ty - al * math.sin(angle + aa)))
+        draw.polygon([(int(tx), int(ty)), p1, p2], fill=rgb + (150,))
+        if progress is not None:
+            dot_x = int(lerp(fx, tx, progress))
+            dot_y = int(lerp(fy, ty, progress))
+            r = 5
+            bright = tuple(min(255, c + 80) for c in rgb)
+            draw.ellipse([dot_x - r, dot_y - r, dot_x + r, dot_y + r], fill=bright)
+        return
 
-    # 箭头尖
-    angle = math.atan2(ty - fy, tx - fx)
-    al, aa = 14, math.pi / 6
-    p1 = (int(tx - al * math.cos(angle - aa)), int(ty - al * math.sin(angle - aa)))
-    p2 = (int(tx - al * math.cos(angle + aa)), int(ty - al * math.sin(angle + aa)))
-    draw.polygon([(int(tx), int(ty)), p1, p2], fill=color + (150,))
-
-    # 移动指示圆点（仅滑动阶段）
+    # ---- 2x overlay 抗锯齿 ----
+    pad = SQUARE  # 外扩一格，保证箭头尖/圆点不被裁
+    min_x = min(fx, tx) - pad
+    min_y = min(fy, ty) - pad
+    max_x = max(fx, tx) + pad
+    max_y = max(fy, ty) + pad
+    ow, oh = max_x - min_x, max_y - min_y
+    SCALE = 2
+    overlay = Image.new("RGBA", (ow * SCALE, oh * SCALE), (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    sfx, sfy = (fx - min_x) * SCALE, (fy - min_y) * SCALE
+    stx, sty = (tx - min_x) * SCALE, (ty - min_y) * SCALE
+    # 主线（2x 线宽）
+    od.line([(sfx, sfy), (stx, sty)], fill=rgb + (150,), width=5 * SCALE)
+    # 箭头尖（2x 尺寸）
+    angle = math.atan2(sty - sfy, stx - sfx)
+    al, aa = 14 * SCALE, math.pi / 6
+    p1 = (stx - al * math.cos(angle - aa), sty - al * math.sin(angle - aa))
+    p2 = (stx - al * math.cos(angle + aa), sty - al * math.sin(angle + aa))
+    od.polygon([(stx, sty), p1, p2], fill=rgb + (150,))
+    # 移动指示圆点
     if progress is not None:
-        dot_x = int(lerp(fx, tx, progress))
-        dot_y = int(lerp(fy, ty, progress))
-        r = 5
-        bright = tuple(min(255, c + 80) for c in color[:3])
-        draw.ellipse(
-            [dot_x - r, dot_y - r, dot_x + r, dot_y + r],
-            fill=bright,
-        )
+        dot_x = int(lerp(sfx, stx, progress))
+        dot_y = int(lerp(sfy, sty, progress))
+        r = 5 * SCALE
+        bright = tuple(min(255, c + 80) for c in rgb)
+        od.ellipse([dot_x - r, dot_y - r, dot_x + r, dot_y + r], fill=bright)
+    # 缩回 1x 并以 alpha 合成到画布
+    down = overlay.resize((ow, oh), Image.LANCZOS)
+    img.paste(down, (min_x, min_y), down)
 
 def _draw_pieces_static(
     img: Image.Image, board: chess.Board, skip_sq: Optional[int] = None
     ):
-    """ 绘制静止棋子 """
+    """ 绘制静止棋子（每枚棋子先粘投影再粘本体） """
     for sq, piece in board.piece_map().items():
         if sq == skip_sq:
             continue
         x, y = _sq_xy(sq)
         piece_img = _load_piece(str(piece))
-        img.paste(piece_img, (x, y), piece_img)
+        _paste_piece(img, piece_img, x, y, shadow_char=str(piece))
+
+
+# ============================================================
+# PLAN-005 Core 3 落子结果澄清（仅 python-chess 确定性事件）
+# - 将军攻击线：从将军子到被将王画红色虚线，区别于实线走子箭头
+# - 将杀无逃生格：在被将王周围被对方控制的格标低干扰红点
+# 均只在 glow/hold 帧出现，由 board 状态确定性计算，不做战术推断。
+# ============================================================
+COLOR_ATTACK_LINE = (235, 70, 70)
+COLOR_ESCAPE_BLOCKED = (235, 70, 70, 120)   # 半透明，低干扰
+
+def _draw_check_attack_line(img: Image.Image, board: chess.Board):
+    """将军时从每个将军子画一条红色虚线到被将王（board.checkers() 确定性）。"""
+    if not board.is_check():
+        return
+    king_sq = board.king(board.turn)
+    if king_sq is None:
+        return
+    kx, ky = _sq_center(king_sq)
+    for attacker_sq in board.checkers():
+        ax, ay = _sq_center(attacker_sq)
+        _draw_dashed_line(img, (ax, ay), (kx, ky), COLOR_ATTACK_LINE,
+                          dash=10, gap=7, width=3)
+
+def _draw_dashed_line(img: Image.Image, p0: tuple, p1: tuple,
+                      color: tuple, dash: int = 10, gap: int = 7, width: int = 3):
+    """沿 p0->p1 画半透明虚线。
+
+    PIL 的 ImageDraw.line 在 RGBA 主图上是像素替换而非 alpha 合成，
+    且 _save 会把主图 convert('RGB') 丢弃 alpha——直接画无法实现半透明。
+    故在整图大小的透明 overlay 上聚合所有虚线段，再一次 paste 走真正的 alpha 合成。
+    overlay 一次构造、段数少（每条线约 6 段），开销可忽略。
+    """
+    x0, y0 = p0
+    x1, y1 = p1
+    dist = math.hypot(x1 - x0, y1 - y0)
+    if dist < 1:
+        return
+    ux, uy = (x1 - x0) / dist, (y1 - y0) / dist
+    rgb = color[:3]
+    alpha = color[3] if len(color) >= 4 else 180
+    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    od = ImageDraw.Draw(overlay)
+    covered = 0.0
+    while covered < dist:
+        seg_end = min(covered + dash, dist)
+        sx, sy = x0 + ux * covered, y0 + uy * covered
+        ex, ey = x0 + ux * seg_end, y0 + uy * seg_end
+        od.line([(sx, sy), (ex, ey)], fill=rgb + (alpha,), width=width)
+        covered = seg_end + gap
+    img.paste(overlay, (0, 0), overlay)
+
+def _draw_mate_escape_blocks(img: Image.Image, board: chess.Board):
+    """将杀时在被将王周围被对方控制的空格标低干扰半透明红点，配合现有金框。
+
+    仅标记王邻接 8 格中无己方棋子且被对方攻击的格，避免满屏脏。
+    攻击关系由 board.attacks() 对剩余对方棋子聚合得到（确定性）。
+    """
+    if not board.is_checkmate():
+        return
+    king_sq = board.king(board.turn)
+    if king_sq is None:
+        return
+    attacker_color = not board.turn
+    # 聚合对方所有攻击格（棋子类型无关，仅用于标记"被控制"）
+    attacked: set = set()
+    temp = board.copy()
+    # 移除被将王，避免其自占格影响攻击判定
+    temp.remove_piece_at(king_sq)
+    for sq, piece in temp.piece_map().items():
+        if piece.color == attacker_color:
+            attacked.update(temp.attacks(sq))
+    draw = ImageDraw.Draw(img)
+    for nb in chess.SQUARES:
+        if chess.square_distance(king_sq, nb) != 1:
+            continue
+        piece = board.piece_at(nb)
+        if piece is not None and piece.color == board.turn:
+            continue  # 己方棋子占的格不标
+        if nb in attacked:
+            _draw_escape_dot(img, draw, nb)
+
+
+def _draw_escape_dot(img: Image.Image, draw: ImageDraw.ImageDraw, sq: int):
+    """在格中心画一个低干扰半透明红点（小尺寸，避免压住其他视觉元素）。"""
+    cx, cy = _sq_center(sq)
+    r = 8
+    # 外晕：半透明红圆
+    halo = Image.new("RGBA", (r * 4, r * 4), (0, 0, 0, 0))
+    hd = ImageDraw.Draw(halo)
+    hd.ellipse([r, r, r * 3, r * 3], fill=COLOR_ESCAPE_BLOCKED)
+    img.paste(halo, (cx - r * 2, cy - r * 2), halo)
+    # 中心实心小点
+    draw.ellipse([cx - 3, cy - 3, cx + 3, cy + 3], fill=(235, 70, 70, 220))
 
 
 #  HUD 叠加层
@@ -448,6 +665,8 @@ def render_frame(
     img = _get_background(CANVAS_W, CANVAS_H)
     draw = ImageDraw.Draw(img)
 
+    # 棋盘投影层（背景之上、棋盘格之下）
+    _paste_board_shadow(img)
     # 棋盘层
     _draw_board(draw)
     _draw_coordinates(draw)
@@ -461,7 +680,7 @@ def render_frame(
 
     # 箭头层（progress 非 None 时带移动圆点）
     if from_sq is not None and to_sq is not None:
-        _draw_arrow(draw, from_sq, to_sq, arrow_color, progress=arrow_progress)
+        _draw_arrow(img, from_sq, to_sq, arrow_color, progress=arrow_progress)
 
     # 棋子层
     _draw_pieces_static(img, board)
@@ -485,6 +704,12 @@ def render_frame(
         mate_font = _get_font(36)
         draw.text((BOARD_LEFT + BOARD_SIZE - 16, BOARD_TOP + BOARD_SIZE - 12),
                   "将杀", fill=(255, 215, 0), font=mate_font, anchor="rb")
+
+    # Core 3：落子结果澄清（仅 glow/hold 帧，确定性计算，普通步不触发）
+    if is_check:
+        _draw_check_attack_line(img, board)
+    if is_mate:
+        _draw_mate_escape_blocks(img, board)
 
     return img
 
@@ -529,6 +754,8 @@ def _render_move_sequence(
             img = _get_background(CANVAS_W, CANVAS_H)
             draw = ImageDraw.Draw(img)
 
+            # 棋盘投影层（背景之上、棋盘格之下）
+            _paste_board_shadow(img)
             _draw_board(draw)
             _draw_coordinates(draw)
             _draw_highlight(img, from_sq, from_hl or COLOR_HIGHLIGHT_FROM)
@@ -540,13 +767,13 @@ def _render_move_sequence(
                 cap_img.putalpha(int(255 * max(0.0, 1.0 - t)))
                 img.paste(cap_img, (to_x, to_y), cap_img)
 
-            # 移动棋子
+            # 移动棋子（带投影；y-2 维持原有轻微上浮感）
             cur_x = int(lerp(from_x, to_x, t))
             cur_y = int(lerp(from_y, to_y, t))
-            img.paste(piece_img, (cur_x, cur_y - 2), piece_img)
+            _paste_piece(img, piece_img, cur_x, cur_y - 2, shadow_char=str(piece))
 
             # 箭头 + 移动指示圆点（progress 与棋子同步）
-            _draw_arrow(draw, from_sq, to_sq, arrow_col, progress=t)
+            _draw_arrow(img, from_sq, to_sq, arrow_col, progress=t)
 
             # HUD
             if info:
@@ -796,7 +1023,8 @@ def render_animated_frames(
                 global_frame_idx += 1
 
         seg.start_time = seg_start_cursor
-        seg.duration_s = seg_rendered
+        seg.duration_s = seg_rendered   # 仅写画面占用时长（含动画最低预算，可能略长于语音）
+        # speech_duration_s（真实语音截止）由 TTS 写入，渲染器不得改写——字幕据此分配 cue 避免落入尾静音
         time_cursor += seg_rendered
 
     Logger.success(f"动画渲染完成: {len(frame_paths)} 帧, {sum(durations):.1f}s")

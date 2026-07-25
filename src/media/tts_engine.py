@@ -1,5 +1,5 @@
 from src.common import Segment, Logger, GeneratedCommentary, CompressedStep
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from pydub import AudioSegment
 import chess
 import torch
@@ -317,9 +317,14 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
 
             if not sent_ok or len(combined) == 0:
                 seg.audio_path = ""
+                seg.speech_duration_s = 0.0  # 防御：段复用时清残留，避免误导字幕
+                seg.duration_s = 0.0
                 continue
 
             combined.export(path, format="wav")
+            # speech_duration_s = 真实语音截止（不含 0.3 尾静音），字幕据此分配 cue，
+            # 避免末条字幕落入尾部静音；duration_s 仍含尾静音供画面/音频对齐用。
+            seg.speech_duration_s = combined.duration_seconds
             seg.duration_s = combined.duration_seconds + 0.3
             success_count += 1
 
@@ -433,6 +438,7 @@ def synthesize(
         if not seg.text.strip():
             seg.audio_path = ""
             seg.duration_s = 1.0
+            seg.speech_duration_s = 0.0  # 空段无语音，字幕跳过
             seg.start_time = time_cursor
             time_cursor += 1.0
 
@@ -461,7 +467,8 @@ def synthesize(
                 for seg in fallback_needed:
                     seg.audio_path = os.path.abspath(
                         os.path.join(AUDIO_DIR, f"seg_{seg.move_idx:03d}.wav"))
-                    seg.duration_s = _fallback_pyttsx3(seg.text, seg.audio_path, fb_engine)
+                    seg.speech_duration_s, seg.duration_s = _fallback_pyttsx3(
+                        seg.text, seg.audio_path, fb_engine)
                 try:
                     fb_engine.stop()
                 except Exception:
@@ -480,7 +487,8 @@ def synthesize(
             continue
         path = os.path.abspath(os.path.join(AUDIO_DIR, f"seg_{seg.move_idx:03d}.wav"))
         seg.audio_path = path
-        seg.duration_s = _fallback_pyttsx3(seg.text, seg.audio_path, fallback_engine)
+        seg.speech_duration_s, seg.duration_s = _fallback_pyttsx3(
+            seg.text, path, fallback_engine)
 
     if fallback_engine:
         try:
@@ -506,16 +514,23 @@ def _init_fallback_engine():
         return None
 
 
-def _fallback_pyttsx3(text: str, output_path: str, engine) -> float:
-    """pyttsx3 回退，返回时长"""
+def _fallback_pyttsx3(text: str, output_path: str, engine) -> Tuple[float, float]:
+    """pyttsx3 回退，返回 (speech_duration_s, duration_s)。
+
+    speech_duration_s 为真实语音时长（不含尾静音），duration_s 含 0.3 尾静音，
+    与 ChatTTS 路径保持同一契约，供字幕按真实语音分配 cue。
+    """
     if engine is None:
-        return max(1.0, len(text) * 0.1)
+        d = max(1.0, len(text) * 0.1)
+        return d, d + 0.3
     try:
         engine.save_to_file(text, output_path)
         engine.runAndWait()
         _normalize_audio(output_path)
         audio = AudioSegment.from_wav(output_path)
-        return audio.duration_seconds + 0.3
+        speech = audio.duration_seconds
+        return speech, speech + 0.3
     except Exception as e:
         Logger.error(f"pyttsx3 合成失败: {e}")
-        return max(1.0, len(text) * 0.1)
+        d = max(1.0, len(text) * 0.1)
+        return d, d + 0.3

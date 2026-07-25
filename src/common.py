@@ -30,8 +30,9 @@ class Segment:
     text: str                   # 该节点的解说文本，用于合成语音和字幕生成
     pacing: str = "normal"      # 解说节奏，slow、normal、fast、pause_before、pause_after
     audio_path: str = ""        # TTS生成的音频文件路径
-    duration_s: float = 0.0     # 音频时长
+    duration_s: float = 0.0     # 段最终画面占用时长；TTS 先写入语音时长，渲染器可能因最低动画预算改写为渲染时长
     start_time: float = 0.0     # 在最终视频中的不含片头静音起始时间
+    speech_duration_s: float = 0.0  # 真实语音截止时长（不含句后/尾部静音）；由 TTS 写入后不再被改写，字幕据此分配 cue 避免末条落入静音尾
     moves: List[chess.Move] = field(default_factory=list)  # 本节点包含的子步走法，按顺序在节点时长内依次播放
     phase: str = ""             # 当前节点所属残局阶段名，渲染器用于阶段过渡提示
 

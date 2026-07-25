@@ -115,13 +115,22 @@ def build_cues(segments: List[Segment], offset_s: float = 0.0) -> List[tuple]:
     直接供moviepy的SubtitlesClip(list)使用绕开其脆弱的SRT文本解析
     file_to_subtitles对多行文本/空行/数字冒号易误判，产生None时间戳后崩溃
     过滤空文本cue，确保下游不会拿到非法条目
+
+    时间预算优先取 speech_duration_s（真实语音截止，不含尾静音），
+    使末条字幕随语音结束消失而非落入尾部静音；字段缺失或为 0 时回退 duration_s。
     """
     cues: List[tuple] = []
     for segment in segments:
         if not segment.text.strip():
             continue
         seg_start = offset_s + segment.start_time
-        for start, end, text in _allocate_cues(segment.text, seg_start, segment.duration_s):
+        # 优先真实语音时长；缺失/为 0 时回退渲染后的 duration_s（画面占用，可能含尾静音）
+        seg_dur = float(getattr(segment, "speech_duration_s", 0.0) or 0.0)
+        if seg_dur <= 0:
+            seg_dur = float(segment.duration_s or 0.0)
+        if seg_dur <= 0:
+            continue
+        for start, end, text in _allocate_cues(segment.text, seg_start, seg_dur):
             t = (text or "").strip()
             if not t:
                 continue
