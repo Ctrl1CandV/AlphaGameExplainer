@@ -20,6 +20,12 @@ from typing import Optional
 import hashlib
 import re
 
+# PLAN-006 阶段 D：Puzzle 教学角色 prompt 指令（≤ 20 token/节点，important 不注入省 token）
+_PUZZLE_EMPHASIS_PROMPT = {
+    "pivotal": "重要性: 核心机理——深入解释战术主题与关键变化",
+    "routine": "重要性: 跟进——简要带过，不展开",
+}
+
 # Puzzle战术讲解解说生成
 def _get_depth_instruction(rating: int) -> str:
     """
@@ -363,6 +369,11 @@ def _build_puzzle_chunk_prompt(
         elif roles and key_reason:
             roles_cn = "、".join(roles)
             lines.append(f"[参考] 本步承担标签角色({roles_cn})：{key_reason}")
+
+        # PLAN-006 阶段 D：emphasis_level 教学角色指令（≤ 20 token）
+        emphasis = node.get("emphasis_level", "important")
+        if emphasis in _PUZZLE_EMPHASIS_PROMPT:
+            lines.append(_PUZZLE_EMPHASIS_PROMPT[emphasis])
 
         # 参考材料
         prereq = node.get("prerequisite_facts", "")

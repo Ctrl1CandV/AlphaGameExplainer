@@ -33,6 +33,11 @@ GLOW_SEC = 0.30
 INTRO_SEC = 1.5
 MIN_STEP_HOLD = 0.35
 
+# PLAN-006 视觉分化：emphasis_level → 画面效果参数
+# 阶段 E 二轮反馈修正：用户明确全局效果（整屏明暗/缩放/字幕变体）观感差，
+# 只保留局部效果（落子辉光增强、面板着法着色），详略改由局部辉光 + 时间节奏承担。
+GLOW_SEC_PIVOTAL = 0.45          # pivotal 辉光延长（默认 0.30），局部作用于落点格
+
 # 颜色
 COLOR_LIGHT = (240, 217, 181)
 COLOR_DARK = (181, 136, 99)
@@ -505,6 +510,8 @@ def _draw_side_panel(img: Image.Image, info: dict):
 
     所有区域在数据缺失时优雅降级（谜题链路无评分数据时不画评估条）。
     """
+    # PLAN-006：当前着法按 emphasis 着色
+    _emphasis = info.get("emphasis_level", "important")
     px = PANEL_LEFT
     pw = PANEL_WIDTH
     panel_top = BOARD_TOP
@@ -565,9 +572,12 @@ def _draw_side_panel(img: Image.Image, info: dict):
                   fill=(150, 150, 158), font=_get_font(12), anchor="lt")
         font_hist = _get_font(14)
         recent = history[-5:]
+        # PLAN-006：最新着法按 emphasis 着色，其余保持灰色
+        _HIST_COLORS = {"pivotal": (255, 235, 150), "important": (230, 230, 238),
+                        "routine": (140, 140, 148)}
         line = ""
         row_y = y + 24
-        for token in recent:
+        for token in recent[:-1]:
             trial = (line + " " + token).strip()
             if draw.textlength(trial, font=font_hist) > inner_w and line:
                 draw.text((inner_x, row_y), line, fill=(190, 190, 198),
@@ -576,8 +586,19 @@ def _draw_side_panel(img: Image.Image, info: dict):
                 line = token
             else:
                 line = trial
+        # 最后一枚 token（当前着法）用 emphasis 色绘制
+        last_color = _HIST_COLORS.get(_emphasis, (190, 190, 198))
+        if recent:
+            trial = (line + " " + recent[-1]).strip()
+            if draw.textlength(trial, font=font_hist) > inner_w and line:
+                draw.text((inner_x, row_y), line, fill=(190, 190, 198),
+                          font=font_hist, anchor="lt")
+                row_y += 18
+                line = recent[-1]
+            else:
+                line = trial
         if line:
-            draw.text((inner_x, row_y), line, fill=(190, 190, 198),
+            draw.text((inner_x, row_y), line, fill=last_color,
                       font=font_hist, anchor="lt")
 
 def _draw_vertical_info_bar(img: Image.Image, info: dict):
@@ -720,13 +741,15 @@ def _render_move_sequence(
     hold_sec: float, is_check: bool = False, info: Optional[dict] = None,
     sub_colors=None, is_mate: bool = False, phase_label_name: str = "",
     phase_label_fade_frames: int = 0, phase_label_start_frame: int = 0,
-    _sub_frame_idx: int = 0
+    _sub_frame_idx: int = 0, slide_sec: float = SLIDE_SEC,
+    emphasis: str = "important"
     ) -> List[Tuple[Image.Image, float]]:
     """
     为单步走法生成 (帧, 时长) 序列
-    三阶段：滑动(0.45s) → 落子高光脉冲(0.30s) → 定格保持(hold_sec)
+    三阶段：滑动(slide_sec) → 落子高光脉冲(glow) → 定格保持(hold_sec)
     滑动阶段箭头带移动指示圆点。定格保持为单帧长时长。
     phase_label_* 参数用于在首帧叠加阶段标记。
+    PLAN-006：pivotal 落子辉光更强更长（局部效果，作用于落点格）。
     """
     from_sq = move.from_square
     to_sq = move.to_square
@@ -748,7 +771,7 @@ def _render_move_sequence(
         from_x, from_y = _sq_xy(from_sq)
         to_x, to_y = _sq_xy(to_sq)
 
-        slide_n = max(2, round(SLIDE_SEC * FPS))
+        slide_n = max(2, round(slide_sec * FPS))
         for i in range(slide_n):
             t = ease_in_out_cubic(i / (slide_n - 1))
             img = _get_background(CANVAS_W, CANVAS_H)
@@ -794,13 +817,15 @@ def _render_move_sequence(
         # piece is None（罕见：不合法的走法）→ 直接渲染最终帧
         slide_n = 0
 
-    # ---- 阶段2：落子高光脉冲 ----
+    # ---- 阶段2：落子高光脉冲（PLAN-006：pivotal 辉光更强更长）----
     glow_color = (COLOR_CHECK_GLOW if is_check
                   else COLOR_CAPTURE_GLOW if is_capture
                   else COLOR_GLOW)
-    glow_n = max(2, round(GLOW_SEC * FPS))
+    _glow_sec = GLOW_SEC_PIVOTAL if emphasis == "pivotal" else GLOW_SEC
+    _glow_boost = 1.4 if emphasis == "pivotal" else 1.0
+    glow_n = max(2, round(_glow_sec * FPS))
     for i in range(glow_n):
-        intensity = math.sin((i / (glow_n - 1)) * math.pi)
+        intensity = math.sin((i / (glow_n - 1)) * math.pi) * _glow_boost
         img = render_frame(board_after, from_sq=from_sq, to_sq=to_sq,
                            arrow_color=arrow_col, is_check=is_check, info=info,
                            from_hl_color=from_hl, to_hl_color=to_hl,
@@ -836,10 +861,11 @@ def _phase_label_alpha(frame_rel: int, total_frames: int) -> int:
     else:
         return int(255 * (1 - (t - 0.8) / 0.2))  # 255 → 0
 
-def _step_overhead_sec() -> float:
-    """单个子步「滑动+高光」的固定开销（秒），不含定格"""
-    slide_n = max(2, round(SLIDE_SEC * FPS))
-    glow_n = max(2, round(GLOW_SEC * FPS))
+def _step_overhead_sec(slide_sec: float = SLIDE_SEC, emphasis: str = "important") -> float:
+    """单个子步「滑动+高光」的固定开销（秒），不含定格。PLAN-006：pivotal 辉光更长。"""
+    slide_n = max(2, round(slide_sec * FPS))
+    _glow_sec = GLOW_SEC_PIVOTAL if emphasis == "pivotal" else GLOW_SEC
+    glow_n = max(2, round(_glow_sec * FPS))
     return (slide_n + glow_n) / FPS
 
 #  主渲染入口
@@ -869,7 +895,6 @@ def render_animated_frames(
     durations: List[float] = []
     fnum = 0
     move_num = 0
-    step_overhead = _step_overhead_sec()
 
     # 阶段追踪（用于阶段切换标签）
     prev_phase = ""
@@ -904,6 +929,7 @@ def render_animated_frames(
         node_moves = list(getattr(seg, "moves", []) or [])
         seg_target = seg.duration_s if seg.duration_s and seg.duration_s > 0 else 3.0
         seg_start_cursor = time_cursor
+        seg_emphasis = getattr(seg, "emphasis_level", "important") or "important"
 
         # 检测阶段切换 → 启动阶段标签
         seg_phase = getattr(seg, "phase", "") or ""
@@ -920,7 +946,7 @@ def render_animated_frames(
                 panel_info, move_num, total, history, score,
                 white_captured, black_captured,
                 captured_white_list, captured_black_list,
-                current_phase=seg_phase
+                current_phase=seg_phase, emphasis=seg_emphasis
             )
             # 无走法段不叠加阶段标签（开场白/总结词的 phase 为空或不变）
             img = render_frame(board, info=info, is_mate=is_mate)
@@ -935,6 +961,7 @@ def render_animated_frames(
         # 子步重要性加权分配定格时长：吃子/将军/将杀步获得更多定格，
         # 重复驱赶步快速带过。总时长不变，但观众能在重要步上"看清楚"。
         n = len(node_moves)
+        step_overhead = _step_overhead_sec(getattr(seg, "slide_sec", SLIDE_SEC), seg_emphasis)
         budget_hold = seg_target - n * step_overhead
 
         # 预计算每步权重（在副本上推进，保证每步在正确局面上评估）
@@ -991,7 +1018,7 @@ def render_animated_frames(
                 panel_info, move_num, total, history, score,
                 white_captured, black_captured,
                 captured_white_list, captured_black_list,
-                current_phase=seg_phase
+                current_phase=seg_phase, emphasis=seg_emphasis
             )
 
             sub_colors = _SUBSTEP_COLORS[sub_idx % len(_SUBSTEP_COLORS)]
@@ -1017,7 +1044,9 @@ def render_animated_frames(
                     phase_label_name=pl_name,
                     phase_label_fade_frames=pl_fade,
                     phase_label_start_frame=pl_start,
-                    _sub_frame_idx=global_frame_idx):
+                    _sub_frame_idx=global_frame_idx,
+                    slide_sec=getattr(seg, "slide_sec", SLIDE_SEC),
+                    emphasis=seg_emphasis):
                 _save(img, dur)
                 seg_rendered += dur
                 global_frame_idx += 1
@@ -1048,7 +1077,7 @@ def _make_frame_info(
     white_captured: int = 0, black_captured: int = 0,
     captured_white: Optional[list] = None,
     captured_black: Optional[list] = None,
-    current_phase: str = ""
+    current_phase: str = "", emphasis: str = "important"
     ) -> Optional[dict]:
     """构建帧级信息字典（供 HUD 叠加层使用）"""
     if panel_info is None:
@@ -1065,4 +1094,5 @@ def _make_frame_info(
         "captured_white": captured_white or [],
         "captured_black": captured_black or [],
         "current_phase": current_phase,
+        "emphasis_level": emphasis,
     }

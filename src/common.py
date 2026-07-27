@@ -35,6 +35,9 @@ class Segment:
     speech_duration_s: float = 0.0  # 真实语音截止时长（不含句后/尾部静音）；由 TTS 写入后不再被改写，字幕据此分配 cue 避免末条落入静音尾
     moves: List[chess.Move] = field(default_factory=list)  # 本节点包含的子步走法，按顺序在节点时长内依次播放
     phase: str = ""             # 当前节点所属残局阶段名，渲染器用于阶段过渡提示
+    emphasis_level: str = "important"  # PLAN-006：重要性梯度（pivotal/important/routine），TTS 查表用
+    pre_silence_s: float = 0.0  # PLAN-006：段前静音秒数（pivotal 前置停顿，由查表填入）
+    slide_sec: float = 0.45     # PLAN-006 阶段 D：走子动画滑动时长（pivotal 0.55 / routine 0.35）
 
 @dataclass
 class CompressedStep:

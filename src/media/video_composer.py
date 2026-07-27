@@ -355,15 +355,6 @@ def compose(
     if not os.path.exists(_FONT_PATH):
         _FONT_PATH = "C:/Windows/Fonts/arial.ttf"
 
-    def _mk_sub(txt):
-        sub_font_size = 28 if IS_VERTICAL else 26
-        return TextClip(
-            text=txt, font=_FONT_PATH, font_size=sub_font_size, color="#F0EDE5",
-            stroke_color="#1a1a1a", stroke_width=1.5,
-            method="caption", size=(card_w, SUBTITLE_HEIGHT),
-            text_align="center",
-        )
-
     if cues is None:
         try:
             from moviepy.video.tools.subtitles import file_to_subtitles
@@ -372,6 +363,16 @@ def compose(
         except Exception as e:
             Logger.warn(f"读取字幕文件失败，将不渲染字幕: {e}")
             cues = []
+
+    # 字幕样式统一（PLAN-006 阶段 E 二轮反馈：字幕变体属全局效果、观感差，已回退为统一样式）
+    def _mk_sub(txt):
+        sub_font_size = 28 if IS_VERTICAL else 26
+        return TextClip(
+            text=txt, font=_FONT_PATH, font_size=sub_font_size, color="#F0EDE5",
+            stroke_color="#1a1a1a", stroke_width=1.5,
+            method="caption", size=(card_w, SUBTITLE_HEIGHT),
+            text_align="center",
+        )
 
     layers = [video]
     if cues:

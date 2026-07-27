@@ -6,6 +6,7 @@ from src.analysis.insight_extractor import extract_for_compressed
 from src.storyboard.compressor import _role_meta
 from typing import List, Optional, Tuple
 import chess
+import re
 
 LONG_MOVE_THRESHOLD = 18
 COMPACT_NODE_THRESHOLD = 7
@@ -265,6 +266,30 @@ _ROLE_WORD_BUDGET = {
     "resolution": "60-100字",
 }
 
+# PLAN-006 阶段 B：emphasis 修正系数（叠加在 narrative_role 基准之上）
+_EMPHASIS_BUDGET_FACTOR = {"pivotal": 1.4, "important": 1.0, "routine": 0.7}
+# routine 节点字数下限（与 MIN_VOICEOVER_LEN 对齐）
+_EMPHASIS_BUDGET_FLOOR = 28
+
+
+def _apply_emphasis_budget(base_budget: str, emphasis: str) -> str:
+    """把 role 基准字数范围乘以 emphasis 修正系数，下限截断保证 ≥ FLOOR。
+
+    例："40-70字" × routine(0.7) → "28-49字"（下限 40×0.7=28 截断生效）
+    例："110-160字" × pivotal(1.4) → "154-224字"
+    """
+    factor = _EMPHASIS_BUDGET_FACTOR.get(emphasis, 1.0)
+    if factor == 1.0:
+        return base_budget
+    m = re.match(r"(\d+)-(\d+)字", base_budget)
+    if not m:
+        return base_budget
+    low = int(m.group(1))
+    high = int(m.group(2))
+    new_low = max(_EMPHASIS_BUDGET_FLOOR, int(low * factor))
+    new_high = max(new_low + 10, int(high * factor))
+    return f"{new_low}-{new_high}字"
+
 
 def _assign_narrative_role(idx: int, total: int, tension: float, node: dict) -> str:
     """根据节点位置+张力分数+特殊事件判定叙事角色。
@@ -486,6 +511,30 @@ def build(board: chess.Board, compressed: List[CompressedStep], winner_color=Non
                 node["narrative_role"] = role
                 node["tone_hint"] = _ROLE_TONE.get(role, "")
                 node["word_budget"] = _ROLE_WORD_BUDGET.get(role, "60-90字")
+
+            # PLAN-006 阶段 A：注入 emphasis_level（重要性梯度）
+            # 基础值由 insight_extractor._inject_emphasis_levels 计算（tension 阈值+相对排名）。
+            # 此处追加事件覆写：endgame_changed → pivotal；反复试探机动 → routine。
+            emphasis = insight.get("emphasis_level", "important")
+            if endgame_changed:
+                emphasis = "pivotal"
+            if same_position and contains_rep:
+                emphasis = "routine"
+            node["emphasis_level"] = emphasis
+
+            # PLAN-006 阶段 B：word_budget 按 emphasis 修正（下限截断保证 ≥ min_len）
+            if "word_budget" in node:
+                node["word_budget"] = _apply_emphasis_budget(
+                    node["word_budget"], emphasis)
+            # tone_hint 按 emphasis 追加语气修正
+            if emphasis == "pivotal":
+                node["tone_hint"] = node.get("tone_hint", "") + "，语气加重、节奏放慢"
+            elif emphasis == "routine":
+                node["tone_hint"] = node.get("tone_hint", "") + "，语气平稳轻描淡写"
+
+        # PLAN-006：insight 提取失败时缺省值（不降档）
+        if "emphasis_level" not in node:
+            node["emphasis_level"] = "important"
 
         # 引擎信号（中性观察，不给结论）：
         # 利用节点已有的 eval_delta / is_only_move 生成量化参考句。

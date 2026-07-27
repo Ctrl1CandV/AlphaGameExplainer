@@ -24,6 +24,12 @@ MAX_RETRIES = 1
 # 与 validators.MIN_VOICEOVER_LEN 同步（PLAN-003 B2 宽松化 48→44）。真值源在 validators.py。
 MIN_VOICEOVER_LEN = 44
 
+# PLAN-006 阶段 B：emphasis_level prompt 指令（≤ 20 token/节点，important 不注入省 token）
+_EMPHASIS_PROMPT = {
+    "pivotal": "重要性: 全局转折——讲深讲透，语带张力",
+    "routine": "重要性: 过渡——一句带过，不展开分析",
+}
+
 _EXAMPLE_BY_ENDGAME = {
     "单车杀王": (
         "第1步：Ra5+。白车移至a5将军，画出了第一条控制线——黑王被限制在第5排以上，活动空间开始缩小。\n"
@@ -443,6 +449,11 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
         budget = node.get("word_budget", "")
         if role and budget:
             parts.append(f"叙事角色: {role}（{tone}）— 字数预算: {budget}")
+
+        # PLAN-006 阶段 B：emphasis_level 注入（≤20 token，给模型明确的重要性梯度信号）
+        emphasis = node.get("emphasis_level", "important")
+        if emphasis in _EMPHASIS_PROMPT:
+            parts.append(_EMPHASIS_PROMPT[emphasis])
         role_guidance = {
             "setup": "交代当前局面的任务和本步作用，不提前宣布结局。",
             "build_up": "说明本步新增了哪项限制、改善了什么配合，以及局面如何向关键点推进。",

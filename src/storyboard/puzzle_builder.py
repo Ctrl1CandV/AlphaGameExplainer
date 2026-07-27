@@ -286,6 +286,13 @@ def build_for_puzzle( board: chess.Board, moves: List[chess.Move], puzzle) -> di
             "phase_hint": "",
             "claim_level": "terminal" if is_checkmate_after else "forcing" if is_check else "positioning",
         }
+        # PLAN-006 阶段 D：Puzzle 教学角色→emphasis_level 映射
+        if is_core_key:
+            node["emphasis_level"] = "pivotal"
+        elif i == 0:
+            node["emphasis_level"] = "important"  # 识别阶段/setup
+        else:
+            node["emphasis_level"] = "routine"    # follow_up
         # PLAN-003 B+：本节点吃掉的棋子类型累加进全局集，供后续节点的放行快照使用。
         # 兵不校验（PIECE_CN_TO_TYPE 不含兵），跳过；中文反查枚举。
         if captured_piece_cn in _CN_TO_PIECE_TYPE:

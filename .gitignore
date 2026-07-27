@@ -3,6 +3,7 @@ __pycache__/
 .claude/
 .idea/
 .zcode/
+.qoder/
 .env
 .git/
 *.exe

@@ -129,23 +129,28 @@ def _clean_text_for_speech(text: str) -> str:
     return t.strip()
 
 
-def _preprocess_text_for_chattts(text: str, pacing: str) -> str:
+def _preprocess_text_for_chattts(text: str, pacing: str, speed_override: int = 0) -> str:
     """根据 pacing 为 ChatTTS 添加语速与韵律标记。
 
     只用 [speed_N] 控制语速 + 句中 [uv_break] 控制停顿。
     不再使用 [oral_N]：它会让模型注入口语填充词（嗯/啊/那个），
-    且填充音音色常与主音色不同，听上去像另一个人在旁边"嗯"。
+    且填充音音色常与主音色不同，听上去像另一个人在旁边“嗯”。
+
+    speed_override: PLAN-006 阶段 C，从二维参数表查出的 speed 值（0 表示用旧逻辑）。
     """
     import re
 
-    speed_map = {
-        "slow": "[speed_3]",
-        "normal": "[speed_5]",
-        "fast": "[speed_6]",
-        "pause_before": "[speed_4]",
-        "pause_after": "[speed_4]",
-    }
-    speed_tag = speed_map.get(pacing, "[speed_5]")
+    if speed_override > 0:
+        speed_tag = f"[speed_{speed_override}]"
+    else:
+        speed_map = {
+            "slow": "[speed_3]",
+            "normal": "[speed_5]",
+            "fast": "[speed_6]",
+            "pause_before": "[speed_4]",
+            "pause_after": "[speed_4]",
+        }
+        speed_tag = speed_map.get(pacing, "[speed_5]")
 
     # 句中韵律：句末标点仅在本句已积累足够内容时才插停顿；逗号/顿号/冒号同理。
     # 短句（如开场白「这是一个X残局。」）不再每句都插 [uv_break]——过密的停顿
@@ -180,6 +185,35 @@ _DEFAULT_PAUSE_MS = 250
 _MIN_SENTENCE_CHARS = 10
 # 句音频头尾淡入淡出毫秒，避免硬接静音产生的爆音/断线感
 _SENTENCE_FADE_MS = 60
+
+# PLAN-006 阶段 C：pacing × emphasis 二维 TTS 参数表
+# 阶段 0 冒烟结论：temp 0.5 长句不可用，上限 0.4；温度差异感知微弱，主要靠 speed + silence 分化。
+# 阶段 E 反馈修正：routine speed 6-7 过快导致发音模糊，降速保清晰；pivotal 放慢+加长停顿拉大情绪对比。
+_EMPHASIS_TTS_PARAMS = {
+    # (pacing, emphasis): {temp, top_P, top_K, speed, post_ms, pre_s}
+    ("slow", "pivotal"):     {"temp": 0.40, "top_P": 0.7, "top_K": 20, "speed": 3, "post_ms": 550, "pre_s": 0.4},
+    ("slow", "important"):   {"temp": 0.30, "top_P": 0.7, "top_K": 20, "speed": 5, "post_ms": 400, "pre_s": 0.2},
+    ("slow", "routine"):     {"temp": 0.25, "top_P": 0.6, "top_K": 18, "speed": 5, "post_ms": 300, "pre_s": 0.0},
+    ("normal", "pivotal"):   {"temp": 0.40, "top_P": 0.7, "top_K": 20, "speed": 4, "post_ms": 500, "pre_s": 0.4},
+    ("normal", "important"): {"temp": 0.30, "top_P": 0.6, "top_K": 18, "speed": 5, "post_ms": 350, "pre_s": 0.0},
+    ("normal", "routine"):   {"temp": 0.20, "top_P": 0.5, "top_K": 15, "speed": 5, "post_ms": 250, "pre_s": 0.0},
+    ("fast", "pivotal"):     {"temp": 0.35, "top_P": 0.7, "top_K": 20, "speed": 4, "post_ms": 450, "pre_s": 0.3},
+    ("fast", "important"):   {"temp": 0.25, "top_P": 0.6, "top_K": 18, "speed": 6, "post_ms": 300, "pre_s": 0.0},
+    ("fast", "routine"):     {"temp": 0.20, "top_P": 0.5, "top_K": 15, "speed": 6, "post_ms": 220, "pre_s": 0.0},
+}
+# pause_before/pause_after 归入 slow/normal 对应行
+_PACING_ALIAS = {"pause_before": "slow", "pause_after": "normal"}
+
+
+def _lookup_tts_params(pacing: str, emphasis: str) -> dict:
+    """查二维参数表，未定义组合回退 emphasis='important' 行。"""
+    p = _PACING_ALIAS.get(pacing, pacing)
+    if p not in ("slow", "normal", "fast"):
+        p = "normal"
+    key = (p, emphasis)
+    if key not in _EMPHASIS_TTS_PARAMS:
+        key = (p, "important")
+    return _EMPHASIS_TTS_PARAMS[key]
 
 
 def _split_sentences(text: str) -> List[tuple]:
@@ -253,21 +287,13 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
     t_start = time.time()
 
     success_count = 0
+    prev_emphasis = ""  # PLAN-006：跟踪前一段 emphasis，连续 pivotal 时 pre_silence 减半
     for i, (text, seg) in enumerate(zip(batch_texts, batch_segments)):
         path = os.path.abspath(os.path.join(AUDIO_DIR, f"seg_{seg.move_idx:03d}.wav"))
         seg.audio_path = path
 
-        # slow/pause 不再用 0.1 极低温：低温会让自回归 TTS 在停顿边界坍缩到
-        # 训练分布里概率最高的衬词 token（嗯/呃），开头慢节奏段尤其明显。
-        # 提到与 normal 接近的温度，韵律仍平稳但不再固定吐衬词。
-        pacing_params = {
-            "slow":     {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
-            "normal":   {"temperature": 0.2, "top_P": 0.6, "top_K": 18},
-            "fast":     {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
-            "pause_before": {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
-            "pause_after":  {"temperature": 0.3, "top_P": 0.7, "top_K": 20},
-        }
-        pp = pacing_params.get(seg.pacing, pacing_params["normal"])
+        # PLAN-006 阶段 C：从 pacing×emphasis 二维表查参数
+        pp = _lookup_tts_params(seg.pacing, seg.emphasis_level)
 
         speech_text = _clean_text_for_speech(text)
 
@@ -280,11 +306,19 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
 
         try:
             combined = AudioSegment.empty()
+
+            # PLAN-006：段前静音（pivotal 停顿感，连续 pivotal 减半）
+            pre_s = pp["pre_s"]
+            if pre_s > 0 and prev_emphasis == "pivotal" and seg.emphasis_level == "pivotal":
+                pre_s = pre_s / 2
+            if pre_s > 0:
+                combined += AudioSegment.silent(duration=int(pre_s * 1000), frame_rate=_CHATTTS_SAMPLE_RATE)
+
             sent_ok = False
             for sent_idx, (sentence, pause_ms) in enumerate(sentences):
-                processed_text = _preprocess_text_for_chattts(sentence, seg.pacing)
+                processed_text = _preprocess_text_for_chattts(sentence, seg.pacing, speed_override=pp["speed"])
                 # 段首句用更低温度稳定音色，后续句略升温减少累积漂移
-                temperature = pp["temperature"] if sent_idx == 0 else min(pp["temperature"] + 0.1, 0.4)
+                temperature = pp["temp"] if sent_idx == 0 else min(pp["temp"] + 0.1, 0.4)
                 params = chat.InferCodeParams(
                     spk_emb=_chattts_spk_emb,
                     temperature=temperature,
@@ -306,8 +340,9 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
                 sent_audio = sent_audio.fade_in(_SENTENCE_FADE_MS).fade_out(_SENTENCE_FADE_MS)
                 combined += sent_audio
                 # 句后插入真实静音（最后一句不加，段间静音由 composer 处理）
+                # PLAN-006：句后静音用查表值（体现 emphasis 分化），不再纯由标点决定
                 if sent_idx < len(sentences) - 1:
-                    combined += AudioSegment.silent(duration=pause_ms)
+                    combined += AudioSegment.silent(duration=pp["post_ms"])
                 sent_ok = True
 
                 try:
@@ -322,11 +357,12 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
                 continue
 
             combined.export(path, format="wav")
-            # speech_duration_s = 真实语音截止（不含 0.3 尾静音），字幕据此分配 cue，
+            # speech_duration_s = 真实语音截止（不含前置静音和 0.3 尾静音），字幕据此分配 cue，
             # 避免末条字幕落入尾部静音；duration_s 仍含尾静音供画面/音频对齐用。
-            seg.speech_duration_s = combined.duration_seconds
+            seg.speech_duration_s = combined.duration_seconds - pre_s
             seg.duration_s = combined.duration_seconds + 0.3
             success_count += 1
+            prev_emphasis = seg.emphasis_level
 
         except Exception:
             seg.audio_path = ""
@@ -407,6 +443,7 @@ def build_puzzle_segments(
             voice_map[seg.id] = (seg.voiceover, seg.pacing)
 
     result: List[Segment] = []
+    _SLIDE_BY_EMPHASIS = {"pivotal": 0.55, "important": 0.45, "routine": 0.35}
     for node in nodes:
         nid = node["id"]
         vo, pac = voice_map.get(nid, (None, "normal"))
@@ -415,12 +452,15 @@ def build_puzzle_segments(
         node_moves: List[chess.Move] = []
         if nid <= len(moves):
             node_moves = [moves[nid - 1]]
+        emph = node.get("emphasis_level", "important")
         result.append(Segment(
             move_idx=nid,
             text=text,
             pacing=pac or "normal",
             moves=node_moves,
             phase="",
+            emphasis_level=emph,
+            slide_sec=_SLIDE_BY_EMPHASIS.get(emph, 0.45),
         ))
     return result
 

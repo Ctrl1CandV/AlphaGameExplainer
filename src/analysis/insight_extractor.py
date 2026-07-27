@@ -814,4 +814,59 @@ def extract_for_compressed(
     for cs in compressed:
         insights.append(extract_for_node(
             cs, root_winner_strong, role_meta, endgame_name, prev_state, mode=mode))
+
+    # PLAN-006 阶段 A：计算 emphasis_level 三档并注入每个 insight dict
+    _inject_emphasis_levels(insights)
+
     return insights
+
+
+def _inject_emphasis_levels(insights: List[dict]) -> None:
+    """PLAN-006：基于 tension_score 计算 emphasis_level 三档，原地注入 insight dict。
+
+    规则（SPEC 行为规约 §1-3）：
+    - 绝对阈值：tension ≥ 0.7 → pivotal；≥ 0.35 → important；其余 routine
+    - 相对排名（仅 total ≥ 8）：按 tension 排序，top-2（total≥12 时 top-3）强制 pivotal
+    - pivotal 硬上限 3
+    - 特殊事件：将杀节点已通过 tension=1.0 ≥ 0.7 正确归入 pivotal，无需额外分支
+    """
+    total = len(insights)
+    if total == 0:
+        return
+
+    # 第一步：绝对阈值 + 特殊事件
+    levels = []
+    tensions = []
+    for ins in insights:
+        t = ins.get("tension_score")
+        if t is None:
+            t = 0.0
+        tensions.append(t)
+
+        if t >= 0.7:
+            levels.append("pivotal")
+        elif t >= 0.35:
+            levels.append("important")
+        else:
+            levels.append("routine")
+
+    # 第二步：相对排名（仅 total ≥ 8）——按 tension 排序，top-N 强制 pivotal
+    if total >= 8:
+        top_n = 3 if total >= 12 else 2
+        # 按 tension 降序排列，取 top-N 的索引
+        ranked_indices = sorted(range(total), key=lambda i: tensions[i], reverse=True)
+        forced_pivotal = set(ranked_indices[:top_n])
+        for idx in forced_pivotal:
+            levels[idx] = "pivotal"
+
+    # 第三步：硬上限 3——若 pivotal 超过 3 个，保留 tension 最高的 3 个
+    pivotal_indices = [i for i, lv in enumerate(levels) if lv == "pivotal"]
+    if len(pivotal_indices) > 3:
+        # 按 tension 降序，保留前 3，其余降为 important
+        pivotal_indices.sort(key=lambda i: tensions[i], reverse=True)
+        for idx in pivotal_indices[3:]:
+            levels[idx] = "important"
+
+    # 注入
+    for i, ins in enumerate(insights):
+        ins["emphasis_level"] = levels[i]

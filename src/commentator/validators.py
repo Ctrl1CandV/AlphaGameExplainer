@@ -185,7 +185,8 @@ def validate_single_segment(seg: dict, node: dict) -> tuple:
     if not surface_ok:
         return False, surface_err
 
-    min_len = 28 if node.get("summary_only") else MIN_VOICEOVER_LEN
+    # PLAN-006 阶段 B：routine 节点与 summary_only 同样放宽到 28（从 node dict 读取 emphasis_level）
+    min_len = 28 if (node.get("summary_only") or node.get("emphasis_level") == "routine") else MIN_VOICEOVER_LEN
     if len(voiceover.strip()) < min_len:
         return False, f"voiceover过短({len(voiceover.strip())}<{min_len})"
 
@@ -333,8 +334,9 @@ def validate_puzzle_segment(seg: dict, node: dict) -> tuple:
     if not mat_ok:
         return False, mat_err
 
-    # 最短长度校验
-    min_len = 28 if node.get("is_checkmate_after") and len(node.get("moves", "")) <= 4 else MIN_VOICEOVER_LEN
+    # 最短长度校验（PLAN-006：routine 放宽到 28）
+    min_len = 28 if ((node.get("is_checkmate_after") and len(node.get("moves", "")) <= 4)
+                     or node.get("emphasis_level") == "routine") else MIN_VOICEOVER_LEN
     if len(voiceover.strip()) < min_len:
         return False, f"voiceover过短({len(voiceover.strip())}<{min_len})"
 

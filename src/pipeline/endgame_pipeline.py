@@ -122,6 +122,13 @@ def run_video(input_text: str, voice_prompt: str = "", endgame_name: str = "") -
     # [6/7] TTS 语音合成
     Logger.info("[6/7]TTS 语音合成...")
     segments = build_node_segments(commentary, moves, compressed)
+    # PLAN-006 阶段 C：从 storyboard 节点注入 emphasis_level（TTS 二维查表用）
+    _node_emph = {n["id"]: n.get("emphasis_level", "important") for n in storyboard.get("nodes", [])}
+    # PLAN-006 阶段 D：slide_sec 随 emphasis 微调（pivotal 略慢给观众消化，routine 略快保持节奏）
+    _SLIDE_BY_EMPHASIS = {"pivotal": 0.55, "important": 0.45, "routine": 0.35}
+    for seg in segments:
+        seg.emphasis_level = _node_emph.get(seg.move_idx, "important")
+        seg.slide_sec = _SLIDE_BY_EMPHASIS.get(seg.emphasis_level, 0.45)
     if commentary.opening:
         segments.insert(0, Segment(
             move_idx=0,
