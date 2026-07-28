@@ -37,6 +37,10 @@ MIN_STEP_HOLD = 0.35
 # 阶段 E 二轮反馈修正：用户明确全局效果（整屏明暗/缩放/字幕变体）观感差，
 # 只保留局部效果（落子辉光增强、面板着法着色），详略改由局部辉光 + 时间节奏承担。
 GLOW_SEC_PIVOTAL = 0.45          # pivotal 辉光延长（默认 0.30），局部作用于落点格
+# PLAN-006 V1 修（REVIEW-002）：pivotal 辉光峰值亮度上限。此前 _draw_glow 把
+# intensity 夹到 1.0，使 _render_move_sequence 里 pivotal 的 ×1.4 boost 完全失效
+# （峰值与 important 相同）。放宽到 1.4 让 boost 真正体现在峰值亮度上。
+GLOW_MAX_INTENSITY = 1.4
 
 # 颜色
 COLOR_LIGHT = (240, 217, 181)
@@ -242,7 +246,9 @@ def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
     """ 落子后辉光脉冲：高斯柔光（B3）替代 5 层同心矩形；可关闭回退原阶梯式。"""
     if intensity <= 0:
         return
-    intensity = max(0.0, min(1.0, intensity))
+    # PLAN-006 V1：上限放宽到 GLOW_MAX_INTENSITY（1.4），让 pivotal 的 ×1.4 boost
+    # 真正体现在峰值亮度上；alpha 各自封顶 255 防溢出。非 pivotal 峰值仍是 1.0，行为不变。
+    intensity = max(0.0, min(GLOW_MAX_INTENSITY, intensity))
     x, y = _sq_xy(sq)
     rgb = color[:3]
     if not ENABLE_SOFT_GLOW:
@@ -251,7 +257,7 @@ def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
         od = ImageDraw.Draw(overlay)
         layers = 5
         for i in range(layers):
-            a = int(150 * intensity * (1 - i / layers))
+            a = min(255, int(150 * intensity * (1 - i / layers)))
             if a <= 0:
                 continue
             od.rectangle([i, i, SQUARE - 1 - i, SQUARE - 1 - i],
@@ -262,7 +268,7 @@ def _draw_glow(img: Image.Image, sq: int, color: tuple, intensity: float):
     glow = Image.new("RGBA", (SQUARE, SQUARE), (0, 0, 0, 0))
     gd = ImageDraw.Draw(glow)
     gd.rounded_rectangle([4, 4, SQUARE - 5, SQUARE - 5], radius=8,
-                         fill=rgb + (int(180 * intensity),))
+                         fill=rgb + (min(255, int(180 * intensity)),))
     glow = glow.filter(ImageFilter.GaussianBlur(radius=5))
     img.paste(glow, (x, y), glow)
 

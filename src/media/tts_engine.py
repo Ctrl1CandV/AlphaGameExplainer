@@ -195,8 +195,13 @@ _EMPHASIS_TTS_PARAMS = {
     ("slow", "important"):   {"temp": 0.30, "top_P": 0.7, "top_K": 20, "speed": 5, "post_ms": 400, "pre_s": 0.2},
     ("slow", "routine"):     {"temp": 0.25, "top_P": 0.6, "top_K": 18, "speed": 5, "post_ms": 300, "pre_s": 0.0},
     ("normal", "pivotal"):   {"temp": 0.40, "top_P": 0.7, "top_K": 20, "speed": 4, "post_ms": 500, "pre_s": 0.4},
-    ("normal", "important"): {"temp": 0.30, "top_P": 0.6, "top_K": 18, "speed": 5, "post_ms": 350, "pre_s": 0.0},
-    ("normal", "routine"):   {"temp": 0.20, "top_P": 0.5, "top_K": 15, "speed": 5, "post_ms": 250, "pre_s": 0.0},
+    # A3（PLAN-006 REVIEW-002 修）：important 与 routine 此前 speed/pre_s 全同，只差
+    # temp+post_ms，短段（单句、无句间停顿）几乎无差异，三档塌成两档。routine 提速
+    # 会发音模糊（阶段 E 一轮已验证，禁止），故靠给 important 段前微停顿 pre_s 0.15
+    # + 拉大句间停顿（420 vs 190）+ 温度韵律区分，让 important 更从容、routine 更紧凑。
+    # important pre_s 依赖 A1 字幕偏移补偿（seg.pre_silence_s 写回），二者必须同批落地。
+    ("normal", "important"): {"temp": 0.32, "top_P": 0.6, "top_K": 18, "speed": 5, "post_ms": 420, "pre_s": 0.15},
+    ("normal", "routine"):   {"temp": 0.20, "top_P": 0.5, "top_K": 15, "speed": 5, "post_ms": 190, "pre_s": 0.0},
     ("fast", "pivotal"):     {"temp": 0.35, "top_P": 0.7, "top_K": 20, "speed": 4, "post_ms": 450, "pre_s": 0.3},
     ("fast", "important"):   {"temp": 0.25, "top_P": 0.6, "top_K": 18, "speed": 6, "post_ms": 300, "pre_s": 0.0},
     ("fast", "routine"):     {"temp": 0.20, "top_P": 0.5, "top_K": 15, "speed": 6, "post_ms": 220, "pre_s": 0.0},
@@ -361,6 +366,10 @@ def _synthesize_chattts(segments: List[Segment], speed: float = 1.0) -> bool:
             # 避免末条字幕落入尾部静音；duration_s 仍含尾静音供画面/音频对齐用。
             seg.speech_duration_s = combined.duration_seconds - pre_s
             seg.duration_s = combined.duration_seconds + 0.3
+            # A1（PLAN-006 REVIEW-002 修）：写回段前静音长度（此前是死字段）。
+            # 语音实际从 start_time + pre_s 才开始，字幕 cue 起点须据此后移，
+            # 否则 pivotal/important 段（pre_s>0）字幕整体早出 0.15~0.4s。
+            seg.pre_silence_s = pre_s
             success_count += 1
             prev_emphasis = seg.emphasis_level
 
@@ -443,7 +452,8 @@ def build_puzzle_segments(
             voice_map[seg.id] = (seg.voiceover, seg.pacing)
 
     result: List[Segment] = []
-    _SLIDE_BY_EMPHASIS = {"pivotal": 0.55, "important": 0.45, "routine": 0.35}
+    # PLAN-006 阶段 D（REVIEW-002 V2）：与 endgame_pipeline 对齐，0.60/0.30 放大节奏差异
+    _SLIDE_BY_EMPHASIS = {"pivotal": 0.60, "important": 0.45, "routine": 0.30}
     for node in nodes:
         nid = node["id"]
         vo, pac = voice_map.get(nid, (None, "normal"))

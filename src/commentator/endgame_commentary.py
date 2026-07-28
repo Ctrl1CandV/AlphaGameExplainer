@@ -1148,17 +1148,39 @@ def _endgame_chunk_prompt_wrapper(storyboard: dict):
     原始 generate_structured 对每个 chunk 调用：
         _build_chunk_prompt(json_header, chunk_nodes, chunk_idx, total_chunks,
                            _JSON_EXAMPLE if chunk_idx == 0 else "", prev_context=prev_context)
-    本闭包捕获 storyboard 来计算 prev_context 和 example。
+    本闭包捕获 storyboard 来计算 prev_context、example 和 prev_voiceover。
     """
-    def wrapper(header, chunk_nodes, chunk_idx, total_chunks, all_nodes):
+    def wrapper(header, chunk_nodes, chunk_idx, total_chunks, all_nodes, generated_segments=None):
         prev_context = ""
         start = chunk_idx * 4  # CHUNK_SIZE = 4
         if start > 0:
             prev_context = _build_prev_context(all_nodes[start - 1])
         example = _select_endgame_example(storyboard, chunk_nodes, chunk_idx)
-        return _build_chunk_prompt(header, chunk_nodes, chunk_idx, total_chunks,
-                                   example, prev_context=prev_context)
+        prompt = _build_chunk_prompt(header, chunk_nodes, chunk_idx, total_chunks,
+                                     example, prev_context=prev_context)
+        # PLAN-007 阶段 P：注入前段实际解说文本（核心改进——让模型感知前文措辞和语气）
+        if generated_segments and start > 0:
+            prev_vo = _extract_prev_voiceover(generated_segments)
+            if prev_vo:
+                prompt += f"\n【上一段原文（承接其措辞和语气）】\n“{prev_vo}”"
+        return prompt
     return wrapper
+
+
+def _extract_prev_voiceover(generated_segments) -> str:
+    """从已生成段中取最后一个 segment 的 voiceover 末尾 100 字。
+
+    返回空串表示无可用前文（chunk 0 或前段为空）。
+    """
+    if not generated_segments:
+        return ""
+    last_seg = generated_segments[-1]
+    vo = getattr(last_seg, "voiceover", "") or ""
+    vo = vo.strip()
+    if not vo:
+        return ""
+    # 取末尾 100 字（约 50 token），足够感知语气和措辞
+    return vo[-100:] if len(vo) > 100 else vo
 
 
 def generate_structured(board, storyboard: dict) -> GeneratedCommentary:

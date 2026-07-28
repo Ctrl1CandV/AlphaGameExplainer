@@ -24,8 +24,8 @@ MIN_VOICEOVER_LEN = 44
 class CommentaryConfig:
     """
     双链路的生成配置——由endgame_commentary / puzzle_commentary各自构造
-    build_chunk_prompt签名: (header, chunk_nodes, chunk_idx, total_chunks, all_nodes) -> str
-        残局版用all_nodes计算prev_context；Puzzle版忽略all_nodes
+    build_chunk_prompt签名: (header, chunk_nodes, chunk_idx, total_chunks, all_nodes, generated_segments) -> str
+        残局版用all_nodes计算prev_context、用generated_segments注入prev_voiceover；Puzzle版忽略
     build_fallback_voiceover 签名: (chunk_nodes, json_prompt) -> list[StoryboardSegment]
     post_process签名: (commentary, all_segments, nodes, storyboard, backend) -> None
     """
@@ -141,7 +141,7 @@ def generate_commentary(storyboard: dict, backend, config: CommentaryConfig) -> 
         end = min(start + CHUNK_SIZE, node_count)
         chunk_nodes = nodes[start:end]
 
-        json_prompt = config.build_chunk_prompt(json_header, chunk_nodes, chunk_idx, total_chunks, nodes)
+        json_prompt = config.build_chunk_prompt(json_header, chunk_nodes, chunk_idx, total_chunks, nodes, all_segments)
         chunk_grammar = config.build_grammar(len(chunk_nodes))
 
         success = False
@@ -253,6 +253,10 @@ def generate_commentary(storyboard: dict, backend, config: CommentaryConfig) -> 
 
     # 后处理（去重/将杀追加/双关键点/opening/summary等）
     config.post_process(commentary, all_segments, nodes, storyboard, backend)
+
+    # PLAN-007：可选全局润色（detect/true 模式由 env 控制）
+    from src.commentator.polisher import polish_commentary
+    polish_commentary(commentary, nodes, storyboard, backend, config)
 
     status = "正常" if not commentary.fallback_used else f"部分回退({commentary.chunks_succeeded}/{total_chunks})"
     Logger.success(f"解说生成完成: {len(all_segments)} 段, {status}")

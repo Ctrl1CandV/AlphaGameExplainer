@@ -1,11 +1,13 @@
 from src.pipeline import run, run_video, run_puzzle, run_puzzle_video
 from src.common import Logger
 import sys
+import os
 
 def main():
     """
     默认生成视频，--text仅输出解说文本
     --puzzle切换到Puzzle战术讲解链路
+    残局模式支持传入文件路径（.fen/.pgn/.txt），或不传参进入交互式输入
     """
     text_mode = "--text" in sys.argv
     puzzle_mode = "--puzzle" in sys.argv
@@ -30,15 +32,38 @@ def main():
             sys.exit(1)
         return
 
-    # 残局讲解
-    Logger.info("请输入PGN或FEN内容(输入END结束):")
-    lines = []
-    while True:
-        line = input()
-        if line.strip().upper() == "END":
-            break
-        lines.append(line)
-    input_text = "\n".join(lines)
+    # 残局讲解：支持文件路径或交互式输入
+    if args:
+        # 文件模式：从文件读取 FEN/PGN
+        path = args[0]
+        if not os.path.isfile(path):
+            Logger.error(f"文件不存在: {path}")
+            sys.exit(1)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                input_text = f.read().strip()
+        except UnicodeDecodeError:
+            Logger.error(f"文件编码错误，请确保是 UTF-8 文本文件: {path}")
+            sys.exit(1)
+        except OSError as e:
+            Logger.error(f"读取文件失败: {e}")
+            sys.exit(1)
+
+        if not input_text:
+            Logger.error(f"文件内容为空: {path}")
+            sys.exit(1)
+
+        Logger.info(f"已从文件读取: {path}")
+    else:
+        # 交互式输入
+        Logger.info("请输入PGN或FEN内容(输入END结束，或直接传入.fen文件路径):")
+        lines = []
+        while True:
+            line = input()
+            if line.strip().upper() == "END":
+                break
+            lines.append(line)
+        input_text = "\n".join(lines)
 
     try:
         if text_mode:

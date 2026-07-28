@@ -266,9 +266,13 @@ def _puzzle_example_role(chunk_nodes: list) -> str:
 
 def _build_puzzle_chunk_prompt(
         header: str, chunk_nodes: list, chunk_idx: int,
-        total_chunks: int, primary_theme: str = ""
+        total_chunks: int, primary_theme: str = "", prev_voiceover: str = ""
     ) -> str:
-    """ 构建puzzle分块prompt """
+    """ 构建puzzle分块prompt
+
+    PLAN-007 阶段 P（P3 补齐）：prev_voiceover 为上一段实际解说末尾文本，
+    非空时在末尾注入，让模型承接前文措辞与语气（与 endgame 链路对齐）。
+    """
     is_last = (chunk_idx == total_chunks - 1)
     lines = [header]
 
@@ -396,6 +400,10 @@ def _build_puzzle_chunk_prompt(
             lines.append(f"节奏: {pacing} — 这是关键节点，请重点展开讲解")
 
         lines.append("")
+
+    # PLAN-007 阶段 P（P3）：注入前段实际解说文本，承接措辞和语气
+    if prev_voiceover:
+        lines.append(f"【上一段原文（承接其措辞和语气）】\n“{prev_voiceover}”")
 
     return "\n".join(lines)
 
@@ -843,9 +851,17 @@ def _puzzle_chunk_prompt_wrapper(storyboard: dict):
     """构造 Puzzle 版 build_chunk_prompt 闭包，适配 generator 的统一签名。"""
     primary_theme = (storyboard.get("tactic_focus", {}) or {}).get("primary_theme", "")
 
-    def wrapper(header, chunk_nodes, chunk_idx, total_chunks, all_nodes):
+    def wrapper(header, chunk_nodes, chunk_idx, total_chunks, all_nodes, generated_segments=None):
+        # PLAN-007 阶段 P（P3）：多 chunk 时注入前段实际解说文本，与 endgame 对齐。
+        # puzzle 链路通常较短（多为单 chunk），仅 chunk_idx>0 且有已生成段时生效。
+        prev_vo = ""
+        if generated_segments and chunk_idx > 0:
+            last_seg = generated_segments[-1]
+            vo = (getattr(last_seg, "voiceover", "") or "").strip()
+            prev_vo = vo[-100:] if len(vo) > 100 else vo
         return _build_puzzle_chunk_prompt(
-            header, chunk_nodes, chunk_idx, total_chunks, primary_theme)
+            header, chunk_nodes, chunk_idx, total_chunks, primary_theme,
+            prev_voiceover=prev_vo)
     return wrapper
 
 

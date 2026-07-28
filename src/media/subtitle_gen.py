@@ -123,7 +123,12 @@ def build_cues(segments: List[Segment], offset_s: float = 0.0) -> List[tuple]:
     for segment in segments:
         if not segment.text.strip():
             continue
-        seg_start = offset_s + segment.start_time
+        # A1（PLAN-006 REVIEW-002 修）：段前静音（pivotal/important 段的 pre_silence_s）
+        # 延后了语音真正开始的时刻——语音从 start_time + pre_silence_s 才响。cue 起点
+        # 须一并后移，否则字幕比语音早出 0.15~0.4s。speech_duration_s 已扣掉 pre_silence，
+        # 故起点加、时长不变，末条仍随语音结束消失。
+        pre_sil = float(getattr(segment, "pre_silence_s", 0.0) or 0.0)
+        seg_start = offset_s + segment.start_time + pre_sil
         # 优先真实语音时长；缺失/为 0 时回退渲染后的 duration_s（画面占用，可能含尾静音）
         seg_dur = float(getattr(segment, "speech_duration_s", 0.0) or 0.0)
         if seg_dur <= 0:

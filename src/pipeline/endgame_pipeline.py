@@ -125,7 +125,9 @@ def run_video(input_text: str, voice_prompt: str = "", endgame_name: str = "") -
     # PLAN-006 阶段 C：从 storyboard 节点注入 emphasis_level（TTS 二维查表用）
     _node_emph = {n["id"]: n.get("emphasis_level", "important") for n in storyboard.get("nodes", [])}
     # PLAN-006 阶段 D：slide_sec 随 emphasis 微调（pivotal 略慢给观众消化，routine 略快保持节奏）
-    _SLIDE_BY_EMPHASIS = {"pivotal": 0.55, "important": 0.45, "routine": 0.35}
+    # PLAN-006 阶段 D（REVIEW-002 V2）：±0.1s 差异低于人眼运动感知阈值（~0.3s），
+    # 放大到 planner 裁决的 0.60/0.30，配合 V1 辉光增强让画面节奏真正拉开。
+    _SLIDE_BY_EMPHASIS = {"pivotal": 0.60, "important": 0.45, "routine": 0.30}
     for seg in segments:
         seg.emphasis_level = _node_emph.get(seg.move_idx, "important")
         seg.slide_sec = _SLIDE_BY_EMPHASIS.get(seg.emphasis_level, 0.45)
