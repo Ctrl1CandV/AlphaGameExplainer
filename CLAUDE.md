@@ -43,6 +43,7 @@
 - **n_ctx=4096**：本地 llama.cpp 当前默认生成上下文窗口，受 Qwen3.6-27B 4-bit 占满显存后 KV cache 余量所限，可经 `LLAMA_CPP_N_CTX` 覆盖。非硬产品上限；prompt 仍需预算控制。切到 API 后端后此约束不适用于 API 路径（DeepSeek 128k 窗口），仅本地兜底路径受限。
 - **讲解词中文纯净化**：voiceover 禁止英文/数字/坐标/Markdown。已有 `_strip_coordinates` / `_clean_cjk_text` 兜底。
 - **Syzygy 表库覆盖 3-6 子**：超出范围的残局走 Stockfish 求解。
+- **Python 运行环境**：项目用 conda 环境 `commentary`（`C:\Users\LiuYiJie\.conda\envs\commentary`）。系统默认 `python`（WindowsApps stub）无依赖、无输出，**不能直接 `python` 跑项目代码**。命令行必须用 `"C:\Users\LiuYiJie\.conda\envs\commentary\python.exe"` 或先 `conda activate commentary`。`chess` / `pydub` / `chatTTS` 等依赖仅装在该环境。
 
 ## 当前状态
 
@@ -76,7 +77,11 @@
 
 **PLAN-006/007 独立审查与修复**（2026-07-28，REVIEW-002）：对两阶段方案+实施全面审查，9 个问题已修复或记录。**PLAN-006 音画缺陷**：V1 pivotal 辉光 ×1.4 增强被 `_draw_glow` 的 `min(1.0)` 截断——三轮回退后仅剩的两个视觉效果之一实际失效（新增 `GLOW_MAX_INTENSITY=1.4` + alpha 封顶 255）；V2 slide_sec ±0.1s 低于运动感知阈值，planner 对 M4 的裁决（0.60/0.30）从未落地；A1 `speech_duration_s` 扣了 `pre_s` 但字幕起点未偏移，pivotal 段字幕早出 0.2~0.4s（`pre_silence_s` 死字段已写回并被字幕消费）；A3 important/routine 的 speed 都是 5、pre_s 都是 0，三档实际塌成两档。**PLAN-007 安全边界**：P1 润色绕过 validator——它跑在链路最后、作用于成片文本，却是唯一无 §8 舍弃通道的一环，写坏直接进片，且 REVIEW-001 标称「已修 validator 重验」而代码实无（现复用 `config.validate_chunk` 单段重验，不通过保留原文）；P2 `_should_skip` 对 Fallback/API 后端恒 False（现显式检查熔断/永久失败）；P3 puzzle 的 prev_voiceover 注入计划有而代码无（已补齐）。**E2 遗留**：emphasis 三档分布的 ≤65% routine 闸门属阶段 A 要求的验证步骤，从未执行，仍待补。
 
-**解说词质量遗留问题**（2026-07-28）：`docs/FINDINGS-001-解说词质量遗留问题.md`——detect 模式实测（双象杀王）暴露 3 个润色按设计管不了的问题：总结词双开场语气词+口语风格断层（post_process 范畴）、routine 节点把 `spatial_change` 逐着真值念成数字流水账且为全片最长段（印证 emphasis 详略未生效，关联 E2）、`strip_coordinates` 清洗后残句「白方通过的走位」。三者属 prompt/post_process 层，待 planner 评估纳入后继计划。
+**解说词质量遗留问题**（2026-07-28）：`docs/FINDINGS-001-解说词质量遗留问题.md`——detect 模式实测（双象杀王）暴露 3 个润色按设计管不了的问题：总结词双开场语气词+口语风格断层（post_process 范畴）、节点把 `spatial_change` 逐着真值念成数字流水账且为全片最长段、`strip_coordinates` 清洗后残句「白方通过的走位」。三者属 prompt/post_process 层，已全部纳入 PLAN-008（分别为 F1/F2/F3）。**更正**：原记录称流水账段为「routine 节点、印证 emphasis 详略未生效」，经 PLAN-008 REVIEW-002 实测证伪——现场段实为 `important`/`pivotal` 档长多着节点（mc=8，traj_len=9），且 trajectory 注入条件（`len>=3`）根本不按 emphasis 分级，与 emphasis 详略无关。
+
+**PLAN-008 立项与实施完成**（2026-07-28）：修 PLAN-006/007 遗留的表达层缺陷（F1 总结词双开场 / F2 数字流水账 / F3 坐标残句 / F4 puzzle 开场白僵硬）。阶段 A·A1（`_SPOKEN_OPENERS` 剥离）+ A2（`_THROUGH_PREP_DE` 悬空介词清理）已落地；**阶段 B 经 REVIEW-002 实测重写并冻结后已实施**——原方案「routine 不注入 trajectory」的核心前提被实测证伪（F2 源头是 important/pivotal 长多着节点），改为**空间过程形态化注入**：`summarize_trajectory`（insight_extractor.py）把逐着数字串 `2→3→3→…→1`+"必须按这个顺序如实叙述"（实测覆盖 204/221=92.3% 节点）换成「起止真值+形态词（单向/有回升/波动/持平）+区域锚点」，全 emphasis 档统一。原型+真实接入全量实测 **221/221 PASS**，peer_review 修复 1 major（无轨迹谎报波动）+6 minor。B2 header 信条禁逐着罗列格数（含中文数词），B5 `scan_process_enumeration` 审计标记（只标记不判废，基线复现 15.3%）。**阶段 C 已实施**：`generate_puzzle_intro`（puzzle_commentary.py）LLM 生成+模板兜底，同战术标签两次开场白不再雷同（修复 F4）；实施中发现 `_puzzle_intro_is_bad` 不能复用 segment 的 thinking_leaks 校验（"接下来我"误杀合法开场过渡语），改为开场白只查硬特征。--text 实跑 3 残局+2 puzzle 并做新旧代码对照，确认 F1/F2/F4 生效。**同时清掉 PLAN-006 E2 验证债**：emphasis 三档实测 pivotal 29.0%/important 36.2%/routine 34.8%，≤65% 闸门 PASS。**新发现遗留 F5**（解说词缺宾语残句"登上，"+"那一格"突兀，新旧代码都有非本次回归）+ **B7**（pivotal ≤3 上限在 2/30 样本失效，属 PLAN-006 范畴）已记录待 planner 评估。code-developer 自审闭环完成，待用户全量验证+reviewer 复盘。
+
+**reviewer REVIEW-003 + 修缮收尾**（2026-07-28）：reviewer 判路径 B（F2 未解决，起草 PLAN-009 全域数字关闭+validator 硬拦截）。code-developer 基于用户「放权、改善而非修复、容忍瑕疵」哲学重新校准：实测证实 reviewer 的 28.6% 用了过宽口径（把单次起止对比「从三个减到两个」也算罪证），而这类是**含棋理、可容忍**的；F2 真病灶（多步过程枚举）**已被 B1 切断**。倾向**不采纳 PLAN-009 收紧方向**（会损失 teaching_point/must_mention 棋理真值，解说退回空话）。修缮：C1 echo 检测补齐（reviewer R-5）；prompt 强化"禁那一格"实测反效果（负面提及强化反模式）已回退；`_MOVE_TO_COORD` 脱节仅 2% 容忍不改。三个阶段均判定主要目标达成。遗留 F5（坐标清洗残骸可容忍）+ B7（pivotal 上限）+ PLAN-009 草案待 planner 裁决。**教训**：负面 prompt 提及会强化被禁内容——禁用某词时不要在指令里反复出现该词。
 
 **视频视听优化立项 PLAN-005**（2026-07-25，主指针）：解说质量常规优化收口后转向「解说如何被更好地听见、看见」。三条必要改动，均限定媒体层（`src/common.py` + `src/media/*`）加法式扩展，不重构、不换框架、不动解说生成。**Core 1**（字幕真实语音同步）：TTS 记录真实语音截止时长 `speech_duration_s`（不含尾静音），字幕预算从被渲染器覆盖的 `duration_s` 改用 `speech_duration_s`，修末条字幕拖入尾静音的真实 bug；不追句级精度（TTS/字幕分句逻辑不一致，直通会错位）。**Core 2**（画面整体质量）：箭头 2x overlay 抗锯齿 + glow 改高斯柔光 + 格子高亮改柔和圆角环 + 棋子/棋盘投影缓存，按元素分治不做统一超采样。**Core 3**（落子结果澄清）：将军画攻击线（红虚线，区别实线走子箭头）+ 将杀标王无逃生格（低干扰半标记），均 python-chess 确定性计算。砍掉音效（空资产+盖人声）与战术射线（易错）。经 external validate_approach（longcat）判「有条件推荐」，两前提已纳入设计。
 
@@ -99,7 +104,7 @@
 - 四层文档职责：CLAUDE.md=长期领域语言/架构决策索引/硬约束/当前状态；docs/adr/=决策论证；docs/SPEC.md=行为契约+高层状态（不存详细施工步骤）；docs/plans/PLAN-XXX=详细实施路线与全过程证据。
 - **CLAUDE.md**（本文件）：项目当前状态。每次会话开始先读。
 - **docs/SPEC.md**：行为契约+高层状态；当前指针指向 PLAN-002（API 后端）。
-- **docs/plans/**：PLAN-001（Phase 3 质量修复，**已作废** 2026-07-21，后继 PLAN-004）、PLAN-002（DeepSeek API 为主本地兜底后端，已完成）、PLAN-003（Phase 4 结构可靠性修复，已完成）、PLAN-004（API 时代解说质量修复与验证闭环，**已完成** 2026-07-22 收口，A/B/C/C1/C2 全部完成）、PLAN-005（视频生成视听优化，**执行中** 2026-07-25，当前主指针，关联媒体层）。
+- **docs/plans/**：PLAN-001（Phase 3 质量修复，**已作废** 2026-07-21，后继 PLAN-004）、PLAN-002（DeepSeek API 为主本地兜底后端，已完成）、PLAN-003（Phase 4 结构可靠性修复，已完成）、PLAN-004（API 时代解说质量修复与验证闭环，**已完成** 2026-07-22 收口）、PLAN-005（视频生成视听优化，**已完成** 2026-07-27 收口）、PLAN-006（解说节奏与情感表达优化，执行中，待端到端观感验证）、PLAN-007（解说词二次润色，执行中，待切 `ENABLE_POLISH=true`）、PLAN-008（表达层精修与约束松绑，**当前主指针** 2026-07-28，阶段 B 已冻结待实施）。
 - **docs/REFACTORING_PLAN.md**：全项目结构重构详细设计方案（ADR-016，已实施）。
 - **docs/Phase2 Review Findings.md**：Phase 2 代码审查发现（4个问题已全部修复）。
 - **docs/adr/ADR-XXX.md**：架构决策完整论证（注意状态字段：已采纳/暂缓/已废弃）。

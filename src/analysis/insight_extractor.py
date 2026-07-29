@@ -870,3 +870,117 @@ def _inject_emphasis_levels(insights: List[dict]) -> None:
     # 注入
     for i, ins in enumerate(insights):
         ins["emphasis_level"] = levels[i]
+
+
+# ============================================================
+#  PLAN-008 阶段 B：空间过程形态化注入
+#  把逐着 weak 安全格序列（trajectory）渲染成「起止真值 + 形态词 + 区域锚点」
+#  的 prompt 注入句，取代旧的逐着阿拉伯数字串（"2→3→3→…→1"+"必须按这个顺序如实叙述"）。
+#  milestone 不在此产出——它由 teaching_point（同层 _compose_teaching）单独注入，
+#  本函数只负责空间形态，单一事实来源避免重复。
+#  设计不变量（安全性来源，见 PLAN-008 B1）：
+#    1. 输出数字只允许 {起, 止, 着数}；中间每一着的数值不出现，切断可照抄素材
+#    2. 起止值与 wb/wa 严格一致（ADR-015 前置真值完整保留）
+#    3. 形态词承载中间形状真值（单向/有回升/波动/持平），无需想象填补
+#    4. 方向词与 net 符号一致（净回升场景禁出现"压缩/收窄/逼退"）
+#    5. 无逐着轨迹时只给起止，绝不描述中间过程（避免"编造波动"）
+# ============================================================
+def summarize_trajectory(trajectory, weak_before, weak_after,
+                         region_cn=""):
+    """把 trajectory 渲染成 prompt 用的「趋势+起止」空间事实句。
+
+    取代 endgame_commentary.py 中逐着数字序列的注入方式——那种格式（"依次为
+    2→3→3→3→2→3→3→2→1" + "必须按这个顺序如实叙述"）是 F2 数字流水账的直接诱因：
+    DeepSeek 这类强遵循力模型必然照念。本函数只给起止两个真值 + 用词语描述的
+    形状，逐着数据仍完整保留在 node["spatial_change"]["trajectory"] 中供离线审计。
+
+    milestone 不作为参数：它已随 teaching_point 进入 prompt，此处不重复注入
+    （单一事实来源，避免一句话里 milestone 出现两次）。
+
+    Args:
+        trajectory: 逐着 weak 安全格序列（含起始点，长度=着数+1），可为空
+        weak_before / weak_after: 节点起止的对方王安全格数（真值，必填）
+        region_cn: 对方王当前区域中文（如"边线"/"角落"），来自 king_region
+
+    Returns:
+        prompt 注入句（含"空间数据:"前缀与尾括号指令）；数据不可用时返回空串。
+    """
+    wb, wa = weak_before, weak_after
+    if wb is None or wa is None:
+        return ""
+
+    # 形态分类前先规整 trajectory：非整数一律视为无轨迹
+    traj = [x for x in (trajectory or []) if isinstance(x, int)]
+    has_traj = len(traj) >= 2
+
+    # 着数：优先取 trajectory 推导值（=长度-1），回落到 None（不写"本节点N着"）
+    n_moves = (len(traj) - 1) if has_traj else None
+    head = f"空间数据: 本节点{n_moves}着，" if (n_moves and n_moves > 1) else "空间数据: "
+
+    # 区域锚点：宽松条件——任何非空 region_cn 都注入，不假设具体字面值，
+    # 避免 _REGION_CN 输出变化时锚点静默失效（peer_review suggestion）
+    region_txt = f"；对方王此时在{region_cn}" if region_cn else ""
+
+    net = wa - wb
+
+    # ── 档0：无逐着轨迹（单着节点或未填充 trajectory）──
+    # 只给起止，绝不描述中间过程（即使 net==0 也不得谎称"波动"——peer_review major）
+    if not has_traj:
+        if net < 0:
+            strength = "明显压缩" if ((wb - wa >= 2) or (wb > 0 and wa <= 1)) else "小幅收窄"
+            return (
+                f"{head}对方王安全格从{wb}个{strength}到{wa}个{region_txt}"
+                "（只讲这个起止结果，不要编造中间过程）"
+            )
+        if net > 0:
+            return (
+                f"{head}对方王安全格从{wb}个回升到{wa}个{region_txt}"
+                "（本节点对方王的活动空间没有被压缩，不得讲成正在被逼退或空间锐减）"
+            )
+        return (
+            f"{head}对方王安全格起止都是{wb}个、净结果无变化{region_txt}"
+            "（不得讲成空间被压缩或中途波动，只能讲成调整站位、试探或等招）"
+        )
+
+    # ── 档1：全程不变（反复试探/等招，weak 无实质变化）──
+    # 沿用旧实现的硬约束：不得描述成被逼退或空间锐减
+    if all(x == traj[0] for x in traj):
+        return (
+            f"{head}对方王安全格全程保持{traj[0]}个不变{region_txt}"
+            "（没有实质压缩，不得描述成正在被逼退或空间锐减，"
+            "只能讲成调整站位、试探或等招）"
+        )
+
+    # ── 档2：净压缩（wa < wb）──
+    if net < 0:
+        # 强度按"绝对幅度+终值是否锁死"双判：wa<=1 是锁死时刻，哪怕只降1格也是关键
+        if (wb - wa >= 2) or (wb > 0 and wa <= 1):
+            strength = "明显压缩"
+        else:
+            strength = "小幅收窄"
+        # 形状：trajectory 单调不增才算"全程单向收紧"，否则"中途曾回升"
+        # （len>=3 才能判定形状，2 点只能给起止）
+        shape = ""
+        if len(traj) >= 3:
+            monotonic = all(traj[i + 1] <= traj[i] for i in range(len(traj) - 1))
+            shape = "，全程单向收紧、没有回升" if monotonic else "，中途曾短暂回升，但最终仍被压回来"
+        return (
+            f"{head}对方王安全格从{wb}个{strength}到{wa}个{shape}{region_txt}"
+            "（只讲这个起止结果和整体趋势，不要逐着念数字，"
+            "也不要编造中间每一着的具体格数变化）"
+        )
+
+    # ── 档3：净回升（wa > wb）—— 禁止讲成被压缩/逼退，否则方向撒谎 ──
+    if net > 0:
+        return (
+            f"{head}对方王安全格从{wb}个回升到{wa}个{region_txt}"
+            "（本节点对方王的活动空间没有被压缩，不得讲成正在被逼退或空间锐减，"
+            "只能讲成主动方在调整站位；不要逐着念数字）"
+        )
+
+    # ── 档4：净持平但中途有波动（net==0 且非全程不变）──
+    return (
+        f"{head}对方王安全格起止都是{wb}个、中途有上下波动{region_txt}"
+        "（净结果是持平，不得讲成空间被压缩，只能讲成调整站位、试探或等招；"
+        "不要逐着念数字）"
+    )

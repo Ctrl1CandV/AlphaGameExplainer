@@ -13,6 +13,7 @@ from src.commentator.grammar import build_chunk_grammar, build_retry_prompt, SEG
 from src.commentator.validators import validate_single_segment, validate_storyboard_chunk
 from src.commentator.examples import commentary_example_mode, get_commentary_example
 from src.commentator.json_utils import parse_single_segment
+from src.analysis.insight_extractor import summarize_trajectory
 from src.infra.llm_backend import create_backend_from_env
 from src.common import GeneratedCommentary, Logger
 from typing import Optional
@@ -179,9 +180,15 @@ def _build_json_header(storyboard: dict) -> str:
         "- 不写「看似平淡实则」「胜利的天平」「囊中之物」「致命一击」「步步为营」或泛泛的「为后续做准备」。",
         "- 没有事实支撑时宁可朴素、少说，也不要用空洞形容词填充。",
         "- 讲清因果而非结论：不要用「完全掌握主动权」「锁死」「彻底封锁」「大局已定」这类空泛结论句收尾，"
-        "而要说清「哪一步把对方王从几个逃格压到几个、白方哪个子换到了什么位置」这样可验证的具体过程。",
+        "而要说清「整体上把对方王的活动空间压小了多少、由谁的动作造成、白方哪个子换到了什么位置」这样可验证的具体过程。",
         "- 落到棋盘具体事实：每段至少让观众看到一个可指认的画面变化——某个子换到了哪条线、"
-        "对方王少了哪个方向的逃路、安全格从几减到几；禁止只用「控制局面」「胜势已成」这类无落点的形容词。",
+        "对方王少了哪个方向的逃路、活动范围整体被压缩；禁止只用「控制局面」「胜势已成」这类无落点的形容词。",
+        # PLAN-008 B2：空间变化只讲起止结果与整体趋势，不逐着念数字。
+        # 旧信条「从几个逃格压到几个」会诱导模型逐着罗列格数，与 B1 形态化注入冲突。
+        # 含中文数词——实测证明模型流水账多以中文数词形态出现（基线 11.2%）。
+        # 边界澄清（peer_review）：可以说「整体压缩了多少」，但不要逐步罗列每着格数。
+        "- 空间与子力的变化只讲整体起止结果和趋势（如「活动空间整体被压缩」），"
+        "不要逐着罗列每一步的具体格数（含中文数词，如「从三格、两格，压到一格」），也不要编造中间每一着的变化过程。",
         _DIFFICULTY_TONE[_rate_difficulty(endgame_name)],
         "",
         f"【残局类型】{endgame_name}",
@@ -387,27 +394,21 @@ def _build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int, total_ch
             parts.append(f"棋理事实: {teaching_point}")
         spatial = node.get("spatial_change", {})
         if spatial and spatial.get("weak_before") is not None:
-            wb = spatial.get("weak_before")
-            wa = spatial.get("weak_after")
-            region = spatial.get("king_region", "")
-            extra = f"，对方王已退到{region}" if region in ("边线", "角落") else ""
-            trajectory = spatial.get("trajectory") or []
-            if len(trajectory) >= 3:
-                # 根因4修复：多着节点有完整逐着轨迹时，直接给出真实数字序列，
-                # 不能再只给起止两点——否则模型会在中间插值编造数字。
-                traj_str = "→".join(str(x) for x in trajectory)
-                if all(x == trajectory[0] for x in trajectory):
-                    parts.append(
-                        f"空间数据: 本节点{len(trajectory) - 1}着，对方王安全格数全程保持{wb}不变"
-                        f"（没有实质压缩，不得描述成正在被逼退或空间锐减，只能讲成调整/试探/等招）"
-                    )
-                else:
-                    parts.append(
-                        f"空间数据: 本节点{len(trajectory) - 1}着，对方王可走的安全格依次为 {traj_str}{extra}"
-                        f"（这是逐着真实数字，讲解时必须按这个顺序如实叙述，不得编造中间过程或额外的数字变化）"
-                    )
-            else:
-                parts.append(f"空间数据: 对方王可走的安全格 {wb}→{wa}{extra}")
+            # PLAN-008 阶段 B：空间过程形态化注入。
+            # 旧实现把逐着 weak 序列原样拼成 "2→3→3→…→1" 并配 "必须按这个顺序如实叙述"，
+            # 这是 F2 数字流水账的直接诱因（实测 204/221 节点被注入，强遵循力模型照念）。
+            # 改为 summarize_trajectory 渲染「起止真值 + 形态词（单向/有回升/波动/持平）+
+            # 区域锚点」，切断可照抄的数字串素材但保留中间形状真值（不违反 :396 注释的
+            # 防插值警告——模型拿得到形状信息，不需要靠想象填补中间过程）。
+            # milestone 不在此重复注入：它已随上方 teaching_point 进入 prompt。
+            spatial_line = summarize_trajectory(
+                spatial.get("trajectory") or [],
+                spatial.get("weak_before"),
+                spatial.get("weak_after"),
+                region_cn=spatial.get("king_region", ""),
+            )
+            if spatial_line:
+                parts.append(spatial_line)
         must_mention = node.get("must_mention", [])
         if must_mention:
             parts.append(f"棋理观察: {'；'.join(must_mention)}")
@@ -991,7 +992,13 @@ def generate_summary(storyboard: dict, backend, segments: list = None) -> str:
         "以及背后的主要逻辑思维方式（核心取胜思路、应遵循的次序），并点出要避免的典型错误。",
         "要求：① 纯口语中文，像讲课收尾；② 不要逐步复述具体走法；",
         "③ 绝对禁止出现任何英文字母、数字、棋盘坐标、格子名、棋谱记号或特殊符号；",
-        "④ 不要标题、序号、引号、markdown；⑤ 禁止引擎术语（评估值、距杀步数等）。",
+        "④ 不要标题、序号、引号、markdown；⑤ 禁止引擎术语（评估值、距杀步数等）；",
+        # FINDINGS-001 F1：模型常自带「好了，各位学员，咱们今天…」开场，
+        # 与前文书面解说风格断层，且与程序统一补的「总结一下，」拼成双开场。
+        # 这里从源头禁止；清洗层 clean_summary_text 另有兜底剥离。
+        "⑥ 直接进入总结内容，不要任何开场语气词或称呼语"
+        "（不要出现好了、那么、各位学员、同学们、大家、咱们这类开头）；",
+        "⑦ 文体与前面的分步解说保持一致——书面讲解语气，不要直播口语（不用呢、啦、哦这类语气助词）。",
         "",
         f"残局类型：{endgame_name}",
     ]

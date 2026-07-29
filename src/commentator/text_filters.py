@@ -145,6 +145,12 @@ _MOVE_TO_COORD = [
 # 通用介词：动词未被白名单覆盖时（如"逼到f8""压向a7"），把坐标换成"那一格"，
 # 让前置动词与句子结构完整保留，避免 catch-all 把动词截成残句。
 _COORD_PREP = re.compile(rf"(?<=[一-鿿])(到|至|向|在|于)\s*{_COORD}\s*格?")
+# FINDINGS-001 F3：纯介词（通过/经由/由/从/经）+ 坐标 +「的」整体删除。
+# 这类介词删坐标后无法接续（"通过e4的走位"删坐标剩"通过的走位"=悬空病句），
+# 故把介词+坐标+"的"作为定语结构整体删除。"的"紧跟坐标这一条件天然排除
+# "通过精妙的走位""通过这一步的调整"等合法定语（"的"前是非坐标修饰语）。
+# 必须在 _COORD_CATCHALL 之前：先吃掉"介词+坐标+的"整体，catch-all 只清残留孤立坐标。
+_THROUGH_PREP_DE = re.compile(rf"(通过|经由|由|从|经)\s*{_COORD}\s*格?的")
 # catch-all：清除剩余的孤立坐标，连同可能的前导介词与"格"后缀一起吃掉。
 _COORD_CATCHALL = re.compile(rf"(?:从|由|到|至|向|于|在|经)?\s*{_COORD}\s*格?")
 
@@ -155,6 +161,7 @@ def strip_coordinates(text: str) -> str:
     for pat, repl in _MOVE_TO_COORD:
         out = pat.sub(repl, out)
     out = _COORD_PREP.sub(r"\1那一格", out)
+    out = _THROUGH_PREP_DE.sub("", out)  # F3：纯介词+坐标+"的"整体删除（须在 catch-all 前）
     out = _COORD_CATCHALL.sub("", out)
     return out
 
@@ -232,19 +239,91 @@ def clean_cjk_text(text: str) -> str:
     return t.strip()
 
 
+# LLM 自带的口播开场语气词/称呼（FINDINGS-001 F1）。
+# generate_summary 末尾按 startswith("总结") 决定是否补前缀；模型若自带
+# 「好了，各位学员，咱们今天…」这类开场，旧正则只剥「总结一下，」剥不到它，
+# 判断落空 → 补回前缀 → 拼出「总结一下，好了，各位学员，咱们今天…」双开场。
+# 这里在剥前缀阶段一并剥掉，可重复剥（模型常叠两三个，如「好了，那么各位」）。
+_SPOKEN_OPENERS = (
+    "好了", "那么", "好的", "行了",
+    "各位学员", "各位同学", "各位朋友", "同学们", "朋友们", "大家",
+    "咱们",
+)
+
+
+def _strip_spoken_openers(t: str, max_rounds: int = 4) -> str:
+    """循环剥离开头的口语开场语气词与称呼（含其后紧跟的顿逗号）。
+
+    只动开头，不碰正文中间的同形词。不含「我们/接下来/最后」——
+    它们在总结正文开头是合法表达（「最后要注意…」），剥掉会伤正文。
+    max_rounds 防御性上限，避免异常输入死循环。
+    """
+    for _ in range(max_rounds):
+        before = t
+        for opener in _SPOKEN_OPENERS:
+            if t.startswith(opener):
+                t = t[len(opener):].lstrip("，,、：: ").strip()
+                break
+        if t == before:
+            break
+    return t
+
+
 def clean_summary_text(text: str) -> str:
-    """清洗总结词：先去引号与「总结」前缀，再走公共 CJK 白名单清洗。
+    """清洗总结词：先去引号、「总结」前缀与口语开场词，再走公共 CJK 白名单清洗。
 
     前缀统一由 generate_summary 末尾补回，保证不重复也不残缺。
+    口语开场词必须在此剥净（FINDINGS-001 F1）：否则补前缀判断落空，
+    拼出「总结一下，好了，各位学员…」双开场。
     """
     t = text.strip().strip("「」\"'`").strip()
-    t = re.sub(r"^总结(一下)?[，,：:]?", "", t).strip()
+    # 交替剥「总结」前缀与口语开场词：两者顺序不定
+    # （「总结一下，好了，…」与「好了，总结一下，…」都出现过）
+    for _ in range(3):
+        before = t
+        t = re.sub(r"^总结(一下)?[，,：:]?", "", t).strip()
+        t = _strip_spoken_openers(t)
+        if t == before:
+            break
     return clean_cjk_text(t)
 
 
 def has_forbidden_chars(text: str) -> bool:
     """是否仍含字母/数字（清洗失败的标志）。"""
     return bool(re.search(r"[A-Za-z0-9]", text))
+
+
+# PLAN-008 阶段 B5：中文数词过程枚举审计标记。
+# F2 数字流水账在 strip_coordinates 后多以中文数词形态出现（如「从三格、两格，压到一格」），
+# validator 的 surface 闸只拦阿拉伯数字/坐标，对中文数词枚举零拦截。这里提供「只检测、
+# 不修改」的纯函数，供离线 A/B 验证脚本统计命中率（基线 phase_final = 11.2%），
+# 作为 B5 闸门锚点（>15% 即回退 B1）。**不接入任何 validator 判废逻辑**——按设计只标记
+# 不判失败，避免误杀「先…再…最后」等合法叙述。
+_PROCESS_ENUM_PATTERNS = [
+    # 数词枚举序列：三格、两格（，一格）——两元素或三元素，含"两"。
+    # 分隔符含 到/至：覆盖"从两格、三格到一格""两格到三格"等渐变枚举。
+    # B5 只标记不判废，宁可多标（人工复核剔除）也不漏常见流水账形态。
+    re.compile(r"[一二三四五六七八九十两]+个?格?\s*[、，到至]\s*[一二三四五六七八九十两]+个?格?(?:\s*[、，到至]\s*[一二三四五六七八九十两]+个?格?)?"),
+    # 从X经Y到Z 式渐变枚举
+    re.compile(r"从[一二三四五六七八九十两]+[^。，]{0,6}经[一二三四五六七八九十两]+"),
+    # 从X减/降/压/缩到Y（含中文数词）
+    re.compile(r"(?:从|由)[一二三四五六七八九十两]+个?格?[^。]{0,10}?(?:减|降|压|缩)(?:到|至|成)[一二三四五六七八九十两]+"),
+    # 逐步/一步步/渐渐 + 格数
+    re.compile(r"(?:逐步|逐渐|一步步|渐渐)[^。]{0,12}?[一二三四五六七八九十两]+个?格"),
+]
+
+
+def scan_process_enumeration(text: str) -> list:
+    """检测 voiceover 是否含中文数词过程枚举（F2 残留形态）。
+
+    返回所有命中的片段列表（空列表=未命中）。只检测不改写，调用方负责按需统计或审计。
+    设计为「只标记不判废」：命中不代表必须重写，仅供 A/B 对照与质量审计。
+    """
+    hits = []
+    for pat in _PROCESS_ENUM_PATTERNS:
+        for m in pat.finditer(text or ""):
+            hits.append(m.group(0))
+    return hits
 
 
 def clean_opening_text(text: str) -> str:

@@ -737,6 +737,104 @@ def _compose_puzzle_intro(kp: dict, storyboard: dict) -> str:
     return [intro_a, intro_b, intro_c][idx]
 
 
+def _puzzle_intro_is_bad(text: str, instruction_only: str = "") -> bool:
+    """puzzle 开场白是否不可用（触发模板兜底）。
+
+    与 endgame opening 的双重校验对齐：硬特征（长度/字母数字/坐标/Markdown）+
+    echo 检测（整段复述 prompt 指令）。**不查 thinking_leaks**——"接下来我们"
+    "我们来看"在开场白语境是合法过渡语，按 segment 思维链泄漏口径判废会误杀
+    正常开场白（实测 00008 的"接下来我们一起来看看"被误判）。
+    事实正确性由骨架注入素材保证；元指令复述由 echo 检测兜底（REVIEW-003 R-5：
+    endgame 同样有 prompt 设计仍加 echo 检测，prompt 设计不足以单独兜底）。
+    """
+    if not text or len(text) < 12 or len(text) > 200:
+        return True
+    # 硬特征：英文/数字/坐标/Markdown。不查 thinking_leaks（开场白语境误伤）
+    if re.search(r"[A-Za-z0-9*_#`\[\]{}<>|\\/]", text):
+        return True
+    # echo 检测：与指令骨架的 4-gram 重合度 > 0.5 判为复述
+    if instruction_only and _looks_like_prompt_echo(text, instruction_only):
+        return True
+    return False
+
+
+def _looks_like_prompt_echo(text: str, prompt: str) -> bool:
+    """检测 text 是否在复述 prompt：按字符 4-gram 算 text 落在 prompt 里的比例。
+
+    与 endgame_commentary._looks_like_prompt_echo 同逻辑（puzzle 模块自洽副本，
+    避免跨模块依赖）。阈值 0.5：超过一半 4-gram 来自 prompt，几乎肯定是复述。
+    """
+    if not text or not prompt:
+        return False
+    grams = {prompt[i:i + 4] for i in range(len(prompt) - 3)}
+    if not grams:
+        return False
+    span = len(text) - 3
+    if span <= 0:
+        return False
+    hit = sum(1 for i in range(span) if text[i:i + 4] in grams)
+    return hit / span > 0.5
+
+
+def generate_puzzle_intro(kp: dict, storyboard: dict, backend) -> str:
+    """PLAN-008 阶段 C：puzzle 开场白 LLM 生成 + 模板兜底。
+
+    消除 F4（puzzle 开场白僵硬雷同）：原 _compose_puzzle_intro 用 md5(tactic_cn)%3
+    选模板，同一战术标签永远逐字相同。改为复用 endgame opening 成熟模式：
+    LLM 生成 → 表层 validator 校验 → 失败回退现有模板。
+
+    事实安全性：只注入 build_puzzle_keypoint_skeleton 已算好的确定性字段
+    （战术名、关键手、识别特征、对方困境、实际结果），不注入任何需模型自行推断的内容。
+    与 endgame opening 对称：每片多一次 API 调用（可接受）。
+    """
+    if not kp:
+        return _compose_puzzle_intro(kp, storyboard)
+
+    tactic_cn = kp.get("tactic_cn", "")
+    key_move_piece = kp.get("key_move_piece", "")
+    recognition = kp.get("tactic_recognition", "") or kp.get("local_weakness", "")
+    defender_problem = kp.get("defender_problem", "") or kp.get("consequence", "")
+    actual_result = kp.get("actual_result", "")
+    puzzle_side = storyboard.get("puzzle_side", "")
+
+    lines = [
+        "你是国际象棋战术教练，正要开始讲解一道战术题，现在对着镜头说开场导语。",
+        "请写一段2到3句的中文开场白：点出这道题考的是什么战术、关键手由哪个棋子完成、",
+        "对方会陷入什么困境，自然过渡到接下来的讲解。",
+        "要求：① 纯口语中文，像讲课开场；② 不要逐步复述任何走法；",
+        "③ 绝对禁止出现任何英文字母、数字、棋盘坐标、格子名、棋谱记号或特殊符号；",
+        "④ 不要标题、序号、引号、markdown；⑤ 禁止引擎术语（评估值、距杀步数等）。",
+        "",
+    ]
+    if tactic_cn:
+        lines.append(f"战术主题：{tactic_cn}")
+    if key_move_piece:
+        lines.append(f"关键手棋子：{key_move_piece}")
+    if recognition:
+        lines.append(f"识别特征：{recognition}")
+    if defender_problem:
+        lines.append(f"对方困境：{defender_problem}")
+    if actual_result:
+        lines.append(f"实际结果：{actual_result}")
+    if puzzle_side:
+        lines.append(f"解题方：{puzzle_side}")
+
+    prompt = "\n".join(lines) + "\n\n现在直接输出开场白正文（不要复述以上要求）："
+    # instruction_only 骨架：仅含「对模型说话」的指令行（lines[:7]），用于 echo 检测。
+    # 不含注入的领域素材（战术名/关键手等）——素材被模型复用是期望行为，不应判成复述。
+    instruction_only = "\n".join(lines[:7])
+    # 不加 GBNF 语法：与 endgame opening/generate_summary 同理——
+    # _SUMMARY_GRAMMAR 会与思维链冲突导致中文泄漏，不用语法 + strip_thinking 即可
+    raw = backend.generate(prompt, grammar=None)
+    raw = strip_thinking(raw)
+    text = safe_puzzle_seed_text(raw)
+
+    # 表层校验 + echo 检测失败 → 回退模板（最坏情况不退化于现状）
+    if _puzzle_intro_is_bad(text, instruction_only):
+        return _compose_puzzle_intro(kp, storyboard)
+    return text
+
+
 def _enforce_puzzle_keypoints(segments: list, nodes: list, kp: dict,
                               backend) -> bool:
     """确保关键手 segment 覆盖双关键点（多重失败安全，对应 §10.2）。
@@ -827,13 +925,21 @@ def _puzzle_post_process(commentary: GeneratedCommentary, all_segments: list,
         f"第{seg.id}步：{seg.voiceover}" for seg in all_segments
     )
 
-    # Puzzle 开场白：基于骨架的半模板，稳定不依赖 LLM
+    # Puzzle 开场白（PLAN-008 阶段 C）：LLM 生成 → 表层校验 → 失败回退模板。
+    # 原 _compose_puzzle_intro 用 md5(tactic_cn)%3 选模板，同标签逐字相同（F4 僵硬）。
+    # 改为 generate_puzzle_intro 复用 endgame opening 模式，消除雷同；模板保留作兜底。
     try:
         kp_for_intro = build_puzzle_keypoint_skeleton(storyboard)
         if kp_for_intro:
-            commentary.opening = _compose_puzzle_intro(kp_for_intro, storyboard)
-    except Exception:
-        pass
+            commentary.opening = generate_puzzle_intro(kp_for_intro, storyboard, backend)
+    except Exception as e:
+        Logger.warn(f"puzzle 开场白生成异常，回退模板: {e}")
+        try:
+            kp_for_intro = build_puzzle_keypoint_skeleton(storyboard)
+            if kp_for_intro:
+                commentary.opening = _compose_puzzle_intro(kp_for_intro, storyboard)
+        except Exception:
+            pass
 
 
 def _puzzle_fallback_wrapper(chunk_nodes: list, json_prompt: str) -> list:
