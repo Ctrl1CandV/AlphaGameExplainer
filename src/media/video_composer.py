@@ -30,8 +30,8 @@ def _make_title_frames(
     """
     生成片头动画帧序列（3.5s * FPS 帧）
     动画时间轴：
-      0.0-0.8s:  背景从纯黑渐变显现
-      0.5-1.2s:  棋盘缩略图105% → 100%（微小 Ken Burns 效果）
+      0.0-0.8s:  背景从暗色渐变显现（首帧即有内容，避免全黑封面）
+      0.0-0.6s:  棋盘缩略图105% → 100%（微小 Ken Burns 效果，首帧即可见）
       1.0-2.0s:  标题从下方30px滑入
       1.5-2.5s:  副标题从下方20px滑入
       2.0-3.0s:  装饰线从左到右画出
@@ -73,18 +73,18 @@ def _make_title_frames(
         img = Image.new("RGB", (width, height), (10, 10, 10))
         draw = ImageDraw.Draw(img)
 
-        # 背景渐变（0.0-0.8s fade in）
-        bg_alpha = min(1.0, t / 0.25)
+        # 背景渐变（首帧即有底色，避免全黑封面）
+        bg_alpha = min(1.0, 0.35 + t / 0.25 * 0.65)
         for y in range(height):
             r = int(30 * bg_alpha + (y / height) * 15 * bg_alpha)
             g = int(30 * bg_alpha + (y / height) * 10 * bg_alpha)
             b = int(30 * bg_alpha + (y / height) * 20 * bg_alpha)
             draw.line([(0, y), (width, y)], fill=(r, g, b))
 
-        # 棋盘缩略图（0.5-1.2s: 105% → 100%）
+        # 棋盘缩略图（首帧即可见，105% → 100%）
         if thumb:
-            thumb_t_start = 0.15
-            thumb_t_end = 0.35
+            thumb_t_start = 0.0
+            thumb_t_end = 0.20
             if t >= thumb_t_start:
                 tt = min(1.0, (t - thumb_t_start) / (thumb_t_end - thumb_t_start))
                 scale = 1.05 - 0.05 * tt  # 105% → 100%
@@ -174,8 +174,8 @@ def _make_outro_frames(
         t = i / (total - 1) if total > 1 else 0.0
         frame = last_frame.copy()
 
-        # 画面渐暗（0 → 0.85 半透明黑叠加，模拟暗角效果）
-        dark_alpha = min(0.85, t * 2.0)
+        # 画面渐暗（上限0.60，保留棋局轮廓，避免末帧全黑）
+        dark_alpha = min(0.60, t * 1.5)
         if dark_alpha > 0.01:
             overlay = Image.new("RGBA", (width, height),
                                 (0, 0, 0, int(255 * dark_alpha)))
