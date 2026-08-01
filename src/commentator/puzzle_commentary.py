@@ -18,6 +18,7 @@ from src.common import GeneratedCommentary, Logger
 from src.analysis.themes_kb import get_theme
 from typing import Optional
 import hashlib
+import random
 import re
 
 # PLAN-006 阶段 D：Puzzle 教学角色 prompt 指令（≤ 20 token/节点，important 不注入省 token）
@@ -118,16 +119,31 @@ def _build_puzzle_json_header(storyboard: dict) -> str:
         except Exception:
             pt = None
         if pt:
-            anchor = [
-                "",
-                f"【主战术深度锚点】本题核心战术是【{pt['cn']}】，请把它讲透，做到以下三层：",
-                f"  1. 机理：{pt['cn']}为什么能成立——{pt.get('definition', '')}",
-            ]
-            if pt.get("key_move_signal"):
-                anchor.append(f"  2. 关键手：在本局，{pt['cn']}的关键手表现为——{pt['key_move_signal']}。请结合给定走法，明确指出哪一步是这个关键手，它具体做了什么。")
-            if pt.get("typical_consequence"):
-                anchor.append(f"  3. 结果：{pt['cn']}得手后的典型收益是——{pt['typical_consequence']}。请说明本局实际兑现了什么（净赢的子力／被控的线路／对方的困境）。")
-            anchor.append("至少要有一处把这个战术概念与本局的具体走法结合起来讲清楚，不要只复述定义，也不要只描述走法，要让观众看懂「概念如何在这盘棋里发生」。")
+            if primary_key in _EVAL_THEME_KEYS:
+                # 评估类标签（advantage/crushing/equality）无具体战术机理，
+                # 不注入循环定义，改为要求讲清具体走法如何创造/兑现优势。
+                anchor = [
+                    "",
+                    f"【讲解重点】本题属于「{pt['cn']}」类型——没有单一战术机理可讲，",
+                    "重点在于让观众看到具体走法如何创造优势：",
+                    "  1. 关键手具体做了什么（吃了什么子、走到什么位置、制造了什么威胁）",
+                    "  2. 对方为什么无法有效应对（哪个子被牵制、哪条线被打开、王暴露在哪）",
+                    "  3. 最终兑现了什么具体收益（净赢哪个子、控制了什么线路、对方王陷入什么困境）",
+                    "禁止用「局面占优」「确立优势」「力量对比悬殊」等空话代替具体棋盘事实。",
+                ]
+                if pt.get("teaching_focus"):
+                    anchor.append(f"教学提示：{pt['teaching_focus']}")
+            else:
+                anchor = [
+                    "",
+                    f"【主战术深度锚点】本题核心战术是【{pt['cn']}】，请把它讲透，做到以下三层：",
+                    f"  1. 机理：{pt['cn']}为什么能成立——{pt.get('definition', '')}",
+                ]
+                if pt.get("key_move_signal"):
+                    anchor.append(f"  2. 关键手：在本局，{pt['cn']}的关键手表现为——{pt['key_move_signal']}。请结合给定走法，明确指出哪一步是这个关键手，它具体做了什么。")
+                if pt.get("typical_consequence"):
+                    anchor.append(f"  3. 结果：{pt['cn']}得手后的典型收益是——{pt['typical_consequence']}。请说明本局实际兑现了什么（净赢的子力／被控的线路／对方的困境）。")
+                anchor.append("至少要有一处把这个战术概念与本局的具体走法结合起来讲清楚，不要只复述定义，也不要只描述走法，要让观众看懂「概念如何在这盘棋里发生」。")
             
             # 联动叙事：核心战术与次要战术存在辅助关系时，提示组合讲解
             synergy = tactic_focus.get("synergy_themes", [])
@@ -408,7 +424,11 @@ def _build_puzzle_chunk_prompt(
     return "\n".join(lines)
 
 def _score_puzzle_depth(text: str, kp: dict) -> bool:
-    """ 关键手段落的深度校验：至少覆盖2到3类关键词，单一关键词不足以证明深度，必须同时包含至少两类 """
+    """ 关键手段落的深度校验：
+    机理类标签：至少覆盖2/3类逻辑词（因果、变化、约束）
+    评估类标签：至少1类即可——评估类内容侧重「做了什么→得到什么」，
+    不依赖因果/变化连接词也能有深度（如直接陈述约束事实）。
+    """
     cause_words = ("因为", "所以", "正是", "从而", "导致", "意味着", "因此")
     change_words = ("之前", "之后", "一旦", "不同于", "改变")
     constraint_words = ("迫使", "无法", "必须", "不能", "只能", "否则")
@@ -417,7 +437,8 @@ def _score_puzzle_depth(text: str, kp: dict) -> bool:
         any(w in text for w in change_words),
         any(w in text for w in constraint_words),
     ])
-    return categories >= 2
+    threshold = 1 if kp.get("is_eval_theme") else 2
+    return categories >= threshold
 
 def _auto_fix_puzzle_voiceover(text: str, node: dict) -> str:
     """ puzzle专用自动修复：坐标清洗、标签标记删除、括号展开、轻量反套话、标点收敛 """
@@ -463,6 +484,10 @@ _PUZZLE_RESULT_WORDS = (
     "赢", "得子", "得回", "多子", "失", "丢", "被迫", "无法",
     "困", "杀", "优势", "子力", "胜势", "制胜", "致胜"
 )
+
+# 评估类标签：描述结果而非战术机理，不适用「机理→证据→变化→困境」四句模板。
+# 与 key_move_locator._OUTCOME_THEMES / themes_kb._STANCE_KEYS 对齐。
+_EVAL_THEME_KEYS = {"advantage", "crushing", "equality", "defensiveMove"}
 
 _DIGIT_CN = {
     "0": "零", "1": "一", "2": "二", "3": "三", "4": "四",
@@ -588,6 +613,8 @@ def build_puzzle_keypoint_skeleton(storyboard: dict) -> dict:
         "local_weakness": local_weakness,
         "before_after": before_after,
         "defender_problem": defender_problem,
+        # 评估类标记：供模板/评分器区分处理
+        "is_eval_theme": primary_key in _EVAL_THEME_KEYS,
     }
 
 def _score_puzzle_keypoints(text: str, kp: dict) -> dict:
@@ -599,8 +626,10 @@ def _score_puzzle_keypoints(text: str, kp: dict) -> dict:
         }
 
     issues = []
+    is_eval = kp.get("is_eval_theme", False)
 
     # 关键点 1（机理）：命中战术中文名或其别名
+    # 评估类标签："优势""碾压"等词极易命中，保留检查但意义较小
     concept_words = kp.get("tactic_concept_words", [])
     kp1_covered = any(w and w in text for w in concept_words)
     if not kp1_covered:
@@ -610,7 +639,12 @@ def _score_puzzle_keypoints(text: str, kp: dict) -> dict:
     key_piece = kp.get("key_move_piece", "")
     has_key_move = bool(key_piece) and key_piece in text
     has_result = any(w in text for w in _PUZZLE_RESULT_WORDS)
-    kp2_covered = has_key_move and has_result
+    if is_eval:
+        # 评估类标签：不硬求提及具体棋子名（关键手可能不是单一棋子动作），
+        # 只要有确定结果词即视为落地——避免模板因缺棋子名被反复打回。
+        kp2_covered = has_result
+    else:
+        kp2_covered = has_key_move and has_result
     if not kp2_covered:
         issues.append("未讲清战术在本局如何兑现（关键点2·落地缺失）")
 
@@ -625,7 +659,8 @@ def _score_puzzle_keypoints(text: str, kp: dict) -> dict:
 def _compose_puzzle_voiceover(node: dict, kp: dict) -> str:
     """
     谜题关键手节点的模板填空
-    4句结构：机理 → 证据 → 变化 → 困境/结果
+    机理类标签：4句结构 机理 → 证据 → 变化 → 困境/结果
+    评估类标签：3句结构 关键手动作 → 对方困境 → 具体收益
     保证纯模板下也100%覆盖双关键点 + 有具体棋理深度
     """
     tactic_cn = kp.get("tactic_cn", "该战术")
@@ -635,8 +670,28 @@ def _compose_puzzle_voiceover(node: dict, kp: dict) -> str:
     defender_problem = kp.get("defender_problem", "").rstrip("。！？，、；：")
     actual_result = kp.get("actual_result", "取得优势").rstrip("。！？，、；：")
 
+    # 评估类标签（advantage/crushing/equality）：不用抽象定义，用棋盘事实结构
+    if kp.get("is_eval_theme"):
+        # 评估类模板：3 条随机变体，避免批量跑时重复
+        _eval_skip_prefix = ("对方", "己方", "白方", "黑方", "双方")
+        # 构建「对方困境」子句
+        if (defender_problem
+                and not defender_problem.startswith(_eval_skip_prefix)
+                and "对方" not in defender_problem):
+            _dp_clause = f"对方{defender_problem}"
+        elif defender_problem and defender_problem.startswith(_eval_skip_prefix):
+            _dp_clause = defender_problem
+        else:
+            _dp_clause = "对方找不到有效的应对手段"
+        _eval_templates = [
+            f"这步关键手是{key_move_desc}，直接改变了局面的力量对比。{_dp_clause}，最终{actual_result}。",
+            f"关键手{key_move_desc}，一举打破了场上的平衡。{_dp_clause}，{actual_result}。",
+            f"这步{key_move_desc}看似平淡，实则从根本上扭转了局势走向。{_dp_clause}，{actual_result}。",
+        ]
+        return random.choice(_eval_templates)
+
+    # 机理类标签：原有 4 句结构
     # 句 1：指出战术名和核心机理
-    # 去除定义末尾的标点，避免与外层句号重复
     def_clean = definition.rstrip("。！？，、；：") if definition else ""
     sent1 = f"这里的核心是{tactic_cn}——{def_clean}" if def_clean else f"这里运用的战术是{tactic_cn}"
 
@@ -655,9 +710,6 @@ def _compose_puzzle_voiceover(node: dict, kp: dict) -> str:
 
     # 句 4：指出对方为什么难受 + 最终结果
     if defender_problem:
-        # 只有当句子本身没有主语时才补"对方"前缀。此前只判"对方"，导致
-        # 以"己方/白方/黑方/双方"开头的 consequence（如 advantage 标签的
-        # "己方以优势姿态进入战术阶段…"）被硬加前缀拼出"对方己方…"的病句。
         if defender_problem.lstrip().startswith(("对方", "己方", "白方", "黑方", "双方")):
             sent4 = f"{defender_problem}，{actual_result}"
         else:
@@ -672,7 +724,30 @@ def _polish_puzzle_voiceover(
     node: dict, kp: dict, prev_context: str, backend
 ) -> str:
     """ 谜题关键手节点的LLM润色 """
-    prompt = f"""你在讲解一道国际象棋战术题。请用自然口语化的中文写这一步的解说。
+    is_eval = kp.get("is_eval_theme", False)
+
+    if is_eval:
+        # 评估类标签：不注入抽象定义，要求讲清具体走法如何创造优势
+        prompt = f"""你在讲解一道国际象棋战术题。请用自然口语化的中文写这一步的解说。
+
+【本题类型】{kp.get('tactic_cn', '')}——没有单一战术机理，重点是讲清具体走法如何创造优势。
+
+【必须讲清的内容】
+1. 关键手具体做了什么：「{kp.get('key_move_desc', '')}」
+2. 对方为什么无法应对：{kp.get('defender_problem', '（无）') or '（无）'}
+3. 最终兑现了什么：{kp.get('actual_result', '')}
+
+上一段结尾：{prev_context or '（无）'}
+
+要求：
+- 如果需要推理，请只把推理过程写在最前面的思考标签中；关闭思考后只能输出给观众听的中文解说
+- 按 3 句结构组织：第 1 句讲关键手具体做了什么；第 2 句讲对方为什么无法应对；第 3 句讲最终收益
+- 必须提到最终得到的结果
+- 120-200字，自然口语，禁止棋子英文、坐标、套话模板词
+- 禁止用「局面占优」「确立优势」「力量对比悬殊」等空话，必须落到具体棋盘事实
+- 禁止编造走法"""
+    else:
+        prompt = f"""你在讲解一道国际象棋战术题。请用自然口语化的中文写这一步的解说。
 
 【本题战术】{kp.get('tactic_cn', '')}
 
