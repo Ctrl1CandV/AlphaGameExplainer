@@ -19,16 +19,20 @@
 - **提示词工程深化 / KB知识立体化利用**（**首要主线，ADR-017**）：在上游信息已充分为真的前提下，深化利用KB（json）知识构造提示词——负面约束注入（把套话词表写进prompt禁用清单）+ KB知识按局面立体化组织 + 可选全局润色Pass。无大结构改动，是当前最高ROI优化。
 - **知识库扩容 + 优质范例库**（**必须做，ADR-018**）：扩容 endgame_kb/puzzle_themes，并新建解说范例库锚定「怎么说」的风格（非内容，区别于已废弃ADR-011）。范例经爬取 + 强模型API（Claude Opus 4.8/GPT-5.6）离线生成，非人工手写。
 - **云端 API 并行生成后端**（**首要实施，ADR-019**）：DeepSeek API 为主 + 本地 llama.cpp 兜底（单次调用失败即切本地，带连续失败熔断）。客户端用 OpenAI SDK 指向 OpenAI 兼容端点 `https://api.deepseek.com`（非 /anthropic、非原生 requests），模型id/base_url 经 env 可配置，默认 `deepseek-v4-flash`。**关键约束：HTTP API 无法用 GBNF，Puzzle 采样期 `cnstring` 中文锁定丢失，纯中文/JSON 结构完全落到既有 validator+retry+后处理**，须先冒烟验证通过率再全量接入。方案见 docs/plans/PLAN-002。
-- **多战略计划讲解**（**长期方向，非当前主线**）：给定中局局面，引擎产出多条导向不同终局的走法分支，事后命名对比讲解。不追求算法找到「真正的人类战略意图」，只追求「不同分支→不同终局」可量化验证。
-- **终局差异化gate / 事后命名 / 融入式解说**（**长期方向**）：多战略计划链路的子组件，随 ADR-006~009 一起暂缓。
+- **Decision 决策管线 / 多战略意图讲解**（**第三条管线，已立项待启动，ADR-020**）：给定中局局面，识别兵形原型→取文献战略计划→`searchmoves` 方向约束产出各计划执行线→反向 MultiPV 验证方向价值→后果投射+代价量化→比较式叙事。与 Endgame/Puzzle 平行，独立失败域。载体从 v1「Puzzle 末端展望」推翻而来。
+- **战略 = 对未来结构类型的偏好**（ADR-020 立场 A）：绕开「战略意图无法从着法唯一恢复」的认识论死结——不恢复心理意图，只判定结构偏好方向，未来结构全部 python-chess 可算。
+- **direction / structural_goal 双字段**（ADR-020 R1）：`direction` 是着法打分谓词（选根着进 searchmoves），`structural_goal` 是结构状态谓词（验「这条线真实现了计划」）。必须拆——真实计划执行序列不是每着同向，用着法方向一致率验线任何真实计划都过不了。
+- **单一事实来源四函数**（ADR-020 R1）：`direction_score` / `structural_features` / `line_features` / `equivalence_gap`。「方向」「等强」「结构特征」三概念全链路唯一定义，禁止各模块各写一套（否则挖矿口径与运行时口径脱节）。
+- **三类对比轴**（ADR-020 R1）：轴 1 两个计划（等强，主力）/ 轴 2 同计划两种执行时机（等强，补充）/ 轴 3 执行 vs 等待（**等待必然更差，只做一句话铺垫、不独立成对比段、不用等强措辞**）。
+- **终局差异化gate / 事后命名 / 融入式解说**（**已废弃**）：v1 多战略链路子组件，随 ADR-006~009 被 ADR-020 收束/废弃。
 - **项目结构重构**（**已完成，ADR-016**）：按管线分层将 commentator.py(2752行)/storyboard.py(2078行) 拆分为 8 个子包（infra/chess_utils/analysis/solver/storyboard/commentator/pipeline/media），消除12+处函数级重复，单向依赖。重构不改运行时行为，用回归样本验证逐段语义等价。
 
 ## 架构决策
 
-- **[ADR-006]【暂缓】多战略计划采用伪逻辑路线** —— 多分支→终局差异化gate→事后命名，不强求算法理解人类战略，只确保分支导向不同终局可量化验证。非当前主线，排期靠后。
-- **[ADR-007]【暂缓】分支探索引擎：Lc0 BT3-768x15 为主，Stockfish MultiPV 5 降级备选** —— Lc0 policy取根候选+searchmoves提取多分支；NPS不足或Lc0不可用时回退SF MultiPV。随多战略计划方向暂缓。
-- **[ADR-008]【暂缓】多计划对比采用融入式解说结构** —— 在分步解说关键分叉点插入分支描述，不独立成前置段落。随多战略计划方向暂缓。
-- **[ADR-009]【暂缓】事后命名采用API预标注+Faiss检索库** —— 离线强模型API预标注局面特征→入库Faiss；在线近邻检索，低置信度降级为特征描述型名字。随多战略计划方向暂缓。
+- **[ADR-006]【被 ADR-020 收束】多战略计划采用伪逻辑路线** —— 保留「不强求算法理解真正人类战略」的哲学内核；载体从「多分支终局对比」改为「中局战略取舍教学」。
+- **[ADR-007]【被 ADR-020 废弃】分支探索引擎 Lc0 为主** —— ADR-020 用 SF `searchmoves` 方向约束（前向）+ MultiPV（反向），**Lc0 彻底移出方案**（不提供不可替代价值，且背着「policy 多样性=战略多样性」未验证假设）。
+- **[ADR-008]【被 ADR-020 废弃】多计划对比采用融入式解说结构** —— ADR-020 用独立管线的比较式叙事（诊断→提问→计划甲→回溯→计划乙→对比），既非融入式也非末端展望式。
+- **[ADR-009]【被 ADR-020 废弃】事后命名采用API预标注+Faiss检索库** —— ADR-020 用 structure_kb 封闭词表（棋类文献权威来源），战略名先于搜索已知，无事后检索命名。
 - **[ADR-010]【已废弃】解说质量提升采用五层分层架构** —— 原L1→L5（Narrative Planner→DS-MHP-lite→两阶段生成→评分器+BoN→Playbook进化）整体架构已被"上游算法层优先"路线取代；验证优先原则保留，但L2-L5在truth错误率达标前不启动代码开发。
 - **[ADR-011]【已废弃】DS-MHP-lite动态证据路径替代静态RAG** —— 被 ADR-017 取代。内容型证据路径在 Planner 已给叙事骨架后边际收益低、复杂度高，且属内容注入有 GIGO 风险；解说提质改走 ADR-017 提示词工程路线。从未落地代码。
 - **[ADR-012]【已采纳·已实施】Narrative Planner程序化叙事规划** —— storyboard阶段计算tension_score(0-1)/narrative_role(setup/build_up/climax/falling_action/resolution)/动态字数预算/tone_hint。纯Python计算无LLM调用，代码已落地于 src/analysis/insight_extractor.py(_compute_tension) + src/storyboard/endgame_builder.py(_assign_narrative_role) + src/commentator/endgame_commentary.py(prompt注入)。tension归一化分母40->80（climax档溢出修复）。
@@ -36,10 +40,11 @@
 - **[ADR-014]【已废弃】人工门控Playbook进化，QLoRA降级为长期固化** —— 机制重、有把错误模式固化进context/权重的风险，且解说提质ROI低于提示词工程/范例库路线，弃用。
 - **[ADR-015]【已采纳】上游真值修复采用"前置事实注入+后验硬事实核查"双保险** —— storyboard/insight每节点算确定性事实（子力/吃子/升变/将杀/per-step material delta）注入prompt白名单；commentator校验链路后验核查棋子存在性/将杀位置。代码已落地，上游全量验证通过（30残局+39 Puzzle零问题）。
 - **[ADR-016]【已采纳并已实施】全项目结构重构——按管线分层拆分巨型文件** —— 将 commentator.py(2752行)和 storyboard.py(2078行)按管线拆分为子包；提取 chess_utils/ 消除12+处函数级重复；单向依赖禁止循环。重构不改运行时行为，用回归样本验证逐段语义等价。**遗留**：ADR-016 中 P7「docs/CLAUDE.md/benchmark纳入版本控制」未执行，.gitignore 仍排除这些路径，待处理。
+- **[ADR-020]【已采纳·R1 已修订，待动工】第三条决策管线——多战略意图讲解** —— 新建 Decision 管线（与 Endgame/Puzzle 平行），中局输入 + structure_kb 知识层 + 正向 searchmoves 方向约束 + 反向 MultiPV 交叉验证 + 后果投射 + 比较式叙事。**同时收束 ADR-006（内核保留）、废弃 ADR-007/008/009**。R1（2026-08-02）三项修订：输入主源改 Lichess Elite DB（PGN）、KB schema 拆 `direction`/`structural_goal`、对比轴扩展为三类（轴 3 限权）；新增单一事实来源与颜色归一化两条横切约束；知识层两级降一级（失衡轴不做）。方案见 PLAN-009，评审见 FINDINGS-002。动工前有三道闸门（M5 冒烟 → P0-lite/full → 挖掘 Go/No-Go）。
 
 ## 硬约束
 
-- **硬件**：4070 Ti Super 16G 显存。Qwen3.6-27B 4-bit（~14.5GB）几乎占满显存，**无法与 Lc0 BT3（~2.6GB）或 ChatTTS（~2GB）同时驻留**，必须串行加载/释放（管线已用 `release_backend()` 在 TTS 前释放 LLM）。多战略计划链路（ADR-007 需 Lc0）与 LLM 生成需分阶段错峰用显存。
+- **硬件**：4070 Ti Super 16G 显存。Qwen3.6-27B 4-bit（~14.5GB）几乎占满显存，**无法与 ChatTTS（~2GB）同时驻留**，必须串行加载/释放（管线已用 `release_backend()` 在 TTS 前释放 LLM）。Decision 管线（ADR-020）只用 Stockfish（CPU，不占显存），**Lc0 已移出方案**，故无显存竞争；但引擎调用须在 LLM 加载前完成（现有 puzzle/endgame 管线的既有次序天然满足）。
 - **n_ctx=4096**：本地 llama.cpp 当前默认生成上下文窗口，受 Qwen3.6-27B 4-bit 占满显存后 KV cache 余量所限，可经 `LLAMA_CPP_N_CTX` 覆盖。非硬产品上限；prompt 仍需预算控制。切到 API 后端后此约束不适用于 API 路径（DeepSeek 128k 窗口），仅本地兜底路径受限。
 - **讲解词中文纯净化**：voiceover 禁止英文/数字/坐标/Markdown。已有 `_strip_coordinates` / `_clean_cjk_text` 兜底。
 - **Syzygy 表库覆盖 3-6 子**：超出范围的残局走 Stockfish 求解。
@@ -85,6 +90,8 @@
 
 **视频视听优化立项 PLAN-005**（2026-07-25，主指针）：解说质量常规优化收口后转向「解说如何被更好地听见、看见」。三条必要改动，均限定媒体层（`src/common.py` + `src/media/*`）加法式扩展，不重构、不换框架、不动解说生成。**Core 1**（字幕真实语音同步）：TTS 记录真实语音截止时长 `speech_duration_s`（不含尾静音），字幕预算从被渲染器覆盖的 `duration_s` 改用 `speech_duration_s`，修末条字幕拖入尾静音的真实 bug；不追句级精度（TTS/字幕分句逻辑不一致，直通会错位）。**Core 2**（画面整体质量）：箭头 2x overlay 抗锯齿 + glow 改高斯柔光 + 格子高亮改柔和圆角环 + 棋子/棋盘投影缓存，按元素分治不做统一超采样。**Core 3**（落子结果澄清）：将军画攻击线（红虚线，区别实线走子箭头）+ 将杀标王无逃生格（低干扰半标记），均 python-chess 确定性计算。砍掉音效（空资产+盖人声）与战术射线（易错）。经 external validate_approach（longcat）判「有条件推荐」，两前提已纳入设计。
 
+**第三条决策管线立项 + 两轮评审修订**（2026-08-01 立项，2026-08-02 修订，ADR-020 + PLAN-009 + FINDINGS-002）：多战略意图讲解从「Puzzle 末端展望」（v1，废弃）演进为「独立第三条 Decision 管线」（v2）。理论地基：战略 = 对未来结构类型的偏好（可计算/可对比/可前向），正向 searchmoves 方向约束 + 反向 MultiPV 交叉验证。**FINDINGS-002 两轮评审后用户裁决三项重量级修订**：① 输入主源从 Lichess puzzle 库改 **Lichess Elite DB（PGN）**——puzzle 库的入选原理（解题方每步唯一最佳）与 M5「无强制战术」结构性冲突，原 17.7% 测的是 themes 标签而非 M5；② KB schema 拆 `direction`（选根着）/`structural_goal`（验线）——一个字段无法同时承担着法打分与结构状态判定；③ 对比来源扩展为三类轴（两个计划 / 同计划两种执行 / 执行 vs 等待，轴 3 限权只做一句话）。新增两条横切约束：**单一事实来源**（direction_score/structural_features/line_features/equivalence_gap 四函数全链路唯一）+ **颜色归一化**（`board.mirror()`，KB 只写走子方视角）。知识层由两级降一级（失衡轴不做，PGN 源矿脉无限、识别不到直接丢弃）。**动工前三道闸门**：M5 冒烟（半天，验证换源判断）→ P0-lite（纯静态零引擎，谓词召回 ≥90%/识别 ≥70%/候选覆盖实战 top-2 ≥80%）→ P0-full（带引擎，污染检查/结构目标达成/可分离性自校准）。P0 判据已全部**免人工标注化**（用 PGN 实战频率统计替代评审标注）。含最小可行路径（2 原型 + 只做轴 1 + 单月数据 + 只出文本，两周 demo）对冲工程量膨胀。当前状态：**待启动，主线仍是 ADR-017**。
+
 **工具链**：`tools/quality_audit/` 质量审计工具（默认流程已取消 AI 标注，仅生成 + 人工查看）。
 
 ## 项目结构
@@ -97,14 +104,15 @@
 - `src/storyboard/`：compressor/`key_move_locator.py`/`endgame_builder.py`(_assign_narrative_role)/puzzle_builder/prelude
 - `src/commentator/`：endgame/puzzle 解说、`generator.py`(主流程)、`validators.py`、`text_filters.py`、`grammar.py`(GBNF)、`json_utils.py`
 - `src/pipeline/`：endgame(5步)/puzzle(4步) 管线；`src/media/`：渲染/TTS/字幕/合成
-- `data/`(endgame_kb/puzzle_themes/commentary_examples/quality_benchmark_phaseN)、`syzygy/`、`tools/quality_audit/`、`tools/lc0/`、`main.py`、`docs/`(SPEC/plans/adr)
+- `data/`(endgame_kb/puzzle_themes/commentary_examples/quality_benchmark_phaseN)、`syzygy/`、`tools/`、`main.py`、`docs/`(SPEC/plans/adr)
 
 ## 文档与记忆系统
 
 - 四层文档职责：CLAUDE.md=长期领域语言/架构决策索引/硬约束/当前状态；docs/adr/=决策论证；docs/SPEC.md=行为契约+高层状态（不存详细施工步骤）；docs/plans/PLAN-XXX=详细实施路线与全过程证据。
 - **CLAUDE.md**（本文件）：项目当前状态。每次会话开始先读。
-- **docs/SPEC.md**：行为契约+高层状态；当前指针指向 PLAN-002（API 后端）。
-- **docs/plans/**：PLAN-001（Phase 3 质量修复，**已作废** 2026-07-21，后继 PLAN-004）、PLAN-002（DeepSeek API 为主本地兜底后端，已完成）、PLAN-003（Phase 4 结构可靠性修复，已完成）、PLAN-004（API 时代解说质量修复与验证闭环，**已完成** 2026-07-22 收口）、PLAN-005（视频生成视听优化，**已完成** 2026-07-27 收口）、PLAN-006（解说节奏与情感表达优化，执行中，待端到端观感验证）、PLAN-007（解说词二次润色，执行中，待切 `ENABLE_POLISH=true`）、PLAN-008（表达层精修与约束松绑，**当前主指针** 2026-07-28，阶段 B 已冻结待实施）。
+- **docs/SPEC.md**：行为契约+高层状态。
+- **docs/plans/**：PLAN-001（Phase 3 质量修复，**已作废** 2026-07-21，后继 PLAN-004）、PLAN-002（DeepSeek API 为主本地兜底后端，已完成）、PLAN-003（Phase 4 结构可靠性修复，已完成）、PLAN-004（API 时代解说质量修复与验证闭环，**已完成** 2026-07-22 收口）、PLAN-005（视频生成视听优化，**已完成** 2026-07-27 收口）、PLAN-006（解说节奏与情感表达优化，执行中，待端到端观感验证）、PLAN-007（解说词二次润色，执行中，待切 `ENABLE_POLISH=true`）、PLAN-008（表达层精修与约束松绑，**已完成** 2026-07-28）、PLAN-009（多战略意图讲解第三条决策管线，**已立项待启动** 2026-08-01/02 R1，动工前 M5 冒烟 + P0-lite/full 闸门，非当前主线）。
+- **docs/FINDINGS-002**：多战略意图讲解方案评审与遗留问题（P0 双闸门判据 + P1~P23 问题清单），PLAN-009 各阶段动工前逐条回查。
 - **docs/REFACTORING_PLAN.md**：全项目结构重构详细设计方案（ADR-016，已实施）。
 - **docs/Phase2 Review Findings.md**：Phase 2 代码审查发现（4个问题已全部修复）。
 - **docs/adr/ADR-XXX.md**：架构决策完整论证（注意状态字段：已采纳/暂缓/已废弃）。

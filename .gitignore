@@ -17,3 +17,5 @@ output/
 tools/quality_audit/*result*.json
 docs/
 tools/
+# Decision 管线的 PGN 语料（ADR-020 主源，单月解压后约 255MB，从 Elite DB 重新下载即可）
+data/pgn/
