@@ -1,79 +1,431 @@
 {
-  "carlsbad": {
-    "cn": "卡尔斯巴德结构",
-    "identify": {
-      "pawn_pattern": "走子方有 d4 兵且 c 线无兵；对方有 d5 兵且 e 线无兵（d4/d5 固定对峙，c 线兵已兑）",
-      "opening_hints": ["QGD Exchange (D35-D39)", "English transposition"]
-    },
-    "theory": "白方后翼兵多数、黑方中心兵多数的经典对抗结构：c 线兵兑尽后 d4/d5 固定，白方选择后翼少数派攻击或中心突破，黑方在王翼/中心反击",
-    "plans": [
-      {
-        "name": "少数派攻击",
-        "mover_side": "mover",
-        "mechanism": "用 b4-b5 兵推进冲击对方 c 线兵，制造孤立/后退弱兵后长期施压",
-        "direction": {
-          "pawn_files": ["a", "b"],
-          "target_zone": "queenside",
-          "break_squares": ["b5"]
-        },
-        "structural_goal": { "opp_isolated_qside": ">=1" },
-        "cost": "自身 b/a 兵结构松动，后翼线路可能被对方利用",
-        "typical_mistakes": "过早推进未做好车的配合",
-        "source": "Soltis《Pawn Structure Chess》/ Nimzowitsch"
-      },
-      {
-        "name": "中心突破",
-        "mover_side": "mover",
-        "mechanism": "放弃后翼行动，在中心求 e4 突破，解除 d4/d5 对峙换取空间与主动权",
-        "direction": {
-          "pawn_files": ["e"],
-          "target_zone": "center",
-          "break_squares": ["e4"]
-        },
-        "structural_goal": { "mover_pawns_past_mid": ">=1" },
-        "cost": "中心兵推进后自身兵形不复固定，需承担开放线风险",
-        "typical_mistakes": "e4 突破缺乏子力支援被对方反压",
-        "source": "Pachman《Modern Chess Strategy》"
-      }
-    ]
+ "carlsbad": {
+  "cn": "卡尔斯巴德结构",
+  "identify": {
+   "pawn_pattern": "走子方有 d4 兵且 c 线无兵；对方有 d5 兵且 e 线无兵（d4/d5 固定对峙，c 线兵已兑）",
+   "opening_hints": [
+    "QGD Exchange (D35-D39)",
+    "English transposition"
+   ]
   },
-  "iqp": {
-    "cn": "孤后兵结构（IQP）",
-    "identify": {
-      "pawn_pattern": "任一方的 d 线兵孤立（该方 c/e 线均无兵）——含走子方持孤兵与对方持孤兵两种角色",
-      "opening_hints": ["QGD Tarrasch (D32-D34)", "Nimzo-Indian 4.e3 c5", "QGA"]
+  "theory": "白方后翼兵多数、黑方中心兵多数的经典对抗结构：c 线兵兑尽后 d4/d5 固定，白方选择后翼少数派攻击或中心突破，黑方在王翼/中心反击",
+  "axes": {
+   "axis1": "少数派攻击 vs 中心突破（同方两计划）",
+   "axis2": "推进时机（b4 车未配合即推进/过早 e4，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "少数派攻击",
+    "mover_side": "mover",
+    "mechanism": "用 b4-b5 兵推进冲击对方 c 线兵，制造孤立/后退弱兵后长期施压",
+    "direction": {
+     "pawn_files": [
+      "a",
+      "b"
+     ],
+     "target_zone": "queenside",
+     "break_squares": [
+      "b5"
+     ]
     },
-    "theory": "孤后兵是双刃剑：持有方获得中心控制与动态进攻潜力，但孤兵自身是永久弱点。双方围绕「保持/围攻孤兵」与「推进/兑换消除孤兵」展开典型对抗",
-    "plans": [
+    "structural_goal": {
+     "any": [
       {
-        "name": "对孤兵施压",
-        "mover_side": "opponent",
-        "mechanism": "重子压 d 线、轻子围攻孤兵（d5），迫使持有方逐步防守，孤兵转为弱点",
-        "direction": {
-          "pawn_files": ["d"],
-          "target_zone": "center",
-          "break_squares": ["d4"],
-          "pressure_squares": ["d5"]
-        },
-        "structural_goal": { "opp_isolated_center": ">=1" },
-        "cost": "围攻消耗子力，若迟迟不能兑现，己方王翼可能被对方利用孤兵的中心控制反击",
-        "typical_mistakes": "围攻子力与推进子力脱节，孤兵未兑却先丢主动权",
-        "source": "Pachman / Watson《Secrets of Modern Chess Strategy》"
+       "opp_isolated_qside": ">=1"
       },
       {
-        "name": "推进消除孤兵",
-        "mover_side": "opponent",
-        "mechanism": "用己方 d 线兵或兑换手段迫使孤兵推进（d5xd4 或 d5-d4），消除对方孤兵，把局面转入结构更静态的中局/残局",
-        "direction": {
-          "pawn_files": ["d"],
-          "target_zone": "center",
-          "break_squares": ["d4"]
-        },
-        "structural_goal": { "opp_isolated_center": "==0" },
-        "cost": "兑兵后对方获得中心兵形修复，己方失去施压目标，需评估转入的结构是否仍占优",
-        "typical_mistakes": "过早兑掉孤兵，把动态优势白白送成均势",
-        "source": "Pachman"
+       "opp_backward": ">=1"
       }
-    ]
-  }
+     ]
+    },
+    "cost": "自身 b/a 兵结构松动，后翼线路可能被对方利用",
+    "typical_mistakes": "过早推进未做好车的配合",
+    "source": "Soltis《Pawn Structure Chess》/ Nimzowitsch"
+   },
+   {
+    "name": "中心突破",
+    "mover_side": "mover",
+    "mechanism": "放弃后翼行动，在中心求 e4 突破，解除 d4/d5 对峙换取空间与主动权",
+    "direction": {
+     "pawn_files": [
+      "e"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "e4"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "中心兵推进后自身兵形不复固定，需承担开放线风险",
+    "typical_mistakes": "e4 突破缺乏子力支援被对方反压",
+    "source": "Pachman《Modern Chess Strategy》"
+   }
+  ]
+ },
+ "iqp": {
+  "cn": "孤后兵结构（IQP）",
+  "identify": {
+   "pawn_pattern": "任一方的 d 线兵孤立（该方 c/e 线均无兵）——含走子方持孤兵与对方持孤兵两种角色",
+   "opening_hints": [
+    "QGD Tarrasch (D32-D34)",
+    "Nimzo-Indian 4.e3 c5",
+    "QGA"
+   ]
+  },
+  "theory": "孤后兵是双刃剑：持有方获得中心控制与动态进攻潜力，但孤兵自身是永久弱点。双方围绕「保持/围攻孤兵」与「推进/兑换消除孤兵」展开典型对抗",
+  "axes": {
+   "axis1": "施压/消除/保持/兑掉四计划（对方与持有方多计划）",
+   "axis2": "兑兵时机（过早兑掉送动态优势，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "对孤兵施压",
+    "mover_side": "opponent",
+    "mechanism": "重子压 d 线、轻子围攻孤兵（d5），迫使持有方逐步防守，孤兵转为弱点",
+    "direction": {
+     "pawn_files": [
+      "d"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "d4"
+     ],
+     "pressure_squares": [
+      "d5"
+     ],
+     "outpost_squares": [
+      "e5",
+      "c5"
+     ]
+    },
+    "structural_goal": {
+     "opp_isolated_center": ">=1"
+    },
+    "cost": "围攻消耗子力，若迟迟不能兑现，己方王翼可能被对方利用孤兵的中心控制反击",
+    "typical_mistakes": "围攻子力与推进子力脱节，孤兵未兑却先丢主动权",
+    "source": "Pachman / Watson《Secrets of Modern Chess Strategy》"
+   },
+   {
+    "name": "推进消除孤兵",
+    "mover_side": "opponent",
+    "mechanism": "用己方 d 线兵或兑换手段迫使孤兵推进（d5xd4 或 d5-d4），消除对方孤兵，把局面转入结构更静态的中局/残局",
+    "direction": {
+     "pawn_files": [
+      "d"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "d4"
+     ]
+    },
+    "structural_goal": {
+     "opp_isolated_center": "==0"
+    },
+    "cost": "兑兵后对方获得中心兵形修复，己方失去施压目标，需评估转入的结构是否仍占优",
+    "typical_mistakes": "过早兑掉孤兵，把动态优势白白送成均势",
+    "source": "Pachman"
+   },
+   {
+    "name": "保持孤兵（利用动态潜力）",
+    "mover_side": "mover",
+    "mechanism": "保留 d4 孤兵，轻子围绕中心组织（占领 e5/c5 据点），利用孤兵的中心控制换取动态进攻机会——不急于兑掉",
+    "direction": {
+     "target_zone": "center",
+     "outpost_squares": [
+      "e5",
+      "c5",
+      "e4"
+     ],
+     "exclude_pawn_targets": [
+      "d5",
+      "c4"
+     ]
+    },
+    "structural_goal": {
+     "opp_isolated_center": "==0",
+     "mover_pawns_past_mid": "==0"
+    },
+    "cost": "孤兵是永久弱点，若动态潜力无法兑现为进攻，残局必然吃亏",
+    "typical_mistakes": "孤兵被围死后仍不推进，子力全部被动防守",
+    "source": "Pachman / Watson《Secrets of Modern Chess Strategy》"
+   },
+   {
+    "name": "推进兑掉孤兵",
+    "mover_side": "mover",
+    "mechanism": "d4-d5 推进，迫使对方兑换或让孤兵过线——把孤兵的动态优势变现为空间，或转入更静态的结构",
+    "direction": {
+     "pawn_files": [
+      "d"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "d5"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "推进后孤兵消失，若对方避兑，d5 可能成为新的弱点",
+    "typical_mistakes": "推进时机过早，被对方 e6 兵直接封锁",
+    "source": "Pachman"
+   }
+  ]
+ },
+ "hanging": {
+  "cn": "悬兵结构",
+  "identify": {
+   "pawn_pattern": "走子方 c4+d4（或对方 c5+d5）双兵并列且无相邻线兵保护（b3/e3 或 b6/e6 无兵）；对方 d 线兵在 d5/d6",
+   "opening_hints": [
+    "QGA (D20-D29)",
+    "QGD Tarrasch (D32-D34)",
+    "Sicilian Alapin (B22)"
+   ]
+  },
+  "theory": "悬兵双兵是动态资产：控制中心格但自身缺乏兵的保护，对方可用侧翼兵冲击（b5/f5）或中心挑战（d5）迫其推进或兑换，动态优势与脆弱性并存",
+  "axes": {
+   "axis1": "推进悬兵 vs 保持悬兵（同方两计划）",
+   "axis2": "推进时机（过早被兑兵/过晚被侧翼冲击，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "推进悬兵",
+    "mover_side": "mover",
+    "mechanism": "c4-c5 或 d4-d5 推进，换取空间、制造通路兵或迫使对方兑兵后转入静态结构",
+    "direction": {
+     "pawn_files": [
+      "c",
+      "d"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "c5",
+      "d5"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "推进后双兵不再悬，若被兑则中心控制丧失；c5/d5 可能成为新弱点",
+    "typical_mistakes": "推进时机过早，被对方兑兵后悬兵消失且无中心补偿",
+    "source": "Soltis《Pawn Structure Chess》悬兵章"
+   },
+   {
+    "name": "保持悬兵（利用动态潜力）",
+    "mover_side": "mover",
+    "mechanism": "保持 c4+d4 对中心的控制，轻子围绕悬兵组织（e5/c5 前哨），利用双兵的空间优势",
+    "direction": {
+     "target_zone": "center",
+     "outpost_squares": [
+      "e5",
+      "c5"
+     ],
+     "exclude_pawn_targets": [
+      "d5",
+      "c5"
+     ]
+    },
+    "structural_goal": {
+     "opp_isolated_center": "==0",
+     "mover_pawns_past_mid": "==0"
+    },
+    "cost": "双兵长期不动会被侧翼兵冲击（b5/f5），被迫推进或兑换时动态优势耗尽",
+    "typical_mistakes": "悬兵被围死仍不推进，子力全部被动防守",
+    "source": "Soltis"
+   }
+  ]
+ },
+ "maroczy": {
+  "cn": "马洛齐束缚",
+  "identify": {
+   "pawn_pattern": "走子方 c4+e4 双中心兵控制 d5 格；对方 d 线兵在 d6（未过 d5）",
+   "opening_hints": [
+    "Sicilian Maroczy (B38-B39)",
+    "Sicilian Dragon 加速变例"
+   ]
+  },
+  "theory": "c4+e4 双兵锁住 d5 中心弱格，黑方空间受缚、d 兵难推进；白方在束缚庇护下组织王翼或后翼行动，黑方寻求 d5/b5 解放",
+  "axes": {
+   "axis1": "王翼进攻 vs 后翼扩张（同方两计划）",
+   "axis2": "冲击时机（过早被黑中心反冲，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "王翼进攻",
+    "mover_side": "mover",
+    "mechanism": "h4-h5 兵冲击对方王翼兵墙（配合轻子与重子），在束缚庇护下对王翼施加压力",
+    "direction": {
+     "pawn_files": [
+      "h",
+      "g"
+     ],
+     "target_zone": "kingside",
+     "break_squares": [
+      "h5"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "王翼兵推进后自身王翼松动，若黑中心 d5 解放则反冲",
+    "typical_mistakes": "冲击时机过早（己方王翼/中心未稳），黑 d5 解放后中心反压",
+    "source": "Soltis 西西里章"
+   },
+   {
+    "name": "后翼扩张",
+    "mover_side": "mover",
+    "mechanism": "b4-b5 兵冲击对方后翼兵（配合车 b 线），压制黑后翼并扩大空间",
+    "direction": {
+     "pawn_files": [
+      "b",
+      "a"
+     ],
+     "target_zone": "queenside",
+     "break_squares": [
+      "b5"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "后翼兵推进过深，黑 b 线反击或 d5 解放后中心反压",
+    "typical_mistakes": "后翼推进过深被黑 b 线兑兵后空间优势消失",
+    "source": "Pachman"
+   }
+  ]
+ },
+ "stonewall": {
+  "cn": "石墙兵形",
+  "identify": {
+   "pawn_pattern": "对方 d5+f5 双前伸兵（e6 支撑）或走子方 d4+f4（e3 支撑）",
+   "opening_hints": [
+    "Dutch Stonewall (A90-A99)",
+    "London System 变例"
+   ]
+  },
+  "theory": "石墙三兵（d+f 前伸 + e 支撑）形成坚固中心墙：兵形稳固但空间受限；对抗石墙方从后翼扩张或中心突破瓦解其根基，石墙持有方以王翼进攻为主旋律",
+  "axes": {
+   "axis1": "后翼扩张 vs 中心突破（对抗石墙方两方向）",
+   "axis2": "突破时机（e4 被兑/g4 被吃，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "后翼扩张",
+    "mover_side": "mover",
+    "mechanism": "b4-c5 兵冲击对方石墙的 d5 根基，制造孤立/后退兵后长期施压",
+    "direction": {
+     "pawn_files": [
+      "c",
+      "b"
+     ],
+     "target_zone": "queenside",
+     "break_squares": [
+      "c5"
+     ]
+    },
+    "structural_goal": {
+     "any": [
+      {
+       "opp_isolated_qside": ">=1"
+      },
+      {
+       "opp_backward": ">=1"
+      }
+     ]
+    },
+    "cost": "后翼兵推进后自身后翼线路可能被对方利用",
+    "typical_mistakes": "子力未协调就过早兵扩张，被对方反冲击",
+    "source": "Soltis"
+   },
+   {
+    "name": "中心突破",
+    "mover_side": "mover",
+    "mechanism": "e3-e4 中心突破，打开石墙中心线换取空间与线路",
+    "direction": {
+     "pawn_files": [
+      "e"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "e4"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "e4 突破后中心兵形不复固定，e 兵可能成为新弱点",
+    "typical_mistakes": "e4 突破缺乏子力支援被对方反压",
+    "source": "Pachman"
+   }
+  ]
+ },
+ "majority": {
+  "cn": "通路兵/多数兵结构",
+  "identify": {
+   "pawn_pattern": "走子方在翼侧有兵多数（后翼 a-c 线或王翼 f-h 线 ≥3 vs ≤2）且该翼可推进；或已有通路兵",
+   "opening_hints": [
+    "QGD Exchange (D35-D39)",
+    "Caro-Kann 变例",
+    "Sicilian Najdorf 变例"
+   ]
+  },
+  "theory": "兵多数是长期资产：多数翼推进（a4-b4-c4）可制造通路兵，通路兵牵制对方子力；少数翼方寻求兑换兵或阻塞推进",
+  "axes": {
+   "axis1": "多数翼推进 vs 王翼行动（同方两方向）",
+   "axis2": "推进节奏（过急被兑/过慢失去时机，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "多数翼推进",
+    "mover_side": "mover",
+    "mechanism": "后翼多数兵（a4-b4-c4）逐级推进，制造通路兵后牵制对方子力转入残局优势",
+    "direction": {
+     "pawn_files": [
+      "a",
+      "b",
+      "c"
+     ],
+     "target_zone": "queenside",
+     "break_squares": [
+      "c5",
+      "b5"
+     ]
+    },
+    "structural_goal": {
+     "passed_diff": ">=1"
+    },
+    "cost": "推进节奏错误被对方兑兵后多数消失；推进过深对方 d 兵反冲",
+    "typical_mistakes": "推进过急被对方兑兵，多数优势化为乌有",
+    "source": "Soltis 多数兵章"
+   },
+   {
+    "name": "王翼行动",
+    "mover_side": "mover",
+    "mechanism": "放弃多数翼推进，转王翼进攻（g4-h4 冲击），利用对方子力被多数牵制的时机",
+    "direction": {
+     "pawn_files": [
+      "g",
+      "h"
+     ],
+     "target_zone": "kingside",
+     "break_squares": [
+      "h5"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=1"
+    },
+    "cost": "放弃多数资产，若王翼进攻不成则残局劣势",
+    "typical_mistakes": "王翼投入不足，多数推进时机也被错过",
+    "source": "Pachman"
+   }
+  ]
+ }
 }

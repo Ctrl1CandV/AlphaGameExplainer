@@ -877,7 +877,8 @@ def _step_overhead_sec(slide_sec: float = SLIDE_SEC, emphasis: str = "important"
 #  主渲染入口
 
 def render_animated_frames(
-        segments: List[Segment], initial_fen: str, panel_info: Optional[dict] = None
+        segments: List[Segment], initial_fen: str, panel_info: Optional[dict] = None,
+        frames_dir: Optional[str] = None, write_start_time: bool = True
     ) -> Tuple[List[str], List[float]]:
     """
     节点级动画渲染
@@ -885,8 +886,22 @@ def render_animated_frames(
     时长对齐、音画同步逻辑不变，新增阶段切换时的标签叠加
     panel_info可选:{"endgame_name": str, "scores": [...], "winner_color": ...}
     返回: (frame_paths, frame_durations)
+
+    frames_dir（08.04 加法扩展，默认 None = 用模块级 FRAMES_DIR）：
+        帧输出目录。决策管线要把两条计划各自从决策点渲染成两个独立序列，
+        需要各写一个目录，否则第二次渲染的 frame_XXXXX 会覆盖第一次。
+        既有两条管线不传此参，行为与之前完全一致（零回归）。
+
+    write_start_time（08.04 加法扩展，默认 True = 保持既有行为）：
+        是否回填 seg.start_time。本函数的 start_time 是**本次调用内**从 0
+        起算的相对时间；单序列渲染时它就是全局时间轴，故老管线依赖它。
+        但分序列渲染时，第二次调用会把 seq_b 各段的 start_time 覆盖成
+        「B 内相对时间」，字幕 cue 随之错乱（这是阶段 8a 字幕缺失的根因）。
+        分序列场景传 False，由调用方在全部序列渲染完毕后统一按段序累加。
+        `duration_s` 不受本开关影响——它是画面占用时长，与调用次序无关。
     """
-    os.makedirs(FRAMES_DIR, exist_ok=True)
+    out_dir = frames_dir or FRAMES_DIR
+    os.makedirs(out_dir, exist_ok=True)
     board = chess.Board(initial_fen)
 
     total = sum(len(getattr(seg, "moves", []) or []) for seg in segments)
@@ -913,7 +928,7 @@ def render_animated_frames(
         nonlocal fnum
         if img.mode != "RGB":
             img = img.convert("RGB")
-        fpath = os.path.join(FRAMES_DIR, f"frame_{fnum:05d}.png")
+        fpath = os.path.join(out_dir, f"frame_{fnum:05d}.png")
         img.save(fpath)
         frame_paths.append(fpath)
         durations.append(dur)
@@ -957,7 +972,8 @@ def render_animated_frames(
             # 无走法段不叠加阶段标签（开场白/总结词的 phase 为空或不变）
             img = render_frame(board, info=info, is_mate=is_mate)
             _save(img, seg_target)
-            seg.start_time = seg_start_cursor
+            if write_start_time:
+                seg.start_time = seg_start_cursor
             seg.duration_s = seg_target
             time_cursor += seg_target
             global_frame_idx += 1
@@ -1057,7 +1073,8 @@ def render_animated_frames(
                 seg_rendered += dur
                 global_frame_idx += 1
 
-        seg.start_time = seg_start_cursor
+        if write_start_time:
+            seg.start_time = seg_start_cursor
         seg.duration_s = seg_rendered   # 仅写画面占用时长（含动画最低预算，可能略长于语音）
         # speech_duration_s（真实语音截止）由 TTS 写入，渲染器不得改写——字幕据此分配 cue 避免落入尾静音
         time_cursor += seg_rendered

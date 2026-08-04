@@ -10,7 +10,10 @@ KB 只写「走子方视角」（mover/opponent 语义），识别在归一化�
 
 失败安全：任何异常返回 (None, 0.0, {})，不抛错。
 
-v0 覆盖 2 原型（最小路径）：carlsbad（卡尔斯巴德）、iqp（孤后兵）。
+v1 覆盖 6 原型：carlsbad（卡尔斯巴德）、iqp（孤后兵）、hanging（悬兵）、
+maroczy（马洛齐束缚）、stonewall（石墙）、majority（通路兵/多数兵）。
+识别优先级「具体 → 泛」（中心兵形类优先于翼侧兵数类）：
+carlsbad → iqp → hanging → maroczy → stonewall → majority。
 识别不到返回 None——PGN 源矿脉无限，宁可漏识别不可误识别（丢弃成本为零）。
 """
 from __future__ import annotations
@@ -35,6 +38,13 @@ def _mirror_normalize(board: chess.Board) -> chess.Board:
 def _pawn_files(board: chess.Board, color: int) -> set:
     """某方兵占据的线集合（file → 该方兵存在）。"""
     return {chess.square_file(sq) for sq in board.pieces(chess.PAWN, color)}
+
+
+def _pawn_on(board: chess.Board, color: int, sq_name: str) -> bool:
+    """指定格是否有该方兵（sq_name 如 "d4"）。"""
+    sq = chess.parse_square(sq_name)
+    p = board.piece_at(sq)
+    return p is not None and p.piece_type == chess.PAWN and p.color == color
 
 
 def _isolated_d_pawn_squares(board: chess.Board, color: int) -> list:
@@ -97,13 +107,89 @@ def _iqp_check(board: chess.Board) -> bool:
     return False
 
 
+def _hanging_check(board: chess.Board) -> bool:
+    """悬兵：mover c4+d4 双兵并列且 b3/e3 无 mover 兵（双兵无支撑）；
+    或对方 c5+d5 双兵且 b6/e6 无对方兵（黑方悬兵——归一化后仍显对方
+    颜色，KB identify 的「或对方 c5+d5」）。
+
+    守卫查**格**（b3/e3）而非线：b2 兵不保护 c4（兵保护是斜前方），
+    悬兵仍成立（Berlin 实测——首版按线检查漏识别）。
+    """
+    for color, sq_pair, guard_sqs in (
+        (_MOVER, ("c4", "d4"), ("b3", "e3")),
+        (_OPPONENT, ("c5", "d5"), ("b6", "e6")),
+    ):
+        if _pawn_on(board, color, sq_pair[0]) and _pawn_on(board, color, sq_pair[1]):
+            if all(not _pawn_on(board, color, g) for g in guard_sqs):
+                return True
+    return False
+
+
+def _maroczy_check(board: chess.Board) -> bool:
+    """马洛齐束缚：mover c4+e4 双中心兵控制 d5 + 对方 d 线兵在 d6
+    （rank 5，未过 d5——d6 兵被 c4/e4 束缚）。"""
+    if not (_pawn_on(board, _MOVER, "c4") and _pawn_on(board, _MOVER, "e4")):
+        return False
+    return any(
+        chess.square_file(sq) == _FD and chess.square_rank(sq) == 5
+        for sq in board.pieces(chess.PAWN, _OPPONENT)
+    )
+
+
+def _stonewall_check(board: chess.Board) -> bool:
+    """石墙：对方 d5+f5 双前伸兵（e6 支撑）；或 mover d4+f4（e3 支撑）。
+    归一化后主要查对方版（荷兰石墙黑方常见）——mover 版（伦敦/白方
+    石墙）同样识别。
+    """
+    if (_pawn_on(board, _OPPONENT, "d5") and _pawn_on(board, _OPPONENT, "f5")
+            and _pawn_on(board, _OPPONENT, "e6")):
+        return True
+    if (_pawn_on(board, _MOVER, "d4") and _pawn_on(board, _MOVER, "f4")
+            and _pawn_on(board, _MOVER, "e3")):
+        return True
+    return False
+
+
+def _majority_check(board: chess.Board) -> bool:
+    """多数兵：mover 在翼侧有兵多数（后翼 a-c 线或王翼 f-h 线
+    己方兵数 ≥3 且对方同翼 ≤2），且多数翼至少一兵未过中线（可推进）。
+    翼侧兵数类是六原型中最泛的判据——必须排最后（具体原型优先），
+    且要求「可推进」收紧，控制误报。
+    """
+    def wing_count(color: int, files: tuple) -> int:
+        return sum(1 for sq in board.pieces(chess.PAWN, color)
+                   if chess.square_file(sq) in files)
+
+    for files, past_rank in (((0, 1, 2), 4), ((5, 6, 7), 4)):
+        # (后翼 a-c, 王翼 f-h) 两翼；past_rank = 该翼过中线的 rank
+        # （0-based，对齐 structure_features 的 _MID_RANK=4）
+        wq = wing_count(_MOVER, files)
+        bq = wing_count(_OPPONENT, files)
+        if wq < 3 or bq >= wq:
+            continue
+        # 可推进：多数翼至少一兵未过中线（rank < past_rank 0-based）
+        movable = any(
+            chess.square_rank(sq) < past_rank
+            for sq in board.pieces(chess.PAWN, _MOVER)
+            if chess.square_file(sq) in files
+        )
+        if movable:
+            return True
+    return False
+
+
 def detect_pawn_structure(board: chess.Board) -> Tuple[Optional[str], float, dict]:
     """识别兵形原型。
 
     返回 (archetype_id | None, confidence, pawn_features)。
-    - archetype_id：structure_kb 的键（"carlsbad" / "iqp"），未命中 None；
-    - confidence：v0 纯几何命中记 1.0（后续接入 opening_hints 交叉时细化）；
+    - archetype_id：structure_kb 的键（"carlsbad"/"iqp"/"hanging"/
+      "maroczy"/"stonewall"/"majority"），未命中 None；
+    - confidence：纯几何命中记 1.0（后续接入 opening_hints 交叉时细化）；
     - pawn_features：识别用兵形事实（供诊断/交叉验证，非 P16 结构特征向量）。
+
+    优先级「具体 → 泛」：中心兵形类（carlsbad/iqp/hanging/maroczy/
+    stonewall）先于翼侧兵数类（majority）——多数兵是任何局面的泛化
+    属性，具体结构优先标注。
     """
     try:
         b = _mirror_normalize(board.copy())
@@ -119,26 +205,45 @@ def detect_pawn_structure(board: chess.Board) -> Tuple[Optional[str], float, dic
             return "carlsbad", 1.0, features
         if _iqp_check(b):
             return "iqp", 1.0, features
+        if _hanging_check(b):
+            return "hanging", 1.0, features
+        if _maroczy_check(b):
+            return "maroczy", 1.0, features
+        if _stonewall_check(b):
+            return "stonewall", 1.0, features
+        if _majority_check(b):
+            return "majority", 1.0, features
         return None, 0.0, features
     except Exception:
         return None, 0.0, {}
 
 
 if __name__ == "__main__":
-    # 自检：A1 探针实测 FEN + 镜像 + 负样本
+    # 自检：A1 探针实测 FEN + 镜像 + 负样本（v1 覆盖 6 原型）
     cases = [
         ("卡尔斯巴德", "carlsbad",
          "r1bqrnk1/pp2bppp/2p2n2/3p2B1/3P4/2NBPN2/PPQ2PPP/R4RK1 w - - 8 11"),
         ("卡尔斯巴德镜像(黑方走子)", "carlsbad",
          chess.Board("r1bqrnk1/pp2bppp/2p2n2/3p2B1/3P4/2NBPN2/PPQ2PPP/R4RK1 w - - 8 11").mirror().fen()),
+        ("卡尔斯巴德 Grünfeld", "carlsbad",
+         "4r3/pp2r1k1/2p2ppn/3pP2p/3P3P/2NRP2K/PP3P2/2R5 w - - 0 31"),
         ("IQP(对方持孤兵)", "iqp",
          "r1bq1rk1/pp2bppp/2n2n2/3p4/N7/5NP1/PP2PPBP/R1BQ1RK1 w - - 2 11"),
-        ("马洛齐(黑d6孤立兵,非IQP)", None,
+        ("IQP(走子方持孤兵,镜像)", "iqp",
+         "r1bq1rk1/pp2ppbp/5np1/n7/3P4/2N2N2/PP2BPPP/R1BQ1RK1 w - - 2 11"),
+        ("悬兵 Alapin", "hanging",
+         "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21"),
+        ("悬兵 Berlin(白b2兵存在)", "hanging",
+         "4r1k1/pp1q1ppp/2p5/3pQ3/2PPb3/8/PP3PPP/4RBK1 w - - 1 22"),
+        ("马洛齐束缚", "maroczy",
          "r2q1rk1/pp2ppbp/3pbnp1/8/2P1P3/2N1B3/PP1QBPPP/R3K2R w KQ - 5 11"),
-        ("荷兰石墙", None,
+        ("荷兰石墙", "stonewall",
          "rn3rk1/pb2q1pp/1ppbpn2/3pNp2/2PP4/1P4P1/PB1NPPBP/R2Q1RK1 w - - 2 11"),
+        ("多数兵 Dragon", "majority",
+         "r2qr3/3bRpk1/p2p2p1/3P2Qp/1p6/1N3P2/PPP3PP/1K1R4 w - - 1 21"),
         ("意大利开局", None,
          "r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4"),
+        ("初始局面", None, chess.STARTING_FEN),
     ]
     import sys
     sys.path.insert(0, ".")
