@@ -228,6 +228,19 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
     if arch is None:
         Logger.warn("无法识别兵形原型——按 SPEC §8 放弃（决策管线无回退主体）")
         return ""
+
+    # 产品池闸门（08.04）：原型须通过 P0-full A3 可分离性才可出片。
+    # 闸门由 KB 的 `in_production` 字段驱动（缺省 True——已验证原型无需标注），
+    # 判据与理由写在 KB 条目里，启用/停用只改数据不改代码。
+    # 当前停用：stonewall（封闭兵链，两计划推进后结构差异过小，A3 未过）。
+    # 识别得出的原型不在池内时按 SPEC §8 放弃——宁可不出片，也不出
+    # 「两条路其实分不开却讲成对比」的误导内容。
+    if not kb[arch].get("in_production", True):
+        Logger.warn(
+            f"原型 {arch}（{kb[arch].get('cn', '')}）不在产品池——"
+            f"{kb[arch].get('in_production_note', '未通过可分离性验证')}"
+            "按 SPEC §8 放弃本片生成")
+        return ""
     plans = kb[arch]["plans"]
 
     opens = explore_open(board, sf, k=4, depth=14)
