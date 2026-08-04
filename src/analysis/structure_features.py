@@ -154,17 +154,28 @@ def _outposts(board: chess.Board, color: int) -> int:
 
 
 def _king_exposure(board: chess.Board, opp_king_sq: Optional[int]) -> int:
-    """对方王暴露度：王周围格中对方兵不控制的格数。
+    """对方王暴露度：王周围格中缺少己方兵掩护的格数。
 
-    王周围 8 邻格（棋盘内），统计其中不被对方兵攻击的格数——王翼兵墙
-    缺失程度（王前兵推进/被兑后的暴露面）。
+    「有掩护」= 该格**被对方兵占据** 或 **被对方兵攻击**，二者取并集。
+
+    08.04 修（原实现此维失效）：原判据只查 `attackers_mask & 兵`，即只算
+    兵的**斜向攻击**。但兵墙的主体是「兵站在王前那一格上」——e8 的王由
+    d7/e7/f7 的兵遮挡，而兵并不攻击自己脚下的格子，于是兵墙永远算不进来。
+    实测后果：初始局面（王最安全）、已易位且兵盾完整、兵盾被拆三种局面
+    该维全部取 5/8 = 0.625，**完全无区分力**——一个恒定值参与距离计算，
+    等于白占一个维度，还会稀释 A3 可分离性与 P8 分歧深度的真实信号。
+
+    加上占据项后：兵盾完整的王周围格多为「己方兵占据」→ 暴露度低；
+    兵被推进/兑掉后那些格空出且无兵攻击 → 暴露度升高，方向正确。
     """
     if opp_king_sq is None:
         return 0
+    opp_pawns = board.pieces_mask(chess.PAWN, _OPPONENT)
     cnt = 0
     for sq in chess.scan_forward(chess.BB_KING_ATTACKS[opp_king_sq]):
-        if not (board.attackers_mask(_OPPONENT, sq)
-                & board.pieces_mask(chess.PAWN, _OPPONENT)):
+        occupied_by_pawn = bool(chess.BB_SQUARES[sq] & opp_pawns)
+        attacked_by_pawn = bool(board.attackers_mask(_OPPONENT, sq) & opp_pawns)
+        if not (occupied_by_pawn or attacked_by_pawn):
             cnt += 1
     return cnt
 
