@@ -328,6 +328,78 @@ def goal_satisfied(board: chess.Board, goal: Dict[str, str],
         return False
 
 
+def goal_trajectory(board: chess.Board, line: List[chess.Move],
+                    goal: Dict[str, str],
+                    mover_color: Optional[bool] = None,
+                    max_len: int = 16) -> Dict[str, object]:
+    """沿一条线判 A2 轨迹一致性：目标是否达成 + 各目标维的最大进步。
+
+    返回 `{"goal_reached": bool, "goal_progress": {dim: int}, "goal_ok": bool}`：
+    - `goal_reached`：**push 至少一步后**的任一点 `goal_satisfied`。必须排除
+      起点——保持型计划的起点常已满足目标，把起点算进去则无论线怎么走都判
+      通过，是无效验证（P0-full peer_review Critical 2 的同一判据）；
+    - `goal_progress`：各目标维朝目标方向的最大进步（`_raw_features` 原始
+      计数单位）——`">=N"` 取 `max(序列)-起点`，`"==N"` 取朝 N 收窄的幅度；
+    - `goal_ok`：`goal_reached or 任一维 progress ≥ 1`，即 FINDINGS §3.2
+      A2 判据「约束线跑完达成**或**朝达成方向显著移动」。
+
+    谓词只支持 `>=` / `==`，与 `goal_satisfied` 完全一致（实测 KB 6 原型
+    的全部 structural_goal 也只用这两种）。未知谓词记 0 进步——与
+    `goal_satisfied` 对未知谓词保守判不满足同向，失败安全。
+
+    `mover_color` 必须传**决策点**走子方：线末局面的 `turn` 往往是对手，
+    不锚定视角会把「我方/对方」判反（本模块 docstring 的同一约束）。
+
+    放在本模块而非管线或探针里：`goal_satisfied` 已是 A2 达成判定的单一
+    事实来源，「是否朝目标移动」是同一判据的连续版本，两者必须同源。
+    此前这段逻辑只存在于 `tools/decision_probe/p0_full_probe.py`，阶段 9
+    评审脚本因此读不到任何 goal 字段（`project()` 从不返回它们），d2 维度
+    对每个 demo 都恒为不通过——判据被写在了产品链路之外。
+    """
+    empty: Dict[str, object] = {"goal_reached": False, "goal_progress": {},
+                                "goal_ok": False}
+    if not goal:
+        return empty
+    try:
+        b = board.copy()
+        dims = [d for d in goal if d != "any"]
+        series = {d: [_raw_features(b, mover_color).get(d, 0)] for d in dims}
+        reached = False
+        for mv in line[:max_len]:
+            try:
+                b.push(mv)
+            except Exception:  # noqa: BLE001
+                break
+            raw = _raw_features(b, mover_color)
+            for d in dims:
+                series[d].append(raw.get(d, series[d][-1]))
+            if goal_satisfied(b, goal, mover_color):
+                reached = True
+
+        progress: Dict[str, int] = {}
+        for dim, pred in goal.items():
+            if dim == "any":
+                continue
+            s = series.get(dim) or [0]
+            if pred.startswith(">="):
+                progress[dim] = max(s) - s[0]
+            elif pred.startswith("=="):
+                n = int(pred[2:])
+                progress[dim] = max(abs(s[0] - n) - abs(v - n) for v in s)
+            else:
+                progress[dim] = 0
+        # OR 组：任一子 goal 的维度进步都算进步（与 goal_satisfied 的 OR 同义）
+        for sub in goal.get("any", []) or []:
+            sub_tr = goal_trajectory(board, line, sub, mover_color, max_len)
+            for k, v in (sub_tr["goal_progress"] or {}).items():  # type: ignore[union-attr]
+                progress[f"any.{k}"] = v
+
+        return {"goal_reached": reached, "goal_progress": progress,
+                "goal_ok": reached or any(v >= 1 for v in progress.values())}
+    except Exception:  # noqa: BLE001
+        return empty
+
+
 def feature_distance(fv_a: List[float], fv_b: List[float]) -> float:
     """特征向量距离（加权曼哈顿，权重初版全 1；A3 自校准时可调权重）。"""
     if len(fv_a) != DIM_COUNT or len(fv_b) != DIM_COUNT:

@@ -262,12 +262,19 @@ def compose(
         frame_paths: List[str], frame_durations: List[float],
         segments, srt_path: str, endgame_name: str = "",
         fps: int = FPS, cues=None, initial_fen: str = "",
-        skip_title: bool = False, skip_outro: bool = False
+        skip_title: bool = False, skip_outro: bool = False,
+        output_path: str = ""
     ) -> str:
     """
     合成最终视频，包含片头动画 → 渲染帧 → 片尾，并叠加字幕
     initial_fen: 初始局面 FEN，用于片头棋盘缩略图
     skip_title与skip_outro: puzzle 链路使用，是否跳过片头标题卡动画和片尾动画
+
+    output_path（08.04 加法扩展，默认 "" = 沿用 output/analysis.mp4）：
+        成片输出路径。原实现硬编码单一文件名——两条老管线一次只生成一片，
+        从未暴露问题；但阶段 9 要批量产出多个 demo 供评审，同名会互相覆盖
+        （前一片被静默冲掉，评审时只剩最后一个）。传入不同路径即可并存。
+        既有两条管线不传此参，行为与之前完全一致（零回归）。
     """
     Logger.info("合成视频...")
     frames_dir = os.path.join("output", "frames")
@@ -388,7 +395,9 @@ def compose(
 
     final = CompositeVideoClip(layers)
 
-    output = os.path.join("output", "analysis.mp4")
+    output = output_path or os.path.join("output", "analysis.mp4")
+    out_parent = os.path.dirname(os.path.abspath(output))
+    os.makedirs(out_parent, exist_ok=True)
     final.write_videofile(output, codec="libx264", audio_codec="aac", fps=fps)
     final.close()
     video.close()

@@ -54,6 +54,10 @@ MATE_CP = 10000
 DEFAULT_DEPTH = 18        # 前向约束线的搜索深度
 DEFAULT_OPEN_K = 5        # 自由 MultiPV 候选数（ADR-020 阶段 4 的 k=4~6 取中）
 DEFAULT_FEASIBLE_CP = 80  # 可行性闸初值（PLAN-009 阶段 4：50~80，取宽松端）
+# 实战续走首着的最大容许损失（阶段 9 双重校验②）。PLAN-009 写「≥-30cp」，
+# 即相对该局面最优着最多差 30cp——超过就认为实战这一手本身有瑕疵，不作为
+# 「这个水平的棋手更多选了它」的证据注入解说。
+DEFAULT_ACTUAL_LOSS_CP = 30
 
 
 @dataclass
@@ -67,9 +71,24 @@ class BranchLine:
 
 
 def _open_engine(sf_path: str) -> chess.engine.SimpleEngine:
-    """启动引擎并做统一配置（线程/哈希）。与 stockfish_analyzer 同模式。"""
+    """启动引擎并做统一配置（线程/哈希）。
+
+    **`Threads: 1` 是可复现性要求，不是性能取舍**（08.04 修，原值 2）。
+    多线程 Stockfish 的搜索结果本质不可复现：各线程共享置换表，写入顺序
+    随 OS 调度而变，同一局面同一深度每次跑出的 PV 都可能不同。实测本机
+    （maroczy 决策点 depth=14）：`Threads=2` 连跑 3 次得到 3 条不同的线
+    （长度 9 / 15 / 20）；`Threads=1` 连跑 3 次逐着完全一致。
+
+    为什么这条链路必须确定性：决策管线的产出**判据建立在线的内容之上**
+    ——A2 轨迹一致性（`goal_trajectory` 沿线取样）、P8 分歧深度、代价量化
+    全都读 `line_pv`。线一变，判据结论跟着变：实测同一计划连跑 3 次
+    `goal_ok` 翻转 True/True/False，于是「这条计划的机制是否成立」这种
+    应当客观的事实，变成了一次掷硬币。阶段 9 评审因此无法复现。
+    单线程慢一些（本机实测每次 analyse 增加约 1~2s，一条片子多十几秒），
+    换来的是判据可复现——对「程序算事实、LLM 只表达」的边界，这是必要条件。
+    """
     engine = chess.engine.SimpleEngine.popen_uci(sf_path)
-    engine.configure({"Hash": 128, "Threads": 2})
+    engine.configure({"Hash": 128, "Threads": 1})
     return engine
 
 
@@ -260,6 +279,65 @@ def waiting_baseline(
         return rel.score() or 0
     except Exception:
         return None
+    finally:
+        if engine is not None:
+            try:
+                engine.quit()
+            except Exception:
+                pass
+
+
+def assess_actual_move(
+    board: chess.Board,
+    move: chess.Move,
+    sf_path: str,
+    depth: int = 12,
+    max_loss_cp: int = DEFAULT_ACTUAL_LOSS_CP,
+) -> tuple:
+    """实战续走首着的评估筛（阶段 9 双重校验②，P12/P19/P24）。
+
+    返回 `(passed, loss_cp)`：`loss_cp` = 这一手相对该局面最优着的净损失
+    （走子方视角，非负；0 表示它本身就是最优着）。`loss_cp <= max_loss_cp`
+    时 `passed=True`。任一评估拿不到 → `(False, None)`（失败安全：拿不到
+    证据就不注入，不猜）。
+
+    **为什么必须有这道筛**：实战对照段会说「这个水平的棋手在实战中更多选了
+    某条路」。若那一手本身是失误，这句话就把一个错误决策讲成了参考答案——
+    比不讲更糟。PLAN-009 阶段 9 明确要求「两条都过才注入」，这是第二条。
+    （第一条时限筛在阶段 0 挖掘时已完成：`mine_decision_positions` 的 G1
+    读 `Event` 头官方分类，实测 20000 局里 18582 局因 blitz/bullet 被排除，
+    故产品链路无需重复筛——见 PLAN-009 阶段 9「本阶段无需重复筛」。）
+
+    判据用**相对损失**而非绝对 cp：局面本身可能已经劣势（如 -200cp），此时
+    绝对阈值会把所有着法一律判失误；「未失误」的正确含义是「没有比该局面
+    最优着差太多」。两次 analyse 同深度同引擎配置（`Threads=1` 确定性），
+    结果可复现。
+    """
+    if move not in board.legal_moves:
+        return False, None
+    engine = None
+    try:
+        engine = _open_engine(sf_path)
+        limit = chess.engine.Limit(depth=depth)
+
+        def _cp(info) -> Optional[int]:
+            score = info.get("score")
+            if score is None:
+                return None
+            rel = score.relative
+            m = rel.mate()
+            if m is not None:
+                return MATE_CP if m > 0 else -MATE_CP
+            return rel.score() or 0
+
+        best_cp = _cp(engine.analyse(board, limit))
+        move_cp = _cp(engine.analyse(board, limit, root_moves=[move]))
+        if best_cp is None or move_cp is None:
+            return False, None
+        loss = max(0, best_cp - move_cp)
+        return loss <= max_loss_cp, loss
+    except Exception:  # noqa: BLE001
+        return False, None
     finally:
         if engine is not None:
             try:

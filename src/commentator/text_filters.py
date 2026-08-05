@@ -430,3 +430,93 @@ def safe_puzzle_seed_text(text: str) -> str:
     out = expand_inline_brackets(out)
     out = re.sub(r"[，、]{2,}", "，", out)
     return out.strip()
+
+
+# ---------------------------------------------------------------- 决策管线种子文本
+
+# file → 战略区域。**这是 `src/analysis/direction.direction_zone` 的同一套分区**
+# （a~c 后翼 / d~e 中心 / f~h 王翼），在此重复一份是因为本模块按设计零外部依赖
+# （见模块 docstring），不能 import analysis 层。分区口径若要改，两处必须同改。
+_ZONE_BY_FILE = {
+    "a": "后翼", "b": "后翼", "c": "后翼",
+    "d": "中心", "e": "中心",
+    "f": "王翼", "g": "王翼", "h": "王翼",
+}
+
+_SQ = r"[a-h][1-8]"
+
+
+def _zone(token: str) -> str:
+    """坐标或纵线字母 → 区域词（取 file 首字母）。"""
+    return _ZONE_BY_FILE.get(token[0].lower(), "关键")
+
+
+def _zones_joined(text: str, sep: str) -> str:
+    """把一串坐标折成去重且保序的区域词（如 c4+e4 → 后翼和中心）。"""
+    out = []
+    for sq in re.findall(_SQ, text, flags=re.I):
+        z = _zone(sq)
+        if z not in out:
+            out.append(z)
+    return sep.join(out)
+
+
+def safe_decision_seed_text(text: str) -> str:
+    """把 structure_kb 的 theory / mechanism 转成可口播的中文（决策管线种子规范化）。
+
+    与 `safe_puzzle_seed_text` 并列——同一类职责（**源数据**规范化，不处理模型
+    已生成文本），但决策管线的 KB 文本形态不同，需要单独一套：puzzle 的种子里
+    坐标是孤立格名（f2/f7），决策 KB 里坐标是**兵推进序列与兵形组合**
+    （`b4-b5`、`a4-b4-c4`、`c4+e4`、`d5/b5`、`d5xd4`、`d 兵`、`c 线`）。
+    直接套 puzzle 版会把 `c4+e4` 洗成「关键格+关键格」——分隔符残留导致表层
+    硬闸判「含 Markdown 符号」，且语义全丢。
+
+    为什么必须在 prompt 侧洗（08.04 修）：`_decision_header` 与
+    `_plan_prompt_text` 把 KB 的 theory / mechanism **原样**注入 prompt，而同一
+    个 prompt 又要求「不给坐标」——模型照抄注入的坐标是自然结果。生成后的
+    `strip_coordinates` 只认「字母+数字」，清不掉 `+ - /` 分隔符与裸纵线字母
+    （`d 兵`），于是表层硬闸反复判废、重试耗尽 → 整片放弃。实测 maroczy
+    （theory 含 `c4+e4`、`d5`、`d5/b5`、`d 兵`，全 6 原型里坐标最密）连续两轮
+    都卡在 `id 0 表层校验失败`，是本轮 5 个 demo 里唯一未出片的原型。
+
+    转换按语义保留区域信息，不是一律抹成「关键格」：
+      `b4-b5` / `a4-b4-c4` → 「后翼推进」（取末格 file 定区域，与
+                              `direction_zone` 以目标格为准同口径）
+      `c4+e4`              → 「后翼和中心」（兵形组合：并列区域）
+      `d5/b5`              → 「中心或后翼」（可选方向：择一）
+      `d5xd4`              → 「中心兑子」（吃子记号取目标格区域）
+      `d5`                 → 「中心」
+      `c 线` / `d 兵`      → 「后翼这条线」/「中心兵」
+    """
+    if not text:
+        return ""
+    out = str(text)
+    # 顺序：先长后短——吃子/多格序列/组合/择一，最后才是孤立格与裸纵线，
+    # 否则单格规则会先把序列拆散，`-` `+` `/` 分隔符就留在原地了。
+    out = re.sub(rf"{_SQ}\s*x\s*{_SQ}",
+                 lambda m: _zone(re.findall(_SQ, m.group(0), re.I)[-1]) + "兑子",
+                 out, flags=re.I)
+    out = re.sub(rf"{_SQ}(?:\s*-\s*{_SQ})+",
+                 lambda m: _zone(re.findall(_SQ, m.group(0), re.I)[-1]) + "推进",
+                 out, flags=re.I)
+    out = re.sub(rf"{_SQ}(?:\s*\+\s*{_SQ})+",
+                 lambda m: _zones_joined(m.group(0), "和"), out, flags=re.I)
+    out = re.sub(rf"{_SQ}(?:\s*/\s*{_SQ})+",
+                 lambda m: _zones_joined(m.group(0), "或"), out, flags=re.I)
+    out = re.sub(rf"\b{_SQ}\b", lambda m: _zone(m.group(0)), out, flags=re.I)
+    # 裸纵线字母（KB 里写作「c 线兵」「d 兵难推进」——strip_coordinates 认不出，
+    # 因为它要求字母+数字）
+    out = re.sub(r"\b([a-h])\s*线", lambda m: _zone(m.group(1)) + "这条线",
+                 out, flags=re.I)
+    out = re.sub(r"\b([a-h])\s*兵", lambda m: _zone(m.group(1)) + "兵",
+                 out, flags=re.I)
+    # 区域词相邻重复收敛（「锁住 中心 中心弱格」→「锁住中心弱格」）
+    out = re.sub(r"(后翼|中心|王翼)\s*(?=\1)", "", out)
+    # 残留 ASCII 与数字：到这里应已无坐标，剩下的是零散字母/数字，一律清掉
+    out = re.sub(r"[A-Za-z]", "", out)
+    out = "".join(_DIGIT_CN.get(ch, ch) for ch in out)
+    out = re.sub(r"[/\*_#`\[\]{}<>|+]", "", out)
+    out = expand_inline_brackets(out)
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"[，、]{2,}", "，", out)
+    return out.strip()

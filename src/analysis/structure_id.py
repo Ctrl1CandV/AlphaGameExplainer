@@ -178,6 +178,59 @@ def _majority_check(board: chess.Board) -> bool:
     return False
 
 
+def applicable_mover_side(board: chess.Board, archetype: str) -> Optional[str]:
+    """决策点走子方在该原型里扮演哪一方角色，用于筛选适用计划。
+
+    返回 `"mover"` / `"opponent"` / None：
+    - `"mover"`：走子方是**结构特征的持有方**（如持孤后兵、持悬兵、
+      摆石墙的一方），适用 KB 中 `mover_side == "mover"` 的计划；
+    - `"opponent"`：走子方是**面对该结构的一方**（如围攻对方孤兵），
+      适用 `mover_side == "opponent"` 的计划；
+    - None：该原型的角色不可判或无需区分（判据只从走子方视角成立，
+      如 carlsbad / maroczy / majority——KB 里这些原型的全部计划都是
+      `mover_side == "mover"`，不存在错选可能）。
+
+    为什么必须有这个函数（08.04 补，Critical）：
+    `_iqp_check` / `_hanging_check` / `_stonewall_check` 都是「**任一方**
+    持有该结构即命中」，而 KB 的 iqp 条目里 4 条计划分属两种角色
+    （施压方 2 条 + 持有方 2 条）。管线此前不读 `mover_side`，把**双方的
+    计划**一起当成「走子方的几条路」讲——实测 iqp demo（黑方走子、白持
+    d4 孤兵）四条全讲，其中「保持孤兵」「推进兑掉孤兵」是**白方**的选择，
+    黑方根本执行不了。这是会教错棋的硬事实错（SPEC §8 零容忍），不是
+    表达问题：观众照着讲解去走，走的是对手的计划。
+
+    判据与 P0-full 探针的「计划角色 ↔ 局面角色」匹配约定同源
+    （见 `p0_full_probe.run_a2_goals` docstring）：谁的 d 线兵孤立，
+    谁就是 iqp 的持有方；悬兵/石墙同理按兵形归属判。
+    """
+    try:
+        b = _mirror_normalize(board.copy())
+        if archetype == "iqp":
+            if _isolated_d_pawn_squares(b, _MOVER):
+                return "mover"          # 走子方自己持孤兵
+            if _isolated_d_pawn_squares(b, _OPPONENT):
+                return "opponent"       # 对方持孤兵，走子方是施压方
+            return None
+        if archetype == "hanging":
+            if _pawn_on(b, _MOVER, "c4") and _pawn_on(b, _MOVER, "d4"):
+                return "mover"
+            if _pawn_on(b, _OPPONENT, "c5") and _pawn_on(b, _OPPONENT, "d5"):
+                return "opponent"
+            return None
+        if archetype == "stonewall":
+            if (_pawn_on(b, _MOVER, "d4") and _pawn_on(b, _MOVER, "f4")
+                    and _pawn_on(b, _MOVER, "e3")):
+                return "mover"
+            if (_pawn_on(b, _OPPONENT, "d5") and _pawn_on(b, _OPPONENT, "f5")
+                    and _pawn_on(b, _OPPONENT, "e6")):
+                return "opponent"
+            return None
+        # carlsbad / maroczy / majority：判据本身锚定走子方，无角色歧义
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def detect_pawn_structure(board: chess.Board) -> Tuple[Optional[str], float, dict]:
     """识别兵形原型。
 

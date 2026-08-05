@@ -13,8 +13,13 @@
 - **校验三层（P9 修订）**：① 复用 `validate_puzzle_voiceover_surface`
   表层硬闸；② 战略名提及；③ **独有事实校验**——各计划段必须命中自己
   的 `unique_facts`（防同质化真实防线——「提及」≠「有区分度」）；
-- **措辞降级（P12）**：不说「大师的选择」，说「这个水平的棋手在实战中
-  更多选了」（频率统计口径，非单局个例）；
+- **措辞降级（P12）**：不说「大师的选择」，也不说「更多选了」——
+  `provenance` 是**这一局**的实战续着（单局个例），说「更多」就把 n=1
+  谎报成频率统计。实测：原措辞让 LLM 写出「实战中多数人选择推进悬兵」，
+  凭一局断言多数人偏好，与 ADR-020 认识论边界冲突（08.04 修）。
+  正确口径是「这一局的实战里走的是某条路」＋「只是一个例子，不是标准答案」。
+  真要给频率事实，得接 `tools/pgn_plan_stats.py` 的多局统计（P17 设施），
+  那是后续阶段的事；
 - **ADR-018 对齐**：注入对比式表达范例锚定形态（不带内容）；
 - **PLAN-008 教训**：禁用词不在指令里反复出现（负面提及强化被禁内容）；
 - 段级失败不报废（该段不输出）；管线级失败 = 整片不出（P11/SPEC §8）。
@@ -29,6 +34,7 @@ try:  # 直接运行自检时补充项目根到 sys.path
         clean_cjk_text,
         clean_summary_text,
         reduce_cliches,
+        safe_decision_seed_text,
         strip_coordinates,
         strip_thinking,
     )
@@ -45,6 +51,7 @@ except ModuleNotFoundError:
         clean_cjk_text,
         clean_summary_text,
         reduce_cliches,
+        safe_decision_seed_text,
         strip_coordinates,
         strip_thinking,
     )
@@ -217,7 +224,17 @@ def build_header(storyboard: dict) -> str:
     parts += [
         "",
         f"【局面类型】{dp.get('archetype', '中局')}",
-        f"【战略前提】{dp.get('strategic_premise', '')}",
+        # KB theory/mechanism 是**带坐标的知识库原文**（如马洛齐的
+        # 「c4+e4 双兵锁住 d5」），而本 prompt 同时要求「不给坐标」且成稿要过
+        # 表层硬闸（无英文/数字）。原实现把原文照直注入，模型自然照抄坐标，
+        # 后处理 strip_coordinates 只吃「字母+数字」，留下 `+` `-` `/` 与
+        # 光秃秃的纵线字母（「d 兵」「c 线」），表层校验判不合格 → 重试耗尽 →
+        # 整片按 §8 放弃。实测 maroczy 连续两轮均卡在此处（其 theory 坐标
+        # 密度最高：c4+e4、d5、d5/b5 三处）。
+        # 解法是在**注入前**把坐标转成区域词（与 puzzle 链路对 KB 种子文本
+        # 调 safe_puzzle_seed_text 同一策略）：模型看到的就是可播的中文，
+        # 不必依赖它「记得别抄坐标」，也不必靠后处理补救。
+        f"【战略前提】{safe_decision_seed_text(dp.get('strategic_premise', ''))}",
         f"【反事实基线】若不做任何战略推进（等待），局面基线评估为 "
         f"{dp.get('baseline')}——这是紧迫性的度量，只在开场用一句话铺垫。",
     ]
@@ -232,7 +249,9 @@ def _plan_prompt_text(node: dict, is_first: bool) -> str:
     else:
         lines.append("【计划乙】——先回到分岔点，再展开这一条路线")
     lines.append(f"计划名：{node['name']}")
-    lines.append(f"机理：{node['mechanism']}")
+    # 同【战略前提】：KB mechanism 原文带坐标（「用 b4-b5 兵推进冲击对方
+    # c 线兵」），注入前先转区域词，避免模型照抄后卡表层硬闸。
+    lines.append(f"机理：{safe_decision_seed_text(node['mechanism'])}")
     trend = _trend_cn(node.get("trend", {}))
     if trend:
         lines.append(f"趋势：{trend}")
@@ -295,9 +314,22 @@ def build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
                     "**不做左右对比、不提不存在的备选**，"
                     "给一句「什么情况下要格外小心」的提醒。")
             if prov:
+                # 措辞必须限定为「这一局」（08.04 修）。`provenance` 是**单局**
+                # PGN 续走的首着（挖掘器 continuation[0]），不是频率统计。
+                # 原文写「更多选了……作为频率事实」，LLM 忠实照做，产出
+                # 「实战中多数人选择推进悬兵」——用 n=1 的样本讲群体倾向，
+                # 是无根据的推断（实测 hanging demo 成片总结段原句）。
+                # 真正的频率口径需要 `pgn_plan_stats` 的多局统计，那是另一条
+                # 数据通路（P17 设施），本字段给不出。
+                # 说「这一局走的是 X」是可核验的事实；说「多数人选 X」不是。
+                # 措辞用正面指令而非「不要说 X」：本模块 docstring 记的
+                # PLAN-008 教训是「禁用词在指令里出现会强化被禁内容」，
+                # 故只给可照抄的句式，不点名要避开的说法。
                 parts.append(
-                    f"补充（Tier A）：这个水平的棋手在实战中更多选了「{prov}」"
-                    "——作为频率事实补充，不是权威裁决。")
+                    f"补充（Tier A）：这一局的实战续走里，执子方走的是"
+                    f"「{prov}」这个方向。用一句话点到即止，句式照"
+                    f"「这一局里他选的是{prov}」这种**限定到单局**的说法，"
+                    "作为一个具体例子，不展开、不引申。")
     parts.append("")
     # 字数上限是硬约束（08.04 修）：TTS 是 GPU 逐字合成，实测 ChatTTS 约
     # 27s/96 字。此前只写「一句到三句」无字数上界，总结/对比段常破 150 字，
@@ -344,12 +376,38 @@ _SUBJECT_WORDS = ("孤立兵", "后退兵", "通路兵", "兵过中线", "兵岛
                   "开放线", "半开放线", "前哨", "轻子", "王暴露")
 
 
+# 主体词的口语变形容忍（08.04 修）。
+#
+# 原实现要求主体词以**连续字符串**出现在 voiceover 里，但口语表达会在词中间
+# 插字：事实写「己方兵过中线」，解说说「兵**推**过**了**中线」；事实写
+# 「王暴露」，解说说「王**的**暴露面」。连续匹配一律判未命中——这是假阴性，
+# 会把讲对了的段判废（独有事实校验是 P9 防同质化的主防线，误杀比漏放更糟：
+# 漏放只是少一层保险，误杀会让合格解说反复重试直至整片放弃）。
+#
+# 解法：对易被拆开的主体词声明「必需词组合」——全部出现即命中，不要求连续、
+# 不要求顺序。仍然要求实质内容词，所以「两条路各有千秋」这类套话依然拦得住
+# （它既无「兵」也无「中线」）。未声明的词保持原连续匹配（它们在中文里本就
+# 是固定搭配，如「孤立兵」「开放线」「前哨」）。
+_SUBJECT_ALIASES = {
+    "兵过中线": ("兵", "中线"),
+    "王暴露": ("王", "暴露"),
+}
+
+
+def _subject_in_text(subject: str, text: str) -> bool:
+    """主体词是否出现在文本中（含口语变形容忍）。"""
+    parts = _SUBJECT_ALIASES.get(subject)
+    if parts:
+        return all(p in text for p in parts)
+    return subject in text
+
+
 def _kw_matches(voiceover: str, fact: str) -> bool:
     """一条独有事实是否命中 voiceover（按区域词+主体词匹配）。"""
     for subject in _SUBJECT_WORDS:
         if subject not in fact:
             continue
-        if subject not in voiceover:
+        if not _subject_in_text(subject, voiceover):
             continue
         # 事实含区域词时 voiceover 也必须含同一区域（区分「后翼」与
         # 「中心」孤立兵）
@@ -441,7 +499,11 @@ def build_fallback_voiceover(chunk_nodes: list, json_prompt: str) -> list:
             text = (f"这个局面呈现{node.get('n_plans', 1)}条可行的战略路线。"
                     "先看清兵形的前提，再比较各条路线的取舍。")
         elif ntype == "plan":
-            text = (f"方案是{node['name']}——{node.get('mechanism', '')[:40]}"
+            # 先规范化再截断（08.04 修）：mechanism 是带坐标的 KB 原文，
+            # 若先 [:40] 可能正好切在坐标中间（「b4-b5」→「b4-b」），残段
+            # 连 strip_coordinates 都认不出来，会以裸字母进到 TTS。
+            mech = safe_decision_seed_text(node.get("mechanism", ""))[:40]
+            text = (f"方案是{node['name']}——{mech}"
                     f"；{_trend_cn(node.get('trend', {}))}。"
                     f"{_tradeoffs_cn(node.get('tradeoffs', {}))}。")
         elif ntype == "compare":

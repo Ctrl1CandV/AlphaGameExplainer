@@ -185,6 +185,14 @@ def build_decision_storyboard(
         routes.append({
             "name": o.plan.get("name", "?"),
             "mechanism": o.plan.get("mechanism", ""),
+            # `direction` 必须随 route 带出（08.04 补）：实战对照段要判「实战
+            # 那一手属于哪条计划」，判据是「该着 ∈ 该计划的 direction 候选集」
+            # （`decision_commentary._match_provenance_plan`）。此前 routes 不带
+            # 这个键，那边 `route.get("direction", {})` 恒为空、`if not direction:
+            # continue` 逐条跳过，函数**必然**返回 None——即使实战首着传对了、
+            # 也过了评估筛，Tier A 段依然一句都出不来（实测 hanging 的 Rc1
+            # 手工比对确实命中「推进悬兵」，但走管线拿到的是 None）。
+            "direction": o.plan.get("direction", {}),
             "line": sans,
             "cp": o.line_cp,
             "features": o.start_features,
