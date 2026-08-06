@@ -1,0 +1,395 @@
+{
+ "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21",
+ "archetype": "hanging",
+ "archetype_cn": "悬兵结构",
+ "video": "D:\\Program Project\\AlphaGameExplainer\\output\\decision_hanging_75ac1d.mp4",
+ "routes": [
+  {
+   "name": "推进悬兵",
+   "mechanism": "c4-c5 或 d4-d5 推进，换取空间、制造通路兵或迫使对方兑兵后转入静态结构",
+   "unique_facts": [
+    "推进悬兵末端对方中心孤立兵显著（0.5 vs 0.0）",
+    "保持悬兵（利用动态潜力）末端对方后退兵显著（0.25 vs 0.0）",
+    "保持悬兵（利用动态潜力）末端己方兵过中线显著（0.4 vs 0.2）",
+    "推进悬兵末端开放线显著（0.38 vs 0.12）",
+    "保持悬兵（利用动态潜力）末端己方半开放线显著（0.25 vs 0.0）",
+    "保持悬兵（利用动态潜力）末端己方前哨轻子显著（0.25 vs 0.0）"
+   ],
+   "trend": {
+    "trends": [
+     {
+      "dimension": "opp_backward",
+      "direction": "decreasing",
+      "samples": [
+       0.25,
+       0.0,
+       0.0,
+       0.0
+      ],
+      "robust": true,
+      "perturb_results": [
+       true,
+       true,
+       true
+      ]
+     },
+     {
+      "dimension": "passed_diff",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.0,
+       0.0,
+       0.25
+      ],
+      "robust": true,
+      "perturb_results": [
+       true,
+       true,
+       true
+      ]
+     },
+     {
+      "dimension": "mover_pawns_past_mid",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.2,
+       0.2,
+       0.2
+      ],
+      "robust": true,
+      "perturb_results": [
+       true,
+       true,
+       true
+      ]
+     },
+     {
+      "dimension": "knight_bishop_diff",
+      "direction": "decreasing",
+      "samples": [
+       0.25,
+       0.0,
+       0.0,
+       0.0
+      ],
+      "robust": true,
+      "perturb_results": [
+       true,
+       true,
+       true
+      ]
+     }
+    ],
+    "rejected_trends": [
+     {
+      "dimension": "pawn_islands_diff",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.0,
+       0.0,
+       0.25
+      ],
+      "robust": false,
+      "perturb_results": [
+       false,
+       false,
+       true
+      ]
+     },
+     {
+      "dimension": "open_files",
+      "direction": "increasing",
+      "samples": [
+       0.125,
+       0.25,
+       0.375,
+       0.375
+      ],
+      "robust": false,
+      "perturb_results": [
+       false,
+       false,
+       true
+      ]
+     }
+    ],
+    "archetype_shift": [
+     "hanging",
+     "iqp"
+    ],
+    "end_features": [
+     0.0,
+     0.5,
+     0.0,
+     0.0,
+     0.25,
+     0.2,
+     0.25,
+     0.375,
+     0.0,
+     0.0,
+     0.0,
+     0.25
+    ],
+    "perturb_consistency": 0.778
+   },
+   "tradeoffs": {
+    "pawn_moves": 2,
+    "captures": 7,
+    "open_files_delta": 2,
+    "weak_square_hint": "对方中心孤兵/己方兵过线",
+    "corridor_roots": 3,
+    "unique_ratio": 0.5
+   },
+   "goal_reached": true,
+   "goal_progress": {
+    "mover_pawns_past_mid": 1
+   },
+   "goal_ok": true
+  },
+  {
+   "name": "保持悬兵（利用动态潜力）",
+   "mechanism": "保持 c4+d4 对中心的控制，轻子围绕悬兵组织（e5/c5 前哨），利用双兵的空间优势",
+   "unique_facts": [
+    "推进悬兵末端对方中心孤立兵显著（0.5 vs 0.0）",
+    "保持悬兵（利用动态潜力）末端对方后退兵显著（0.25 vs 0.0）",
+    "保持悬兵（利用动态潜力）末端己方兵过中线显著（0.4 vs 0.2）",
+    "推进悬兵末端开放线显著（0.38 vs 0.12）",
+    "保持悬兵（利用动态潜力）末端己方半开放线显著（0.25 vs 0.0）",
+    "保持悬兵（利用动态潜力）末端己方前哨轻子显著（0.25 vs 0.0）"
+   ],
+   "trend": {
+    "trends": [
+     {
+      "dimension": "mover_pawns_past_mid",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.2,
+       0.2,
+       0.4
+      ],
+      "robust": true,
+      "perturb_results": [
+       true,
+       true,
+       true
+      ]
+     }
+    ],
+    "rejected_trends": [
+     {
+      "dimension": "opp_isolated_center",
+      "direction": "decreasing",
+      "samples": [
+       0.5,
+       0.5,
+       0.5,
+       0.0
+      ],
+      "robust": false,
+      "perturb_results": [
+       true,
+       true,
+       false
+      ]
+     },
+     {
+      "dimension": "passed_diff",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.0,
+       0.0,
+       0.25
+      ],
+      "robust": false,
+      "perturb_results": [
+       false,
+       true,
+       false
+      ]
+     },
+     {
+      "dimension": "pawn_islands_diff",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.0,
+       0.0,
+       0.25
+      ],
+      "robust": false,
+      "perturb_results": [
+       true,
+       true,
+       false
+      ]
+     },
+     {
+      "dimension": "outposts",
+      "direction": "increasing",
+      "samples": [
+       0.0,
+       0.0,
+       0.0,
+       0.25
+      ],
+      "robust": false,
+      "perturb_results": [
+       true,
+       false,
+       true
+      ]
+     },
+     {
+      "dimension": "knight_bishop_diff",
+      "direction": "decreasing",
+      "samples": [
+       0.25,
+       0.25,
+       0.25,
+       0.0
+      ],
+      "robust": false,
+      "perturb_results": [
+       true,
+       false,
+       false
+      ]
+     }
+    ],
+    "archetype_shift": null,
+    "end_features": [
+     0.0,
+     0.0,
+     0.0,
+     0.25,
+     0.25,
+     0.4,
+     0.25,
+     0.125,
+     0.25,
+     0.25,
+     0.0,
+     0.375
+    ],
+    "perturb_consistency": 0.611
+   },
+   "tradeoffs": {
+    "pawn_moves": 4,
+    "captures": 4,
+    "open_files_delta": 0,
+    "weak_square_hint": "对方后退兵/己方兵过线",
+    "corridor_roots": 3,
+    "unique_ratio": 0.0
+   },
+   "goal_reached": false,
+   "goal_progress": {
+    "opp_isolated_center": 1,
+    "mover_pawns_past_mid": 0
+   },
+   "goal_ok": true
+  }
+ ],
+ "comparison_axes": {
+  "axis_type": 1,
+  "speed": [
+   {
+    "plan": "推进悬兵",
+    "pawn_moves": 2
+   },
+   {
+    "plan": "保持悬兵（利用动态潜力）",
+    "pawn_moves": 4
+   }
+  ],
+  "commitment": [
+   {
+    "plan": "推进悬兵",
+    "captures": 7
+   },
+   {
+    "plan": "保持悬兵（利用动态潜力）",
+    "captures": 4
+   }
+  ],
+  "difficulty": [
+   {
+    "plan": "推进悬兵",
+    "corridor": 3,
+    "unique_ratio": 0.5
+   },
+   {
+    "plan": "保持悬兵（利用动态潜力）",
+    "corridor": 3,
+    "unique_ratio": 0.0
+   }
+  ],
+  "waiting_note": null
+ },
+ "opening_text": "这个局面属于悬兵型一对悬兵控制中心，却缺少兵的保护，既是压力点也是软肋。眼下有两种战略走向值得权衡。若不主动推进，局面基线会滑向明显不利，紧迫性摆在眼前。",
+ "summary_text": "推进悬兵把双兵推向前线，换来中心空间，代价是兵链缺口变大、弱点固定保持悬兵则让双兵继续控制格子，保留动态转换的余地，却要一直提防侧翼兵的冲击。若你更想主动撕开局面，推进悬兵若你愿意让对手先出错，保持悬兵。这一局里他选的是推进悬兵。",
+ "segments": [
+  {
+   "id": 0,
+   "voiceover": "这个局面属于悬兵型：一对悬兵控制中心，却缺少兵的保护，既是压力点也是软肋。眼下有两种战略走向值得权衡。若不主动推进，局面基线会滑向明显不利，紧迫性摆在眼前。"
+  },
+  {
+   "id": 1,
+   "voiceover": "推进悬兵这条路线，选择主动把兵向前拱，换取空间和通路兵，代价是兵需要走上两步，兑换次数也明显偏多。末端更常留下对方中心孤立兵，开放线变得显著，对方阵型因此被拉松。"
+  },
+  {
+   "id": 2,
+   "voiceover": "回到分岔点，保持悬兵这条路线不去急着推进，而是让轻子围绕双兵组织，继续压住中心。它带来的变化是己方兵过中线更明显，半开放线与前哨轻子都有机会出现；代价是兵着承诺更长，达到四步，兑换则较少，把动态局面拖得更久。"
+  },
+  {
+   "id": 3,
+   "voiceover": "同样是进攻，推进悬兵要的是速战速决——兑子更多、承诺更短，把对方面对开放线的弱点固定下来；保持悬兵则相反，承诺更长、兑换更少，靠过中线的兵和前哨积累压力。对方中心脆弱可推进，己方轻子活跃则保持双兵。"
+  },
+  {
+   "id": 4,
+   "voiceover": "推进悬兵把双兵推向前线，换来中心空间，代价是兵链缺口变大、弱点固定；保持悬兵则让双兵继续控制格子，保留动态转换的余地，却要一直提防侧翼兵的冲击。若你更想主动撕开局面，推进悬兵；若你愿意让对手先出错，保持悬兵。这一局里他选的是推进悬兵。"
+  }
+ ],
+ "seg_durations": [
+  {
+   "idx": 0,
+   "text_len": 77,
+   "duration_s": 15.45,
+   "speech_s": 15.0,
+   "n_moves": 0
+  },
+  {
+   "idx": 1,
+   "text_len": 81,
+   "duration_s": 15.4,
+   "speech_s": 14.95,
+   "n_moves": 6
+  },
+  {
+   "idx": 2,
+   "text_len": 104,
+   "duration_s": 19.6,
+   "speech_s": 19.15,
+   "n_moves": 6
+  },
+  {
+   "idx": 3,
+   "text_len": 99,
+   "duration_s": 18.33,
+   "speech_s": 17.88,
+   "n_moves": 0
+  },
+  {
+   "idx": 4,
+   "text_len": 115,
+   "duration_s": 22.17,
+   "speech_s": 21.72,
+   "n_moves": 0
+  }
+ ]
+}
