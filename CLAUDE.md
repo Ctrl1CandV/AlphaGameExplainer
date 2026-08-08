@@ -48,7 +48,7 @@
 - **n_ctx=4096**：本地 llama.cpp 当前默认生成上下文窗口，受 Qwen3.6-27B 4-bit 占满显存后 KV cache 余量所限，可经 `LLAMA_CPP_N_CTX` 覆盖。非硬产品上限；prompt 仍需预算控制。切到 API 后端后此约束不适用于 API 路径（DeepSeek 128k 窗口），仅本地兜底路径受限。
 - **讲解词中文纯净化**：voiceover 禁止英文/数字/坐标/Markdown。已有 `_strip_coordinates` / `_clean_cjk_text` 兜底。
 - **Syzygy 表库覆盖 3-6 子**：超出范围的残局走 Stockfish 求解。
-- **Python 运行环境**：项目用 conda 环境 `commentary`（`C:\Users\LiuYiJie\.conda\envs\commentary`）。系统默认 `python`（WindowsApps stub）无依赖、无输出，**不能直接 `python` 跑项目代码**。命令行必须用 `"C:\Users\LiuYiJie\.conda\envs\commentary\python.exe"` 或先 `conda activate commentary`。`chess` / `pydub` / `chatTTS` 等依赖仅装在该环境。
+- **Python 运行环境**：项目用 conda 环境 `explainer`（`C:\Users\11487\.conda\envs\explainer`，2026-08 迁移到本机后适配，PLAN-010 F7/阶段 7 实测确认）。**历史**：迁移前旧机器用环境名 `commentary`（`C:\Users\LiuYiJie\.conda\envs\commentary`），文档旧版曾记该名，已不符。系统默认 `python`（WindowsApps stub）无依赖、无输出，**不能直接 `python` 跑项目代码**。命令行必须用 `"C:\Users\11487\.conda\envs\explainer\python.exe"`、`conda run -n explainer python ...` 或先 `conda activate explainer`。`chess` / `pydub` / `chatTTS` / `pytest` 等依赖仅装在该环境。
 
 ## 当前状态
 
