@@ -127,9 +127,26 @@ def _hanging_check(board: chess.Board) -> bool:
 
 def _maroczy_check(board: chess.Board) -> bool:
     """马洛齐束缚：mover c4+e4 双中心兵控制 d5 + 对方 d 线兵在 d6
-    （rank 5，未过 d5——d6 兵被 c4/e4 束缚）。"""
+    （rank 5，未过 d5——d6 兵被 c4/e4 束缚）。
+
+    PLAN-011 阶段 2 前置收紧（防 Benoni/Hedgehog 误识别）：Sicilian Maroczy
+    白方 d 兵必已兑掉（不在 d4/d5），而 Benoni（白 c4+d5+e4）与 Hedgehog
+    （白 c4+e4）白方有 d 兵或 d5 楔。加 mover 无 d4/d5 兵判别子干净区分。
+    """
     if not (_pawn_on(board, _MOVER, "c4") and _pawn_on(board, _MOVER, "e4")):
         return False
+    # mover 不能有 d4/d5 兵——那是 Benoni 中心楔，不是 Maroczy
+    if _pawn_on(board, _MOVER, "d4") or _pawn_on(board, _MOVER, "d5"):
+        return False
+    # 对方 d6 兵必须是「被束缚的半孤立兵」，不是小中心一员。
+    # Maroczy：对方 d6 + e6（e 线支撑）但 c 线兵已兑（d6 的 c 侧无兵）。
+    # Hedgehog：对方 a6+b7+d6+e6（小中心，但 b 在 b7 不是 b6）。
+    # 干净判别子：对方 a 线有兵（a6/a7）时，不是 Maroczy 的经典兵形——
+    # Maroczy 对方通常 a 兵在 a7（未推进），Hedgehog 有 a6 推进。
+    # 但更干净的：对方同时有 a6 和 e6（Hedgehog 双翼推进标志）时排除。
+    # 实测 Maroczy FEN 对方 a7（未推 a6），Hedgehog 对方 a6。
+    if _pawn_on(board, _OPPONENT, "a6"):
+        return False  # Hedgehog 小中心标志：a6 推进，非 Maroczy
     return any(
         chess.square_file(sq) == _FD and chess.square_rank(sq) == 5
         for sq in board.pieces(chess.PAWN, _OPPONENT)
@@ -148,6 +165,23 @@ def _stonewall_check(board: chess.Board) -> bool:
             and _pawn_on(board, _MOVER, "e3")):
         return True
     return False
+
+
+def _benoni_check(board: chess.Board) -> bool:
+    """Benoni 类：mover d5 中心楔 + c4 兵 + 对方 c5+d6 兵。
+
+    Modern Benoni / Benko Gambit 的核心兵形：白方 d5 楔入黑方阵地、
+    c4 兵固定；黑方 c5+d6 形成半开放 c 线 + 中心弱格 d5。
+    两计划=中心 e4-e5 突破 / 后翼 b4-b5 扩张（Soltis/Benko 文献）。
+
+    判别子：mover d5 + c4（两者缺一不可），对方 c5 + d6。
+    插优先级 maroczy 之后（maroczy 已收紧排除 mover d5 兵的情况），
+    stonewall 之前。
+    """
+    if not (_pawn_on(board, _MOVER, "d5") and _pawn_on(board, _MOVER, "c4")):
+        return False
+    return (_pawn_on(board, _OPPONENT, "c5")
+            and _pawn_on(board, _OPPONENT, "d6"))
 
 
 def _majority_check(board: chess.Board) -> bool:
@@ -262,6 +296,8 @@ def detect_pawn_structure(board: chess.Board) -> Tuple[Optional[str], float, dic
             return "hanging", 1.0, features
         if _maroczy_check(b):
             return "maroczy", 1.0, features
+        if _benoni_check(b):
+            return "benoni", 1.0, features
         if _stonewall_check(b):
             return "stonewall", 1.0, features
         if _majority_check(b):
