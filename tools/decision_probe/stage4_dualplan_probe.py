@@ -62,10 +62,15 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 KB_PATH = os.path.join(_ROOT, "data", "structure_kb.json")
 OUT_DIR = os.path.join(_ROOT, "data", "quality_benchmark_decision")
 
-# 阶段 3 P0-full 实测 A3 通过的原型（实现判据 2/5）——本冒烟据 peer_review
-# 校准项处理：carlsbad/maroczy 已验证可分离，正常计入；hanging/majority
-# A3 未过（且 estimator 缺陷待 planner 裁决），单列不与已验证原型同等计入
-# 存活率分母；stonewall 已 in_production:false，被产品池闸拦下不计。
+# A3 可分离性「稳健通过」原型（Go/No-Go 的 verified 口径）。
+# 08.06 补测轮重测（estimator 修正为 statistics.median 真中位 + iqp 补样）：
+#   carlsbad  margin +0.375  ✓ 稳健   maroczy margin +0.2  ✓ 稳健
+#   hanging   margin +0.0375 ✓ 但临界（余量过薄，不作 verified）
+#   stonewall margin +0.0625 ✓ 但临界（estimator 修复后翻转，in_production
+#             复核移交用户，不作 verified）
+#   majority  margin -0.0417 ✗（样本缺陷待换局面）
+#   iqp_holder margin -0.2375 ✗；iqp_pressure 无效样本已移除
+# 裁决只计稳健通过的 carlsbad/maroczy；临界/未过原型单列不计入分母。
 A3_VERIFIED = {"carlsbad", "maroczy"}
 
 
@@ -121,6 +126,7 @@ def _plan_passes_gate(board: chess.Board, plan: dict, sf: str,
         "feas_cp": bool(feas),
         "mech_ok": mech_ok,
         "gap_cp": gap,
+        "line_cp": line.cp,
         "line_pv": line.pv,
     }
 
@@ -145,6 +151,7 @@ def run(pgn_path: str, max_games: int, out_path: str,
     from src.analysis.structure_id import (
         detect_pawn_structure, applicable_mover_side)
     from src.analysis.structure_features import feature_distance
+    from src.analysis.direction import equivalence_gap, DEFAULT_EQUIV_CP
     from src.solver.branch_explorer import explore_open
 
     sf = os.getenv("STOCKFISH_PATH", "")
@@ -226,11 +233,30 @@ def run(pgn_path: str, max_games: int, out_path: str,
             if a3_ok:
                 stats["double_plan_a3ok"] += 1
                 per_arch[arch]["double_plan_a3ok"] += 1
+
+            # 补测③（2026-08-06）：两计划**彼此** cp 差——可行性闸只查各计划
+            # vs 全局最优 ≤80cp，不查两计划互差；两条可都合规却相差 150cp，
+            # 产品轴 1「等强对比」根本不成立。用 equivalence_gap（等强单一
+            # 事实来源）量互差，≤DEFAULT_EQUIV_CP(60) 才算真等强双计划。
+            cp_gaps = []
+            cps = [r["line_cp"] for r in feasible_plans]
+            for i in range(len(cps)):
+                for j in range(i + 1, len(cps)):
+                    cp_gaps.append(equivalence_gap(cps[i], cps[j]))
+            max_plan_cp_gap = max(cp_gaps) if cp_gaps else 0
+            plans_equivalent = max_plan_cp_gap <= DEFAULT_EQUIV_CP
+            if plans_equivalent:
+                stats["double_plan_equiv"] += 1
+                per_arch[arch]["double_plan_equiv"] += 1
+
             double_plan_positions.append({
                 "fen": pos["fen"], "archetype": arch,
                 "feasible_plans": [r["name"] for r in feasible_plans],
                 "max_pair_distance": round(max_pair, 3),
                 "a3_prefilter_ok": a3_ok,
+                "plan_cp_gaps": cp_gaps,
+                "max_plan_cp_gap": max_plan_cp_gap,
+                "plans_equivalent": plans_equivalent,
                 "url": pos.get("url", ""),
             })
 
@@ -250,10 +276,13 @@ def run(pgn_path: str, max_games: int, out_path: str,
                    if a in A3_VERIFIED)
     ver_a3ok = sum(c["double_plan_a3ok"] for a, c in per_arch.items()
                    if a in A3_VERIFIED)
+    ver_equiv = sum(c["double_plan_equiv"] for a, c in per_arch.items()
+                    if a in A3_VERIFIED)
     # 千局外推（peer_review 次要项：桶去重使产出次线性，此为**上界**）
     proj_all = round(1000.0 * stats["double_plan_gate"] / sampled, 1)
     proj_ver_gate = round(1000.0 * ver_gate / sampled, 1)
     proj_ver_a3ok = round(1000.0 * ver_a3ok / sampled, 1)
+    proj_ver_equiv = round(1000.0 * ver_equiv / sampled, 1)
     # 裁决：verified 口径的千局外推双计划过闸数 ≥ min_double 才判成立
     # （对齐 PLAN 判据「千局量级 ≥30 双计划局面」，且用 verified 口径）
     verdict_supported = proj_ver_gate >= min_double
@@ -272,18 +301,21 @@ def run(pgn_path: str, max_games: int, out_path: str,
             "supported": verdict_supported,
             "basis": "verified-only 口径千局外推双计划过闸数 vs min_double",
             "note": "千局外推是上界（桶去重使产出次线性）；A3 预筛=max≥0.5 粗筛"
-                    "非阶段 3 A3 判定；全原型口径含 iqp(未测)/majority(阶段3已失败)"
-                    "仅作对照不作裁决依据",
+                    "非阶段 3 A3 判定；plans_equivalent 用 equivalence_gap≤60cp"
+                    "量两计划互差（等强单一事实来源），区别于各计划 vs 全局最优",
         },
         "rates": {
             "archetype_hit_pct": round(100.0 * stats["archetype_hit"] / sampled, 1),
             "double_plan_gate_pct_all": round(100.0 * stats["double_plan_gate"] / sampled, 2),
             "double_plan_a3ok_pct_all": round(100.0 * stats["double_plan_a3ok"] / sampled, 2),
+            "double_plan_equiv_pct_all": round(100.0 * stats["double_plan_equiv"] / sampled, 2),
             "verified_gate": ver_gate,
             "verified_a3ok": ver_a3ok,
+            "verified_equiv": ver_equiv,
             "proj_per_1000_all_gate": proj_all,
             "proj_per_1000_verified_gate": proj_ver_gate,
             "proj_per_1000_verified_a3ok": proj_ver_a3ok,
+            "proj_per_1000_verified_equiv": proj_ver_equiv,
         },
     }
 
@@ -295,14 +327,16 @@ def run(pgn_path: str, max_games: int, out_path: str,
     print(f"抽样 {stats['sampled']} | 识别原型 {stats['archetype_hit']} "
           f"({result['rates']['archetype_hit_pct']}%)")
     print(f"[对照·全原型] 双计划过闸 {stats['double_plan_gate']} | "
-          f"过A3预筛 {stats['double_plan_a3ok']} | 千局外推(上界) ≈{proj_all}")
-    print(f"[裁决·verified] carlsbad+maroczy 双计划过闸 {ver_gate} | "
-          f"过A3预筛 {ver_a3ok} | 千局外推(上界) ≈{proj_ver_gate}")
+          f"过A3预筛 {stats['double_plan_a3ok']} | "
+          f"等强(≤60cp) {stats['double_plan_equiv']} | 千局外推(上界) ≈{proj_all}")
+    print(f"[裁决·verified] {'+'.join(sorted(A3_VERIFIED))} 双计划过闸 {ver_gate} | "
+          f"过A3预筛 {ver_a3ok} | 等强 {ver_equiv} | 千局外推(上界) ≈{proj_ver_gate}")
     print("逐原型：")
     for a, c in sorted(per_arch.items()):
         verified = "✓验证" if a in A3_VERIFIED else "⚠未验证/单列(不计入裁决)"
         print(f"  {a} [{verified}]: 识别 {c['hit']} | 双计划过闸 "
-              f"{c['double_plan_gate']} | 过A3粗筛 {c['double_plan_a3ok']}")
+              f"{c['double_plan_gate']} | 过A3粗筛 {c['double_plan_a3ok']} | "
+              f"等强 {c['double_plan_equiv']}")
     print(f"耗时 {elapsed:.0f}s，结果写入 {out_path}")
     print("-" * 72)
     print(f"假设裁决（阈值 verified 千局 ≥{min_double}）："

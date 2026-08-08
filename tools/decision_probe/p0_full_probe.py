@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
 import sys
 import time
 
@@ -445,14 +446,46 @@ def run_a3_separability(sf: str, depth: int = 14) -> dict:
         "majority": (kb["majority"]["plans"],
                      "r2qr3/3bRpk1/p2p2p1/3P2Qp/1p6/1N3P2/PPP3PP/"
                      "1K1R4 w - - 1 21"),
+        # 补测新增（2026-08-06，untangler 复盘 + 用户裁决）：iqp 从未进过 A3
+        # 探针，却是阶段 4 双计划筛最大供给源（15 过闸/9 过粗筛）——「未测」
+        # 不是「失败」，是唯一能实质翻转 verified 口径结论的变量。
+        # iqp 4 条计划分属两种 mover_side 角色，A3 只应在「同一决策点走子方
+        # 真能执行」的计划间测可分离性（与 decision_pipeline 角色闸同口径），
+        # 故拆施压方 / 持有方两个局面、由 applicable_mover_side 筛计划：
+        #   施压方（白走子、黑持 d5 孤兵）→ 对孤兵施压 / 推进消除孤兵；
+        #   持有方（白走子、白持 d4 孤兵）→ 保持孤兵 / 推进兑掉孤兵。
+        #
+        # **iqp_pressure 已移除（08.06，independent_analysis 分歧 2）**：该 FEN
+        # 白方无 d 线兵，「推进消除孤兵」（direction pawn_files=["d"]）永远无法
+        # 触发方向约束，退化为松散中心手——A2 docstring 早已明说此计划需
+        # 「黑持 d5 + 白持 d4 孤兵」的专属局面、现有样本是无效样本。拿无效样本
+        # 测 A3 会把「样本退化」误读成「结构趋同」。待构造可执行局面后补回。
+        "iqp_holder": (kb["iqp"]["plans"],
+                       "r1bq1rk1/pp2ppbp/5np1/n7/3P4/2N2N2/"
+                       "PP2BPPP/R1BQ1RK1 w - - 2 11"),
     }
 
     from src.analysis.direction import direction_candidates
+    from src.analysis.structure_id import applicable_mover_side
 
     per_situation = {}
     all_within, all_cross = [], []
     for sit_name, (plans, fen) in situations.items():
         board = chess.Board(fen)
+        # 角色闸（与 decision_pipeline 同口径）：只测决策点走子方真能执行的
+        # 计划。iqp 的施压方/持有方计划互斥，混测会把「对手的计划」算进可分
+        # 离性。**仅当过滤后计划集非空才应用**（08.06 修，independent_analysis
+        # 分歧 3）：首版无守卫，stonewall 在该 FEN 返回 "opponent" 而 KB 两条
+        # 计划都是 mover_side="mover"，被过滤为空、A3 数据静默丢失，连带让
+        # estimator 修复承诺的 stonewall 重审流产。守卫后 stonewall 保留全部
+        # 计划（其 mover_side 标注与 applicable_mover_side 角色语义的错位是
+        # KB 层问题，另行回流，不在本探针内静默吞掉）。
+        arch = sit_name.split("_")[0]
+        side = applicable_mover_side(board, arch)
+        if side is not None:
+            filtered = [p for p in plans if p.get("mover_side") == side]
+            if filtered:
+                plans = filtered
         within = []
         lines_by_plan = {}   # plan_name -> [pv, ...]
         for plan in plans:
@@ -483,8 +516,14 @@ def run_a3_separability(sf: str, depth: int = 14) -> dict:
                             _line_features(board, lb))
                         cross.append(d)
         ws, cs = sorted(within), sorted(cross)
-        w_med = ws[len(ws) // 2] if ws else None
-        c_med = cs[len(cs) // 2] if cs else None
+        # 中位数用 statistics.median（真中位）——08.06 修（用户裁决）。
+        # 原实现 `ws[len(ws)//2]` 对偶数长度列表取的是上中位（组内均 6 个
+        # 距离 → 下标 3 ≈ 58 分位），跨计划 9 个（奇数）才是真中位，判据
+        # 实际算「跨计划真中位 > 组内 58 分位」，比 docstring 承诺的
+        # 「中位 > 中位」更严、偏向 FAIL。阶段 3 peer_review 发现、PLAN-010
+        # 复盘数值复核证实，用户裁决修复并重审 stonewall/hanging。
+        w_med = statistics.median(ws) if ws else None
+        c_med = statistics.median(cs) if cs else None
         passed = (w_med is not None and c_med is not None
                   and c_med > w_med)
         per_situation[sit_name] = {
