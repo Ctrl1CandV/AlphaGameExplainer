@@ -319,6 +319,10 @@ def run_a2_goals(sf: str, depth: int = 14) -> dict:
         ("majority", kb["majority"],
          "r2qr3/3bRpk1/p2p2p1/3P2Qp/1p6/1N3P2/PPP3PP/1K1R4 w - - 1 21",
          {"多数翼推进", "王翼行动"}, False),
+        # PLAN-011 阶段 2：Benoni 两计划 A2 样本。
+        ("benoni", kb["benoni"],
+         "r2q1rk1/pp1n1ppp/3p4/2pPp3/2P1P3/2N2N2/PP3PPP/R1BQ1RK1 w - - 0 13",
+         {"中心突破", "后翼扩张"}, False),
     ]
     records = []
     achieved = total = 0
@@ -474,6 +478,10 @@ def run_a3_separability(sf: str, depth: int = 14) -> dict:
         "iqp_stage4": (kb["iqp"]["plans"],
                        "2r2rk1/1b2qppp/pQ6/1p1pP3/4nPp1/"
                        "3B4/PPP1N3/1K1R3R w - - 0 21"),
+        # PLAN-011 阶段 2：Benoni A3 样本。
+        "benoni": (kb["benoni"]["plans"],
+                   "r2q1rk1/pp1n1ppp/3p4/2pPp3/2P1P3/2N2N2/"
+                   "PP3PPP/R1BQ1RK1 w - - 0 13"),
     }
 
     from src.analysis.direction import direction_candidates
