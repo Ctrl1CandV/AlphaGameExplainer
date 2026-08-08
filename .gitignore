@@ -26,23 +26,16 @@ data/pgn/
 # 分支约定（用户裁决 2026-08-06）：`tests/` 与 `tools/` 只在 test 分支
 # 提交，main 分支不收；`docs/` 两个分支都不入库。故本段**只应存在于
 # test 分支**，合并回 main 时不要带上。
-#
-# 否定父目录才能让 git 遍历进去检查子规则，故先否定目录本身再开内容。
 # ============================================================
 !/tests/
 !/tests/**
 !pytest.ini
 !/tools/
 !/tools/**
-
-# 但上面的 `**` 例外会连带 re-include 编译产物与冒烟产物（覆盖前面的
-# 全局忽略），须在其后重新屏蔽——.gitignore 后出现的规则可覆盖先前规则。
 tests/**/__pycache__/
 tools/**/__pycache__/
-# 冒烟/回归产物（含真实 API 调用记录）仍然不入库，与第 17 行同一理由
 tools/quality_audit/*result*.json
 
 # PLAN-011 阶段0：质量基线 JSON 入库（否定 *quality_benchmark* 排除）
-# 两分支共享——基线/快照需要可追溯，故不在 test 分支专属段内
 !/data/quality_benchmark_decision/
 !/data/quality_benchmark_decision/**
