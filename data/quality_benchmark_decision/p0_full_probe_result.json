@@ -1,0 +1,488 @@
+{
+ "verdict": "P0-full ❌ 存在未通过项 → 按 FINDINGS §3.5 走向表处置",
+ "elapsed_s": 20.2,
+ "a1": {
+  "total": 3,
+  "polluted": 0,
+  "rate_pct": 100.0,
+  "passed": true,
+  "records": [
+   {
+    "archetype": "卡尔斯巴德结构",
+    "plan": "少数派攻击",
+    "best_mistake": -51,
+    "best_correct": 41,
+    "gap": -92,
+    "mistakes_in_cands": [
+     "b4"
+    ],
+    "correct_in_cands": [
+     "Rab1",
+     "Rfb1",
+     "a4"
+    ],
+    "polluted": false
+   },
+   {
+    "archetype": "卡尔斯巴德结构",
+    "plan": "中心突破",
+    "skipped": true,
+    "reason": "计划在该局面不可行（全局最优不支持）——污染检查无意义"
+   },
+   {
+    "archetype": "孤后兵 IQP",
+    "plan": "对孤兵施压",
+    "best_mistake": -97,
+    "best_correct": 0,
+    "gap": -97,
+    "mistakes_in_cands": [
+     "Nb6",
+     "Ne5",
+     "e4"
+    ],
+    "correct_in_cands": [
+     "Nc3"
+    ],
+    "polluted": false
+   },
+   {
+    "archetype": "荷兰石墙",
+    "plan": "后翼扩张",
+    "best_mistake": -73,
+    "best_correct": 29,
+    "gap": -102,
+    "mistakes_in_cands": [
+     "c5",
+     "b4"
+    ],
+    "correct_in_cands": [
+     "Rc1",
+     "Rb1"
+    ],
+    "polluted": false
+   },
+   {
+    "archetype": "荷兰石墙",
+    "plan": "中心突破",
+    "skipped": true,
+    "reason": "候选集内无错误着或正确着"
+   },
+   {
+    "archetype": "马洛齐束缚",
+    "plan": "王翼进攻",
+    "skipped": true,
+    "reason": "计划在该局面不可行（全局最优不支持）——污染检查无意义"
+   },
+   {
+    "archetype": "马洛齐束缚",
+    "plan": "后翼扩张",
+    "skipped": true,
+    "reason": "候选集内无错误着或正确着"
+   },
+   {
+    "archetype": "悬兵结构",
+    "plan": "推进悬兵",
+    "skipped": true,
+    "reason": "候选集内无错误着或正确着"
+   },
+   {
+    "archetype": "悬兵结构",
+    "plan": "保持悬兵（利用动态潜力）",
+    "skipped": true,
+    "reason": "候选集内无错误着或正确着"
+   },
+   {
+    "archetype": "通路兵/多数兵结构",
+    "plan": "多数翼推进",
+    "skipped": true,
+    "reason": "候选集内无错误着或正确着"
+   },
+   {
+    "archetype": "通路兵/多数兵结构",
+    "plan": "王翼行动",
+    "skipped": true,
+    "reason": "候选集内无错误着或正确着"
+   }
+  ]
+ },
+ "a2": {
+  "total": 9,
+  "achieved": 9,
+  "rate_pct": 100.0,
+  "passed": true,
+  "records": [
+   {
+    "archetype": "carlsbad",
+    "plan": "少数派攻击",
+    "achieved": true,
+    "start_satisfied": true,
+    "satisfied_after_start": true,
+    "progress": {
+     "any.opp_isolated_qside": 0,
+     "any.opp_backward": 1
+    },
+    "significant": true,
+    "first_move": "a3",
+    "reason": ""
+   },
+   {
+    "archetype": "carlsbad",
+    "plan": "中心突破",
+    "achieved": true,
+    "start_satisfied": false,
+    "satisfied_after_start": true,
+    "progress": {
+     "mover_pawns_past_mid": 1
+    },
+    "significant": true,
+    "first_move": "e4",
+    "reason": ""
+   },
+   {
+    "archetype": "iqp",
+    "plan": "对孤兵施压",
+    "achieved": true,
+    "start_satisfied": true,
+    "satisfied_after_start": true,
+    "progress": {
+     "opp_isolated_center": 0
+    },
+    "significant": false,
+    "first_move": "Qd3",
+    "reason": ""
+   },
+   {
+    "archetype": "iqp",
+    "plan": "保持孤兵（利用动态潜力）",
+    "achieved": true,
+    "start_satisfied": true,
+    "satisfied_after_start": true,
+    "progress": {
+     "opp_isolated_center": 0,
+     "mover_pawns_past_mid": 0
+    },
+    "significant": false,
+    "first_move": "Re1",
+    "reason": ""
+   },
+   {
+    "archetype": "iqp",
+    "plan": "推进兑掉孤兵",
+    "achieved": true,
+    "start_satisfied": false,
+    "satisfied_after_start": true,
+    "progress": {
+     "mover_pawns_past_mid": 1
+    },
+    "significant": true,
+    "first_move": "d5",
+    "reason": ""
+   },
+   {
+    "archetype": "maroczy",
+    "plan": "王翼进攻",
+    "achieved": true,
+    "start_satisfied": false,
+    "satisfied_after_start": true,
+    "progress": {
+     "mover_pawns_past_mid": 1
+    },
+    "significant": true,
+    "first_move": "Bg5",
+    "reason": ""
+   },
+   {
+    "archetype": "maroczy",
+    "plan": "后翼扩张",
+    "achieved": true,
+    "start_satisfied": false,
+    "satisfied_after_start": true,
+    "progress": {
+     "opp_isolated_qside": 1
+    },
+    "significant": true,
+    "first_move": "Rb1",
+    "reason": ""
+   },
+   {
+    "archetype": "majority",
+    "plan": "多数翼推进",
+    "achieved": true,
+    "start_satisfied": false,
+    "satisfied_after_start": true,
+    "progress": {
+     "passed_diff": 1
+    },
+    "significant": true,
+    "first_move": "Na5",
+    "reason": ""
+   },
+   {
+    "archetype": "majority",
+    "plan": "王翼行动",
+    "achieved": true,
+    "start_satisfied": true,
+    "satisfied_after_start": true,
+    "progress": {
+     "mover_pawns_past_mid": 0
+    },
+    "significant": false,
+    "first_move": "h3",
+    "reason": ""
+   }
+  ]
+ },
+ "a3": {
+  "per_situation": {
+   "carlsbad": {
+    "within": [
+     0.0,
+     0.25,
+     0.25,
+     1.375,
+     0.75,
+     1.625
+    ],
+    "within_median": 0.5,
+    "cross": [
+     0.875,
+     0.5,
+     1.375,
+     0.875,
+     0.5,
+     1.375,
+     1.125,
+     0.75,
+     1.125
+    ],
+    "cross_median": 0.875,
+    "passed": true
+   },
+   "hanging": {
+    "within": [
+     1.0,
+     0.75,
+     1.5,
+     2.075,
+     1.2,
+     1.375
+    ],
+    "within_median": 1.2875,
+    "cross": [
+     1.875,
+     0.45,
+     1.325,
+     1.125,
+     0.95,
+     1.325,
+     1.875,
+     0.95,
+     1.575
+    ],
+    "cross_median": 1.325,
+    "passed": true
+   },
+   "stonewall": {
+    "within": [
+     0.75,
+     1.375,
+     1.125,
+     1.5,
+     2.291666666666667,
+     1.9583333333333333
+    ],
+    "within_median": 1.4375,
+    "cross": [
+     2.375,
+     1.375,
+     1.0833333333333333,
+     1.875,
+     1.125,
+     1.8333333333333333,
+     1.5,
+     0.0,
+     1.9583333333333333
+    ],
+    "cross_median": 1.5,
+    "passed": true
+   },
+   "maroczy": {
+    "within": [
+     0.0,
+     0.25,
+     0.25,
+     0.7,
+     0.0,
+     0.7
+    ],
+    "within_median": 0.25,
+    "cross": [
+     0.7,
+     0.0,
+     0.7,
+     0.7,
+     0.0,
+     0.7,
+     0.45,
+     0.25,
+     0.45
+    ],
+    "cross_median": 0.45,
+    "passed": true
+   },
+   "majority": {
+    "within": [
+     1.0,
+     0.375,
+     0.625,
+     1.625,
+     1.2916666666666665,
+     0.8333333333333333
+    ],
+    "within_median": 0.9166666666666666,
+    "cross": [
+     1.75,
+     0.125,
+     0.9583333333333333,
+     1.5,
+     0.875,
+     0.7083333333333333,
+     1.375,
+     0.25,
+     0.5833333333333333
+    ],
+    "cross_median": 0.875,
+    "passed": false
+   },
+   "iqp_holder": {
+    "within": [
+     0.875,
+     1.0,
+     0.125,
+     1.6666666666666665,
+     1.8666666666666667,
+     0.2
+    ],
+    "within_median": 0.9375,
+    "cross": [
+     1.8666666666666667,
+     0.7,
+     0.5,
+     1.7416666666666667,
+     0.575,
+     0.375,
+     1.6166666666666667,
+     0.7,
+     0.5
+    ],
+    "cross_median": 0.7,
+    "passed": false
+   }
+  },
+  "passed": false,
+  "all_within": [
+   0.0,
+   0.25,
+   0.25,
+   1.375,
+   0.75,
+   1.625,
+   1.0,
+   0.75,
+   1.5,
+   2.075,
+   1.2,
+   1.375,
+   0.75,
+   1.375,
+   1.125,
+   1.5,
+   2.291666666666667,
+   1.9583333333333333,
+   0.0,
+   0.25,
+   0.25,
+   0.7,
+   0.0,
+   0.7,
+   1.0,
+   0.375,
+   0.625,
+   1.625,
+   1.2916666666666665,
+   0.8333333333333333,
+   0.875,
+   1.0,
+   0.125,
+   1.6666666666666665,
+   1.8666666666666667,
+   0.2
+  ],
+  "all_cross": [
+   0.875,
+   0.5,
+   1.375,
+   0.875,
+   0.5,
+   1.375,
+   1.125,
+   0.75,
+   1.125,
+   1.875,
+   0.45,
+   1.325,
+   1.125,
+   0.95,
+   1.325,
+   1.875,
+   0.95,
+   1.575,
+   2.375,
+   1.375,
+   1.0833333333333333,
+   1.875,
+   1.125,
+   1.8333333333333333,
+   1.5,
+   0.0,
+   1.9583333333333333,
+   0.7,
+   0.0,
+   0.7,
+   0.7,
+   0.0,
+   0.7,
+   0.45,
+   0.25,
+   0.45,
+   1.75,
+   0.125,
+   0.9583333333333333,
+   1.5,
+   0.875,
+   0.7083333333333333,
+   1.375,
+   0.25,
+   0.5833333333333333,
+   1.8666666666666667,
+   0.7,
+   0.5,
+   1.7416666666666667,
+   0.575,
+   0.375,
+   1.6166666666666667,
+   0.7,
+   0.5
+  ]
+ },
+ "b3": {
+  "same_object": true,
+  "kb_zones": [
+   "center",
+   "kingside",
+   "queenside"
+  ],
+  "zones_ok": true,
+  "passed": true
+ }
+}
