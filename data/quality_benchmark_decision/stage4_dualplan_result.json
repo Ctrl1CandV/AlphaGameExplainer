@@ -1,0 +1,727 @@
+{
+ "kb_snapshot": {
+  "git_blob_hash": "190e1e1fb26c6a569e74b0cf5447056d368d1654",
+  "content_sha256": "0ae7c63de7d96c5aa199af16322afa4692d551b9918e3ed71c03fbccf5f055fb",
+  "head_commit": "bef3fab29e8dea63607ddb075c3019f9447159bf"
+ },
+ "pgn": "lichess_elite_2025-11.pgn",
+ "max_games": 600,
+ "elapsed_s": 261.7,
+ "stats": {
+  "sampled": 522,
+  "archetype_hit": 211,
+  "double_plan_gate": 40,
+  "double_plan_a3ok": 25,
+  "double_plan_equiv": 35,
+  "no_archetype": 311,
+  "not_in_production": 9,
+  "no_applicable_plan": 6
+ },
+ "per_archetype": {
+  "majority": {
+   "hit": 116,
+   "reached_gate": 116,
+   "double_plan_gate": 12,
+   "double_plan_a3ok": 9,
+   "double_plan_equiv": 9
+  },
+  "stonewall": {
+   "hit": 9,
+   "not_in_production": 9
+  },
+  "hanging": {
+   "hit": 10,
+   "no_applicable_plan": 6,
+   "reached_gate": 4,
+   "double_plan_gate": 3,
+   "double_plan_equiv": 2,
+   "double_plan_a3ok": 1
+  },
+  "carlsbad": {
+   "hit": 10,
+   "reached_gate": 10,
+   "double_plan_gate": 3,
+   "double_plan_equiv": 3,
+   "double_plan_a3ok": 2
+  },
+  "maroczy": {
+   "hit": 16,
+   "reached_gate": 16,
+   "double_plan_gate": 7,
+   "double_plan_a3ok": 4,
+   "double_plan_equiv": 6
+  },
+  "iqp": {
+   "hit": 50,
+   "reached_gate": 50,
+   "double_plan_gate": 15,
+   "double_plan_a3ok": 9,
+   "double_plan_equiv": 15
+  }
+ },
+ "a3_verified_archetypes": [
+  "carlsbad",
+  "maroczy"
+ ],
+ "double_plan_positions": [
+  {
+   "fen": "2kr3r/p1q2p2/1p2p1p1/2b1Pn2/2Pp1P1p/P2B1Q1P/2PB2P1/1R3RK1 w - - 0 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.833,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    28
+   ],
+   "max_plan_cp_gap": 28,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/HOLYoRWL"
+  },
+  {
+   "fen": "r4rk1/1p2b1p1/p1n1R2p/qp1p1p1P/3P4/P2Q1NB1/1P3PP1/1B3K1R w - - 1 21",
+   "archetype": "carlsbad",
+   "feasible_plans": [
+    "少数派攻击",
+    "中心突破"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    7
+   ],
+   "max_plan_cp_gap": 7,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/b2dWjnLX"
+  },
+  {
+   "fen": "r3qr1k/1bnnb1p1/3p1pPp/p1pPpP2/P1P1P2P/3B1N2/4Q3/R1B1KNR1 w Q - 0 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 0.7,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    73
+   ],
+   "max_plan_cp_gap": 73,
+   "plans_equivalent": false,
+   "url": "https://lichess.org/CvKmi4Mx"
+  },
+  {
+   "fen": "2rr2k1/pb2q1pp/1p2pp2/4N3/2PPn3/5B1P/PQ3PP1/2RR2K1 w - - 0 21",
+   "archetype": "hanging",
+   "feasible_plans": [
+    "推进悬兵",
+    "保持悬兵（利用动态潜力）"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    1
+   ],
+   "max_plan_cp_gap": 1,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/IXGbnsCX"
+  },
+  {
+   "fen": "1r3r1k/p1nqp1bp/3p1p2/2p2P2/2P2N2/4B1P1/PP4QP/4RRK1 w - - 3 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    69
+   ],
+   "max_plan_cp_gap": 69,
+   "plans_equivalent": false,
+   "url": "https://lichess.org/jMGdydQD"
+  },
+  {
+   "fen": "r4rk1/1p2n1p1/1p1pb2p/p2P1q2/P3p3/1Q2B3/5PPP/3R1RK1 w - - 0 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.833,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    13
+   ],
+   "max_plan_cp_gap": 13,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/GlYV3XwF"
+  },
+  {
+   "fen": "r2qk2r/pp1b1n2/3p4/3p4/3QPppP/1P6/P1PPB1P1/2KR3R w kq - 0 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "对孤兵施压",
+    "推进消除孤兵"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    13
+   ],
+   "max_plan_cp_gap": 13,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/AAFv2y9S"
+  },
+  {
+   "fen": "r3r1k1/p2b1pp1/1p5p/3p2q1/P1nP4/2PB2BP/2Q2PP1/R3R1K1 w - - 9 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "对孤兵施压",
+    "推进消除孤兵"
+   ],
+   "max_pair_distance": 1.625,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    3
+   ],
+   "max_plan_cp_gap": 3,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/fsd5pNpl"
+  },
+  {
+   "fen": "b1rqrbk1/2p2ppp/pp2pnn1/4N3/2PP4/2NB2QP/PP3PPB/3RR1K1 w - - 20 21",
+   "archetype": "hanging",
+   "feasible_plans": [
+    "推进悬兵",
+    "保持悬兵（利用动态潜力）"
+   ],
+   "max_pair_distance": 0.325,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    46
+   ],
+   "max_plan_cp_gap": 46,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/HXvk1WGB"
+  },
+  {
+   "fen": "r1q2r2/1n2p1kp/pp1p1pp1/2pP4/2P1P1bP/1P4P1/P2QNPBK/4R1N1 w - - 0 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 0.5,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    11
+   ],
+   "max_plan_cp_gap": 11,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/SoToRQAJ"
+  },
+  {
+   "fen": "rq4k1/pp1bp2p/6p1/3P1rQ1/5P2/4B3/P3B1PP/5RK1 w - - 3 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    13
+   ],
+   "max_plan_cp_gap": 13,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/NzJHC8fO"
+  },
+  {
+   "fen": "5rk1/4ppbp/6p1/p7/1p1Pn3/6P1/PP3P1P/R1B1N1K1 w - - 0 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.25,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    9
+   ],
+   "max_plan_cp_gap": 9,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/OXFboQ5p"
+  },
+  {
+   "fen": "r1r3k1/2qbbppp/3pp3/6P1/1p2P3/p3BPP1/PPPQ4/1K1R1B1R w - - 0 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.5,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    13
+   ],
+   "max_plan_cp_gap": 13,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/Y8PFoDIs"
+  },
+  {
+   "fen": "2r2rk1/1b2qppp/pQ6/1p1pP3/4nPp1/3B4/PPP1N3/1K1R3R w - - 0 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "对孤兵施压",
+    "推进消除孤兵"
+   ],
+   "max_pair_distance": 0.95,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    22
+   ],
+   "max_plan_cp_gap": 22,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/UAStZZVI"
+  },
+  {
+   "fen": "3r3r/1pp2pp1/4kn2/7p/2P5/P1N1PP2/P6P/R2R2K1 w - - 0 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.125,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    21
+   ],
+   "max_plan_cp_gap": 21,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/6XXWrigh"
+  },
+  {
+   "fen": "2r1nr1k/p3qp1P/1n2p1pP/1p1pP3/3N1B2/2P1QP2/P1P5/2K2R1R w - - 0 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.833,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    2
+   ],
+   "max_plan_cp_gap": 2,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/33BkdR2k"
+  },
+  {
+   "fen": "r2qr1k1/5pb1/3pb2p/2p1pNpP/p1PnP1P1/1P1QB3/P4PB1/R4RK1 w - - 0 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 0.458,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    20
+   ],
+   "max_plan_cp_gap": 20,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/wGihg84o"
+  },
+  {
+   "fen": "3r1rk1/2q2p1p/3p1bp1/p1nQpP2/1pP1P3/5NN1/PP4PP/2R2RK1 w - - 1 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 0.708,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    16
+   ],
+   "max_plan_cp_gap": 16,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/ugTSb0Em"
+  },
+  {
+   "fen": "2nr1rk1/pp3pbp/1q2b1p1/8/1PPp2P1/P2P1N1P/1B3PB1/R2QR1K1 w - - 1 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "对孤兵施压",
+    "推进消除孤兵"
+   ],
+   "max_pair_distance": 1.025,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    2
+   ],
+   "max_plan_cp_gap": 2,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/xk0tLsGS"
+  },
+  {
+   "fen": "4q1k1/p2n1p2/b2p3p/2p1b1p1/4P3/2P1Q2P/PP3PP1/1R2R1K1 w - - 0 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 2.325,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    65
+   ],
+   "max_plan_cp_gap": 65,
+   "plans_equivalent": false,
+   "url": "https://lichess.org/xZBL84X5"
+  },
+  {
+   "fen": "2r2rk1/1b2bpp1/pqn1pn1p/4N3/3P4/2N2PB1/1P4PP/1BRQ1RK1 w - - 1 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.875,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    12
+   ],
+   "max_plan_cp_gap": 12,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/w0PkIJyJ"
+  },
+  {
+   "fen": "2r1r1k1/3q1ppp/pp3n2/2bP4/P1p2P2/2Nn2P1/3Q1PBP/BR3RK1 w - - 3 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.125,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    13
+   ],
+   "max_plan_cp_gap": 13,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/S5mdrH5d"
+  },
+  {
+   "fen": "5b1r/N1P1nkpp/1p3p2/5b2/5p2/2p5/P1P2PPP/3RR1K1 w - - 5 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.45,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    9
+   ],
+   "max_plan_cp_gap": 9,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/MUYDeITe"
+  },
+  {
+   "fen": "rr4k1/4nppp/3p4/p1nPp3/1qP1P3/R3NB2/2P2PPP/2Q2RK1 w - - 4 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 0.125,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    15
+   ],
+   "max_plan_cp_gap": 15,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/foCZHR2j"
+  },
+  {
+   "fen": "r3r1k1/1p3ppp/n1pp4/3Pp3/1PP1P3/P1N3Pq/5P1P/R2Q1RK1 w - - 2 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 1.575,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    14
+   ],
+   "max_plan_cp_gap": 14,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/wwRmlPCQ"
+  },
+  {
+   "fen": "r1r3k1/n3b1pp/1q2pn2/p2p4/1p1P1P2/1P2N1P1/PB1Qb1BP/R3R1K1 w - - 0 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 1.583,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    2
+   ],
+   "max_plan_cp_gap": 2,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/0MtosU8f"
+  },
+  {
+   "fen": "r2r2k1/3n1pp1/2p1p2p/p1N5/2P5/1P2BP2/P3K1PP/R7 w - - 1 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.825,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    48
+   ],
+   "max_plan_cp_gap": 48,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/G1BGDUfH"
+  },
+  {
+   "fen": "3qrbk1/1p3pp1/2b2n1p/r2p4/p6B/2NQP2P/PP1RNPP1/2R3K1 w - - 8 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "对孤兵施压",
+    "推进消除孤兵"
+   ],
+   "max_pair_distance": 1.458,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    2
+   ],
+   "max_plan_cp_gap": 2,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/G6fRssoe"
+  },
+  {
+   "fen": "r3kr2/qp1bbpQB/p1n1p3/P2pP2P/3p4/1N6/2PB1PP1/R3R1K1 w q - 1 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.5,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    16
+   ],
+   "max_plan_cp_gap": 16,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/JA7whxAy"
+  },
+  {
+   "fen": "1r4k1/p3nr1p/2pqp1p1/2Np1b2/3P4/1P2QN2/P4PPP/R3R1K1 w - - 1 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    11
+   ],
+   "max_plan_cp_gap": 11,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/9MxWEpnk"
+  },
+  {
+   "fen": "r3r3/pp1q1pk1/2p3p1/3p4/1P1P3p/4P1PP/P2Q1PK1/R4R2 w - - 0 21",
+   "archetype": "carlsbad",
+   "feasible_plans": [
+    "少数派攻击",
+    "中心突破"
+   ],
+   "max_pair_distance": 1.125,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    16
+   ],
+   "max_plan_cp_gap": 16,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/bmMKL3we"
+  },
+  {
+   "fen": "3q1rk1/pp3ppp/2p2n2/3n1N1P/3P4/3Q1N2/PP3PP1/R5K1 w - - 0 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.25,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    4
+   ],
+   "max_plan_cp_gap": 4,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/9tDqt8gE"
+  },
+  {
+   "fen": "r5k1/1bb2ppp/p1p2n2/1p6/P2PBP1q/1Q6/1P1B2PP/R2R2K1 w - - 1 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "保持孤兵（利用动态潜力）",
+    "推进兑掉孤兵"
+   ],
+   "max_pair_distance": 0.825,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    24
+   ],
+   "max_plan_cp_gap": 24,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/AmNZA27J"
+  },
+  {
+   "fen": "r1b2rk1/5p2/3b1Ppp/p1p1p1q1/3pP3/1P1B1Q2/PBP3PP/R4RK1 w - - 0 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 1.0,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    0
+   ],
+   "max_plan_cp_gap": 0,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/zfyF0WEy"
+  },
+  {
+   "fen": "rr2nbk1/2qb1ppn/p2p3p/2pPpN2/2P1P1PP/P1NBBP2/2Q5/1R3RK1 w - - 6 21",
+   "archetype": "maroczy",
+   "feasible_plans": [
+    "王翼进攻",
+    "后翼扩张"
+   ],
+   "max_pair_distance": 0.0,
+   "a3_prefilter_ok": false,
+   "plan_cp_gaps": [
+    30
+   ],
+   "max_plan_cp_gap": 30,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/2b3KUvNU"
+  },
+  {
+   "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21",
+   "archetype": "hanging",
+   "feasible_plans": [
+    "推进悬兵",
+    "保持悬兵（利用动态潜力）"
+   ],
+   "max_pair_distance": 0.75,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    67
+   ],
+   "max_plan_cp_gap": 67,
+   "plans_equivalent": false,
+   "url": "https://lichess.org/DEtGOyHm"
+  },
+  {
+   "fen": "r4nk1/1p2rppp/2pq4/3pN2b/P2P4/1RQBP3/5PPP/R5K1 w - - 3 21",
+   "archetype": "carlsbad",
+   "feasible_plans": [
+    "少数派攻击",
+    "中心突破"
+   ],
+   "max_pair_distance": 0.7,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    30
+   ],
+   "max_plan_cp_gap": 30,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/3LWgQUMM"
+  },
+  {
+   "fen": "r4k1r/4q1pp/p2pPn2/3Pp1Q1/1p6/3R4/PPP3PP/2K2R2 w - - 2 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.917,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    65
+   ],
+   "max_plan_cp_gap": 65,
+   "plans_equivalent": false,
+   "url": "https://lichess.org/kxwKOvFQ"
+  },
+  {
+   "fen": "r3r1k1/pp2qp1p/6p1/3pb3/3Bb3/1P2P2P/P2QBPP1/2R2RK1 w - - 5 21",
+   "archetype": "iqp",
+   "feasible_plans": [
+    "对孤兵施压",
+    "推进消除孤兵"
+   ],
+   "max_pair_distance": 0.75,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    3
+   ],
+   "max_plan_cp_gap": 3,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/iiX7bd0r"
+  },
+  {
+   "fen": "2rb1n1k/1p1b2pp/5p2/p1P1p3/1PB1P3/2P3B1/1P1N1PPP/R3K3 w - - 1 21",
+   "archetype": "majority",
+   "feasible_plans": [
+    "多数翼推进",
+    "王翼行动"
+   ],
+   "max_pair_distance": 0.575,
+   "a3_prefilter_ok": true,
+   "plan_cp_gaps": [
+    10
+   ],
+   "max_plan_cp_gap": 10,
+   "plans_equivalent": true,
+   "url": "https://lichess.org/n9Jy5Uih"
+  }
+ ],
+ "min_double_threshold": 30,
+ "verdict": {
+  "supported": false,
+  "basis": "verified-only 口径千局外推双计划过闸数 vs min_double",
+  "note": "千局外推是上界（桶去重使产出次线性）；A3 预筛=max≥0.5 粗筛非阶段 3 A3 判定；plans_equivalent 用 equivalence_gap≤60cp量两计划互差（等强单一事实来源），区别于各计划 vs 全局最优"
+ },
+ "rates": {
+  "archetype_hit_pct": 40.4,
+  "double_plan_gate_pct_all": 7.66,
+  "double_plan_a3ok_pct_all": 4.79,
+  "double_plan_equiv_pct_all": 6.7,
+  "verified_gate": 10,
+  "verified_a3ok": 6,
+  "verified_equiv": 9,
+  "proj_per_1000_all_gate": 76.6,
+  "proj_per_1000_verified_gate": 19.2,
+  "proj_per_1000_verified_a3ok": 11.5,
+  "proj_per_1000_verified_equiv": 17.2
+ }
+}

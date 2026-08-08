@@ -19,3 +19,7 @@ docs/
 tools/
 # Decision 管线的 PGN 语料（ADR-020 主源，单月解压后约 255MB，从 Elite DB 重新下载即可）
 data/pgn/
+
+# PLAN-011 阶段0：质量基线 JSON 入库（否定 *quality_benchmark* 排除）
+!/data/quality_benchmark_decision/
+!/data/quality_benchmark_decision/**
