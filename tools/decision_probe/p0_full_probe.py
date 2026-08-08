@@ -468,6 +468,12 @@ def run_a3_separability(sf: str, depth: int = 14) -> dict:
         "iqp_holder": (kb["iqp"]["plans"],
                        "r1bq1rk1/pp2ppbp/5np1/n7/3P4/2N2N2/"
                        "PP2BPPP/R1BQ1RK1 w - - 2 11"),
+        # PLAN-011 阶段 1-3：iqp 多局面重测 1/6 通过（margin +0.08）——
+        # iqp_holder 自检 FEN 不过（margin -0.2375）不代表全灭，换 stage4
+        # 实战局面补充。该局面 stage4 实扫、过了双计划机制闸。
+        "iqp_stage4": (kb["iqp"]["plans"],
+                       "2r2rk1/1b2qppp/pQ6/1p1pP3/4nPp1/"
+                       "3B4/PPP1N3/1K1R3R w - - 0 21"),
     }
 
     from src.analysis.direction import direction_candidates
