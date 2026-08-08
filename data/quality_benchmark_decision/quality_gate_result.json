@@ -1,0 +1,443 @@
+{
+ "kb_snapshot": {
+  "content_sha256": "3e2e01b256c178cc12b78bbb703cb92422006d848d1767186e59b656bacfd43d",
+  "git_blob_hash": "af86cb199de22b172b144b5b5597c806966152bb",
+  "head_commit": "f3089ca1b6a68ab84d315043a05b085185bde17c"
+ },
+ "timestamp": "2026-08-08 16:09",
+ "per_arch_sampled": 3,
+ "fast_gate": {
+  "a2": {
+   "total": 9,
+   "achieved": 9,
+   "rate_pct": 100.0,
+   "passed": true,
+   "records": [
+    {
+     "archetype": "carlsbad",
+     "plan": "少数派攻击",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "any.opp_isolated_qside": 0,
+      "any.opp_backward": 1
+     },
+     "significant": true,
+     "first_move": "a3",
+     "reason": ""
+    },
+    {
+     "archetype": "carlsbad",
+     "plan": "中心突破",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "e4",
+     "reason": ""
+    },
+    {
+     "archetype": "iqp",
+     "plan": "对孤兵施压",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "opp_isolated_center": 0
+     },
+     "significant": false,
+     "first_move": "Qd3",
+     "reason": ""
+    },
+    {
+     "archetype": "iqp",
+     "plan": "保持孤兵（利用动态潜力）",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "opp_isolated_center": 0,
+      "mover_pawns_past_mid": 0
+     },
+     "significant": false,
+     "first_move": "Re1",
+     "reason": ""
+    },
+    {
+     "archetype": "iqp",
+     "plan": "推进兑掉孤兵",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "d5",
+     "reason": ""
+    },
+    {
+     "archetype": "maroczy",
+     "plan": "王翼进攻",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "Bg5",
+     "reason": ""
+    },
+    {
+     "archetype": "maroczy",
+     "plan": "后翼扩张",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "opp_isolated_qside": 1
+     },
+     "significant": true,
+     "first_move": "Rb1",
+     "reason": ""
+    },
+    {
+     "archetype": "majority",
+     "plan": "多数翼推进",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "passed_diff": 1
+     },
+     "significant": true,
+     "first_move": "Na5",
+     "reason": ""
+    },
+    {
+     "archetype": "majority",
+     "plan": "王翼行动",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 0
+     },
+     "significant": false,
+     "first_move": "h3",
+     "reason": ""
+    }
+   ]
+  },
+  "a3": {
+   "per_situation": {
+    "carlsbad": {
+     "within": [
+      0.0,
+      0.25,
+      0.25,
+      1.375,
+      0.75,
+      1.625
+     ],
+     "within_median": 0.5,
+     "cross": [
+      0.875,
+      0.5,
+      1.375,
+      0.875,
+      0.5,
+      1.375,
+      1.125,
+      0.75,
+      1.125
+     ],
+     "cross_median": 0.875,
+     "passed": true
+    },
+    "hanging": {
+     "within": [
+      1.0,
+      0.75,
+      1.5,
+      2.075,
+      1.2,
+      1.375
+     ],
+     "within_median": 1.2875,
+     "cross": [
+      1.875,
+      0.45,
+      1.325,
+      1.125,
+      0.95,
+      1.325,
+      1.875,
+      0.95,
+      1.575
+     ],
+     "cross_median": 1.325,
+     "passed": true
+    },
+    "stonewall": {
+     "within": [
+      0.75,
+      1.375,
+      1.125,
+      1.5,
+      2.291666666666667,
+      1.9583333333333333
+     ],
+     "within_median": 1.4375,
+     "cross": [
+      2.375,
+      1.375,
+      1.0833333333333333,
+      1.875,
+      1.125,
+      1.8333333333333333,
+      1.5,
+      0.0,
+      1.9583333333333333
+     ],
+     "cross_median": 1.5,
+     "passed": true
+    },
+    "maroczy": {
+     "within": [
+      0.0,
+      0.25,
+      0.25,
+      0.7,
+      0.0,
+      0.7
+     ],
+     "within_median": 0.25,
+     "cross": [
+      0.7,
+      0.0,
+      0.7,
+      0.7,
+      0.0,
+      0.7,
+      0.45,
+      0.25,
+      0.45
+     ],
+     "cross_median": 0.45,
+     "passed": true
+    },
+    "majority": {
+     "within": [
+      1.0,
+      0.375,
+      0.625,
+      1.625,
+      1.2916666666666665,
+      0.8333333333333333
+     ],
+     "within_median": 0.9166666666666666,
+     "cross": [
+      1.75,
+      0.125,
+      0.9583333333333333,
+      1.5,
+      0.875,
+      0.7083333333333333,
+      1.375,
+      0.25,
+      0.5833333333333333
+     ],
+     "cross_median": 0.875,
+     "passed": false
+    },
+    "iqp_holder": {
+     "within": [
+      0.875,
+      1.0,
+      0.125,
+      1.6666666666666665,
+      1.8666666666666667,
+      0.2
+     ],
+     "within_median": 0.9375,
+     "cross": [
+      1.8666666666666667,
+      0.7,
+      0.5,
+      1.7416666666666667,
+      0.575,
+      0.375,
+      1.6166666666666667,
+      0.7,
+      0.5
+     ],
+     "cross_median": 0.7,
+     "passed": false
+    }
+   },
+   "passed": false,
+   "all_within": [
+    0.0,
+    0.25,
+    0.25,
+    1.375,
+    0.75,
+    1.625,
+    1.0,
+    0.75,
+    1.5,
+    2.075,
+    1.2,
+    1.375,
+    0.75,
+    1.375,
+    1.125,
+    1.5,
+    2.291666666666667,
+    1.9583333333333333,
+    0.0,
+    0.25,
+    0.25,
+    0.7,
+    0.0,
+    0.7,
+    1.0,
+    0.375,
+    0.625,
+    1.625,
+    1.2916666666666665,
+    0.8333333333333333,
+    0.875,
+    1.0,
+    0.125,
+    1.6666666666666665,
+    1.8666666666666667,
+    0.2
+   ],
+   "all_cross": [
+    0.875,
+    0.5,
+    1.375,
+    0.875,
+    0.5,
+    1.375,
+    1.125,
+    0.75,
+    1.125,
+    1.875,
+    0.45,
+    1.325,
+    1.125,
+    0.95,
+    1.325,
+    1.875,
+    0.95,
+    1.575,
+    2.375,
+    1.375,
+    1.0833333333333333,
+    1.875,
+    1.125,
+    1.8333333333333333,
+    1.5,
+    0.0,
+    1.9583333333333333,
+    0.7,
+    0.0,
+    0.7,
+    0.7,
+    0.0,
+    0.7,
+    0.45,
+    0.25,
+    0.45,
+    1.75,
+    0.125,
+    0.9583333333333333,
+    1.5,
+    0.875,
+    0.7083333333333333,
+    1.375,
+    0.25,
+    0.5833333333333333,
+    1.8666666666666667,
+    0.7,
+    0.5,
+    1.7416666666666667,
+    0.575,
+    0.375,
+    1.6166666666666667,
+    0.7,
+    0.5
+   ]
+  },
+  "storyboard": [
+   {
+    "archetype": "carlsbad",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r3r3/pp1q1pk1/2p3p1/3p4/1P1P3p/4P1PP/P2Q1PK1/R4R2 w - - 0 21"
+   },
+   {
+    "archetype": "carlsbad",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r4nk1/1p2rppp/2pq4/3pN2b/P2P4/1RQBP3/5PPP/R5K1 w - - 3 21"
+   },
+   {
+    "archetype": "carlsbad",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r4rk1/1p2b1p1/p1n1R2p/qp1p1p1P/3P4/P2Q1NB1/1P3PP1/1B3K1R w - - 1 21"
+   },
+   {
+    "archetype": "hanging",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21"
+   },
+   {
+    "archetype": "hanging",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "2rr2k1/pb2q1pp/1p2pp2/4N3/2PPn3/5B1P/PQ3PP1/2RR2K1 w - - 0 21"
+   },
+   {
+    "archetype": "hanging",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "b1rqrbk1/2p2ppp/pp2pnn1/4N3/2PP4/2NB2QP/PP3PPB/3RR1K1 w - - 20 21"
+   }
+  ],
+  "storyboard_rates": {
+   "carlsbad": {
+    "real_compare": 0,
+    "sampled": 3,
+    "rate_pct": 0.0
+   },
+   "hanging": {
+    "real_compare": 2,
+    "sampled": 3,
+    "rate_pct": 66.7
+   }
+  }
+ }
+}
