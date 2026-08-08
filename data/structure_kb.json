@@ -429,5 +429,64 @@
     "source": "Pachman"
    }
   ]
+ },
+ "benoni": {
+  "cn": "贝诺尼结构",
+  "identify": {
+   "pawn_pattern": "走子方 d5 中心楔 + c4 兵；对方 c5+d6（c 线半开放 + d5 弱格）",
+   "opening_hints": [
+    "Modern Benoni (A60-A79)",
+    "Benko Gambit (A57-A59)"
+   ]
+  },
+  "theory": "白方 d5 楔入黑方阵地形成中心空间优势，c4 固定后翼；黑方 c5+d6 半开放 c 线反击。白方两路：中心 e4-e5 突破扩大楔子、或后翼 b4-b5 扩张压制黑方后翼。黑方寻求 c 线开放 + 后翼多数兵反击。",
+  "axes": {
+   "axis1": "中心突破 vs 后翼扩张（同方两计划）",
+   "axis2": "推进时机（过早 e5 被反压/过早 b4 漏 c 线，typical_mistakes 素材）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "中心突破",
+    "mover_side": "mover",
+    "mechanism": "e4-e5 推进，进一步楔入黑方阵地、打开中心线路，利用 d5 楔子的空间优势转为主动权",
+    "direction": {
+     "pawn_files": [
+      "e"
+     ],
+     "target_zone": "center",
+     "break_squares": [
+      "e5"
+     ]
+    },
+    "structural_goal": {
+     "mover_pawns_past_mid": ">=2"
+    },
+    "cost": "e5 推进后中心兵不再固定，黑方可 …fxe5 或 …dxe5 打开反击线路",
+    "typical_mistakes": "e5 推进缺乏子力支援被黑方兑换后中心反压",
+    "source": "Soltis《Pawn Structure Chess》/ Benko"
+   },
+   {
+    "name": "后翼扩张",
+    "mover_side": "mover",
+    "mechanism": "b4-b5 兵推进（配合 c4），压制黑方后翼、制造 c6/d6 弱格或孤立兵",
+    "direction": {
+     "pawn_files": [
+      "b",
+      "a"
+     ],
+     "target_zone": "queenside",
+     "break_squares": [
+      "b5"
+     ]
+    },
+    "structural_goal": {
+     "opp_isolated_qside": ">=1"
+    },
+    "cost": "后翼兵推进后 a/b 线可能被黑方利用（c 线半开放已给黑反击条件）",
+    "typical_mistakes": "b4 过早推进被黑方 …cxb4 打开后翼反击",
+    "source": "Benko / Pachman"
+   }
+  ]
  }
 }

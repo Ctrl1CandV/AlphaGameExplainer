@@ -167,6 +167,23 @@ def _stonewall_check(board: chess.Board) -> bool:
     return False
 
 
+def _benoni_check(board: chess.Board) -> bool:
+    """Benoni 类：mover d5 中心楔 + c4 兵 + 对方 c5+d6 兵。
+
+    Modern Benoni / Benko Gambit 的核心兵形：白方 d5 楔入黑方阵地、
+    c4 兵固定；黑方 c5+d6 形成半开放 c 线 + 中心弱格 d5。
+    两计划=中心 e4-e5 突破 / 后翼 b4-b5 扩张（Soltis/Benko 文献）。
+
+    判别子：mover d5 + c4（两者缺一不可），对方 c5 + d6。
+    插优先级 maroczy 之后（maroczy 已收紧排除 mover d5 兵的情况），
+    stonewall 之前。
+    """
+    if not (_pawn_on(board, _MOVER, "d5") and _pawn_on(board, _MOVER, "c4")):
+        return False
+    return (_pawn_on(board, _OPPONENT, "c5")
+            and _pawn_on(board, _OPPONENT, "d6"))
+
+
 def _majority_check(board: chess.Board) -> bool:
     """多数兵：mover 在翼侧有兵多数（后翼 a-c 线或王翼 f-h 线
     己方兵数 ≥3 且对方同翼 ≤2），且多数翼至少一兵未过中线（可推进）。
@@ -279,6 +296,8 @@ def detect_pawn_structure(board: chess.Board) -> Tuple[Optional[str], float, dic
             return "hanging", 1.0, features
         if _maroczy_check(b):
             return "maroczy", 1.0, features
+        if _benoni_check(b):
+            return "benoni", 1.0, features
         if _stonewall_check(b):
             return "stonewall", 1.0, features
         if _majority_check(b):
