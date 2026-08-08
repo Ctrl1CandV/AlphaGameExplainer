@@ -618,6 +618,12 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
                     for r in sb.get("routes", [])
                 ],
                 "comparison_axes": sb.get("comparison_axes", {}),
+                # divergences（P8 分歧深度）：storyboard 顶层字段，纯 JSON-able
+                # （pair/depth/paired）。PLAN-011 阶段 0 加——质量门槛脚本需从
+                # sidecar 统计「真比较式率」（routes≥2 & axis_type=1 & 任一 pair
+                # paired=True），此前 divergences 只在 storyboard 内存、没复制
+                # 到 sidecar，门槛拿不到。产品行为零变化（字段已计算好，只是复制）。
+                "divergences": sb.get("divergences", []),
                 "opening_text": getattr(commentary, "opening", ""),
                 "summary_text": getattr(commentary, "summary", ""),
                 "segments": [
