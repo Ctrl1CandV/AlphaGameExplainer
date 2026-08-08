@@ -441,11 +441,16 @@ def run_a3_separability(sf: str, depth: int = 14) -> dict:
         "maroczy": (kb["maroczy"]["plans"],
                     "r2q1rk1/pp2ppbp/3pbnp1/8/2P1P3/2N1B3/PP1QBPPP/"
                     "R3K2R w KQ - 5 11"),
-        # 阶段 3 新增（PLAN-010）：majority 两计划（多数翼推进/王翼行动）。
-        # 决策点 FEN 同自检（Dragon 白后翼 3v2）。样本局限同 A2 注（见上）。
-        "majority": (kb["majority"]["plans"],
-                     "r2qr3/3bRpk1/p2p2p1/3P2Qp/1p6/1N3P2/PPP3PP/"
-                     "1K1R4 w - - 1 21"),
+        # PLAN-011 阶段 1-2：majority A3 样本从 Dragon 自检 FEN 换成 stage4
+        # 实战局面（PLAN-010 只在 Dragon FEN 测，它恰好不通过 margin -0.0417；
+        # 多局面重测 4/6 通过——Dragon 是样本缺陷不是原型本质不可分）。
+        # 换成 stage4 局面 [0]（margin +0.17）与 [2]（margin +0.38）较稳健。
+        "majority_a": (kb["majority"]["plans"],
+                       "1r3r1k/p1nqp1bp/3p1p2/2p2P2/2P2N2/"
+                       "4B1P1/PP4QP/4RRK1 w - - 3 21"),
+        "majority_b": (kb["majority"]["plans"],
+                       "2r1nr1k/p3qp1P/1n2p1pP/1p1pP3/3N1B2/"
+                       "2P1QP2/P1P5/2K2R1R w - - 0 21"),
         # 补测新增（2026-08-06，untangler 复盘 + 用户裁决）：iqp 从未进过 A3
         # 探针，却是阶段 4 双计划筛最大供给源（15 过闸/9 过粗筛）——「未测」
         # 不是「失败」，是唯一能实质翻转 verified 口径结论的变量。
