@@ -41,3 +41,8 @@ tests/**/__pycache__/
 tools/**/__pycache__/
 # 冒烟/回归产物（含真实 API 调用记录）仍然不入库，与第 17 行同一理由
 tools/quality_audit/*result*.json
+
+# PLAN-011 阶段0：质量基线 JSON 入库（否定 *quality_benchmark* 排除）
+# 两分支共享——基线/快照需要可追溯，故不在 test 分支专属段内
+!/data/quality_benchmark_decision/
+!/data/quality_benchmark_decision/**
