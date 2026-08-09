@@ -113,7 +113,8 @@ def _storyboard_compare(board: chess.Board, sf: str) -> dict:
     kb = json.load(open(KB_PATH, encoding="utf-8"))
     arch, _, _ = detect_pawn_structure(board)
     if arch is None or not kb.get(arch, {}).get("in_production", True):
-        return {"archetype": arch, "n_routes": 0, "real_compare": False,
+        return {"archetype": arch, "n_routes": 0, "paired": False,
+                "real_compare": False, "axis_type": None,
                 "reason": "no_archetype_or_not_in_production"}
     plans = kb[arch]["plans"]
     side = applicable_mover_side(board, arch)

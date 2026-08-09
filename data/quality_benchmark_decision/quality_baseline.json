@@ -4,7 +4,7 @@
   "git_blob_hash": "041bfd57fb222b86744e721f3594bd5537fb550d",
   "head_commit": "69e373553b44cd45901d5e862b9a06e7151fa15d"
  },
- "timestamp": "2026-08-09 13:03",
+ "timestamp": "2026-08-09 13:05",
  "per_arch_sampled": 3,
  "fast_gate": {
   "a2": {
@@ -568,6 +568,79 @@
     "real_compare": true,
     "axis_type": 1,
     "fen": "b1rqrbk1/2p2ppp/pp2pnn1/4N3/2PP4/2NB2QP/PP3PPB/3RR1K1 w - - 20 21"
+   },
+   {
+    "archetype": "iqp",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "1r4k1/p3nr1p/2pqp1p1/2Np1b2/3P4/1P2QN2/P4PPP/R3R1K1 w - - 1 21"
+   },
+   {
+    "archetype": "iqp",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "2nr1rk1/pp3pbp/1q2b1p1/8/1PPp2P1/P2P1N1P/1B3PB1/R2QR1K1 w - - 1 21"
+   },
+   {
+    "archetype": "iqp",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "2r1r1k1/3q1ppp/pp3n2/2bP4/P1p2P2/2Nn2P1/3Q1PBP/BR3RK1 w - - 3 21"
+   },
+   {
+    "archetype": "majority",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "1r3r1k/p1nqp1bp/3p1p2/2p2P2/2P2N2/4B1P1/PP4QP/4RRK1 w - - 3 21"
+   },
+   {
+    "archetype": "majority",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "2kr3r/p1q2p2/1p2p1p1/2b1Pn2/2Pp1P1p/P2B1Q1P/2PB2P1/1R3RK1 w - - 0 21"
+   },
+   {
+    "archetype": "majority",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "2r1nr1k/p3qp1P/1n2p1pP/1p1pP3/3N1B2/2P1QP2/P1P5/2K2R1R w - - 0 21"
+   },
+   {
+    "archetype": "maroczy",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "3r1rk1/2q2p1p/3p1bp1/p1nQpP2/1pP1P3/5NN1/PP4PP/2R2RK1 w - - 1 21"
+   },
+   {
+    "archetype": "benoni",
+    "n_routes": 0,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": null,
+    "reason": "no_archetype_or_not_in_production",
+    "fen": "r1q2r2/1n2p1kp/pp1p1pp1/2pP4/2P1P1bP/1P4P1/P2QNPBK/4R1N1 w - - 0 21"
+   },
+   {
+    "archetype": "maroczy",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r2qr1k1/5pb1/3pb2p/2p1pNpP/p1PnP1P1/1P1QB3/P4PB1/R4RK1 w - - 0 21"
    }
   ],
   "storyboard_rates": {
@@ -580,7 +653,246 @@
     "real_compare": 2,
     "sampled": 3,
     "rate_pct": 66.7
+   },
+   "iqp": {
+    "real_compare": 1,
+    "sampled": 3,
+    "rate_pct": 33.3
+   },
+   "majority": {
+    "real_compare": 1,
+    "sampled": 3,
+    "rate_pct": 33.3
+   },
+   "maroczy": {
+    "real_compare": 1,
+    "sampled": 2,
+    "rate_pct": 50.0
+   },
+   "benoni": {
+    "real_compare": 0,
+    "sampled": 1,
+    "rate_pct": 0.0
    }
   }
+ },
+ "slow_gate": {
+  "per_archetype_rates": {
+   "carlsbad": {
+    "sampled": 3,
+    "pipeline_fail": 1,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 33.3,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "hanging": {
+    "sampled": 3,
+    "pipeline_fail": 0,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 0.0,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "iqp": {
+    "sampled": 3,
+    "pipeline_fail": 0,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 0.0,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "majority": {
+    "sampled": 3,
+    "pipeline_fail": 0,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 0.0,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "maroczy": {
+    "sampled": 3,
+    "pipeline_fail": 1,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 33.3,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   }
+  },
+  "positions": [
+   {
+    "fen": "r3r3/pp1q1pk1/2p3p1/3p4/1P1P3p/4P1PP/P2Q1PK1/R4R2 w - - 0 21",
+    "archetype": "carlsbad",
+    "url": "https://lichess.org/bmMKL3we",
+    "status": "pipeline_fail"
+   },
+   {
+    "fen": "r4nk1/1p2rppp/2pq4/3pN2b/P2P4/1RQBP3/5PPP/R5K1 w - - 3 21",
+    "archetype": "carlsbad",
+    "url": "https://lichess.org/3LWgQUMM",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "r4rk1/1p2b1p1/p1n1R2p/qp1p1p1P/3P4/P2Q1NB1/1P3PP1/1B3K1R w - - 1 21",
+    "archetype": "carlsbad",
+    "url": "https://lichess.org/b2dWjnLX",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21",
+    "archetype": "hanging",
+    "url": "https://lichess.org/DEtGOyHm",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2rr2k1/pb2q1pp/1p2pp2/4N3/2PPn3/5B1P/PQ3PP1/2RR2K1 w - - 0 21",
+    "archetype": "hanging",
+    "url": "https://lichess.org/IXGbnsCX",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "b1rqrbk1/2p2ppp/pp2pnn1/4N3/2PP4/2NB2QP/PP3PPB/3RR1K1 w - - 20 21",
+    "archetype": "hanging",
+    "url": "https://lichess.org/HXvk1WGB",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "1r4k1/p3nr1p/2pqp1p1/2Np1b2/3P4/1P2QN2/P4PPP/R3R1K1 w - - 1 21",
+    "archetype": "iqp",
+    "url": "https://lichess.org/9MxWEpnk",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2nr1rk1/pp3pbp/1q2b1p1/8/1PPp2P1/P2P1N1P/1B3PB1/R2QR1K1 w - - 1 21",
+    "archetype": "iqp",
+    "url": "https://lichess.org/xk0tLsGS",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2r1r1k1/3q1ppp/pp3n2/2bP4/P1p2P2/2Nn2P1/3Q1PBP/BR3RK1 w - - 3 21",
+    "archetype": "iqp",
+    "url": "https://lichess.org/S5mdrH5d",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "1r3r1k/p1nqp1bp/3p1p2/2p2P2/2P2N2/4B1P1/PP4QP/4RRK1 w - - 3 21",
+    "archetype": "majority",
+    "url": "https://lichess.org/jMGdydQD",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2kr3r/p1q2p2/1p2p1p1/2b1Pn2/2Pp1P1p/P2B1Q1P/2PB2P1/1R3RK1 w - - 0 21",
+    "archetype": "majority",
+    "url": "https://lichess.org/HOLYoRWL",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2r1nr1k/p3qp1P/1n2p1pP/1p1pP3/3N1B2/2P1QP2/P1P5/2K2R1R w - - 0 21",
+    "archetype": "majority",
+    "url": "https://lichess.org/33BkdR2k",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "3r1rk1/2q2p1p/3p1bp1/p1nQpP2/1pP1P3/5NN1/PP4PP/2R2RK1 w - - 1 21",
+    "archetype": "maroczy",
+    "url": "https://lichess.org/ugTSb0Em",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "r1q2r2/1n2p1kp/pp1p1pp1/2pP4/2P1P1bP/1P4P1/P2QNPBK/4R1N1 w - - 0 21",
+    "archetype": "maroczy",
+    "url": "https://lichess.org/SoToRQAJ",
+    "status": "pipeline_fail"
+   },
+   {
+    "fen": "r2qr1k1/5pb1/3pb2p/2p1pNpP/p1PnP1P1/1P1QB3/P4PB1/R4RK1 w - - 0 21",
+    "archetype": "maroczy",
+    "url": "https://lichess.org/wGihg84o",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   }
+  ]
  }
 }
