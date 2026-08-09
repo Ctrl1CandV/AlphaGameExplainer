@@ -19,7 +19,7 @@
 - **提示词工程深化 / KB知识立体化利用**（**首要主线，ADR-017**）：在上游信息已充分为真的前提下，深化利用KB（json）知识构造提示词——负面约束注入（把套话词表写进prompt禁用清单）+ KB知识按局面立体化组织 + 可选全局润色Pass。无大结构改动，是当前最高ROI优化。
 - **知识库扩容 + 优质范例库**（**必须做，ADR-018**）：扩容 endgame_kb/puzzle_themes，并新建解说范例库锚定「怎么说」的风格（非内容，区别于已废弃ADR-011）。范例经爬取 + 强模型API（Claude Opus 4.8/GPT-5.6）离线生成，非人工手写。
 - **云端 API 并行生成后端**（**首要实施，ADR-019**）：DeepSeek API 为主 + 本地 llama.cpp 兜底（单次调用失败即切本地，带连续失败熔断）。客户端用 OpenAI SDK 指向 OpenAI 兼容端点 `https://api.deepseek.com`（非 /anthropic、非原生 requests），模型id/base_url 经 env 可配置，默认 `deepseek-v4-flash`。**关键约束：HTTP API 无法用 GBNF，Puzzle 采样期 `cnstring` 中文锁定丢失，纯中文/JSON 结构完全落到既有 validator+retry+后处理**，须先冒烟验证通过率再全量接入。方案见 docs/plans/PLAN-002。
-- **Decision 决策管线 / 多战略意图讲解**（**第三条管线，已立项待启动，ADR-020**）：给定中局局面，识别兵形原型→取文献战略计划→`searchmoves` 方向约束产出各计划执行线→反向 MultiPV 验证方向价值→后果投射+代价量化→比较式叙事。与 Endgame/Puzzle 平行，独立失败域。载体从 v1「Puzzle 末端展望」推翻而来。
+- **Decision 决策管线 / 多战略意图讲解**（**第三条管线，ADR-020，生产入口已落地 PLAN-011**）：给定中局局面，识别兵形原型→取文献战略计划→`searchmoves` 方向约束产出各计划执行线→反向 MultiPV 验证方向价值→后果投射+代价量化→比较式叙事。与 Endgame/Puzzle 平行，独立失败域。`python main.py --decision <fen文件>` 出视频，`--decision --text <fen文件>` 只出解说文本（共用 `_decision_core`，SPEC §8 放弃闸两路径一致）。产品池 5 原型（carlsbad/iqp/hanging/maroczy/majority）+ 2 停用（stonewall/benoni，`in_production:false`）。载体从 v1「Puzzle 末端展望」推翻而来。
 - **战略 = 对未来结构类型的偏好**（ADR-020 立场 A）：绕开「战略意图无法从着法唯一恢复」的认识论死结——不恢复心理意图，只判定结构偏好方向，未来结构全部 python-chess 可算。
 - **direction / structural_goal 双字段**（ADR-020 R1）：`direction` 是着法打分谓词（选根着进 searchmoves），`structural_goal` 是结构状态谓词（验「这条线真实现了计划」）。必须拆——真实计划执行序列不是每着同向，用着法方向一致率验线任何真实计划都过不了。
 - **单一事实来源四函数**（ADR-020 R1）：`direction_score` / `structural_features` / `line_features` / `equivalence_gap`。「方向」「等强」「结构特征」三概念全链路唯一定义，禁止各模块各写一套（否则挖矿口径与运行时口径脱节）。
@@ -48,7 +48,7 @@
 - **n_ctx=4096**：本地 llama.cpp 当前默认生成上下文窗口，受 Qwen3.6-27B 4-bit 占满显存后 KV cache 余量所限，可经 `LLAMA_CPP_N_CTX` 覆盖。非硬产品上限；prompt 仍需预算控制。切到 API 后端后此约束不适用于 API 路径（DeepSeek 128k 窗口），仅本地兜底路径受限。
 - **讲解词中文纯净化**：voiceover 禁止英文/数字/坐标/Markdown。已有 `_strip_coordinates` / `_clean_cjk_text` 兜底。
 - **Syzygy 表库覆盖 3-6 子**：超出范围的残局走 Stockfish 求解。
-- **Python 运行环境**：项目用 conda 环境 `explainer`（`C:\Users\11487\.conda\envs\explainer`，2026-08 迁移到本机后适配，PLAN-010 F7/阶段 7 实测确认）。**历史**：迁移前旧机器用环境名 `commentary`（`C:\Users\LiuYiJie\.conda\envs\commentary`），文档旧版曾记该名，已不符。系统默认 `python`（WindowsApps stub）无依赖、无输出，**不能直接 `python` 跑项目代码**。命令行必须用 `"C:\Users\11487\.conda\envs\explainer\python.exe"`、`conda run -n explainer python ...` 或先 `conda activate explainer`。`chess` / `pydub` / `chatTTS` / `pytest` 等依赖仅装在该环境。
+- **Python 运行环境**：项目用 conda 环境 `explainer`（`C:\Users\11487\.conda\envs\explainer`，2026-08 迁移到本机后适配，PLAN-010 F7/阶段 7 实测确认）。**历史**：迁移前旧机器用环境名 `commentary`（`C:\Users\LiuYiJie\.conda\envs\commentary`），文档旧版曾记该名，已不符。系统默认 `python`（WindowsApps stub）无依赖、无输出，**不能直接 `python` 跑项目代码**。命令行必须用 `"C:\Users\11487\.conda\envs\explainer\python.exe"`、`conda run -n explainer python ...` 或先 `conda activate explainer`。`chess` / `pydub` / `chatTTS` / `pytest` 等依赖仅装在该环境。**torch/torchaudio/numpy 版本配对（PLAN-011 阶段4 实测）**：用户级 site-packages（`AppData\Roaming\Python\Python312`）若装了与 conda 环境不同源的 torch/numpy，会**遮蔽** conda 配套版本导致 ABI 不匹配——ChatTTS 经 numba→numpy、dvae→torchaudio 硬依赖，任一错配 TTS 初始化失败、视频链路卡死。正确配对：`torch 2.6.0+cu124` + `torchaudio 2.6.0+cu124` + `numpy 2.4.6`（满足 numba ≤2.4 要求）。2026-08-09 已卸载用户级遮蔽的 torch 2.13.0+cpu / torchvision 0.28.0 / numpy 2.5.1 恢复配对。装包前确认 `import torch; print(torch.__version__, torch.__file__)` 指向 conda 环境（非 AppData\Roaming）。
 
 ## 当前状态
 
@@ -92,27 +92,33 @@
 
 **第三条决策管线立项 + 两轮评审修订**（2026-08-01 立项，2026-08-02 修订，ADR-020 + PLAN-009 + FINDINGS-002）：多战略意图讲解从「Puzzle 末端展望」（v1，废弃）演进为「独立第三条 Decision 管线」（v2）。理论地基：战略 = 对未来结构类型的偏好（可计算/可对比/可前向），正向 searchmoves 方向约束 + 反向 MultiPV 交叉验证。**FINDINGS-002 两轮评审后用户裁决三项重量级修订**：① 输入主源从 Lichess puzzle 库改 **Lichess Elite DB（PGN）**——puzzle 库的入选原理（解题方每步唯一最佳）与 M5「无强制战术」结构性冲突，原 17.7% 测的是 themes 标签而非 M5；② KB schema 拆 `direction`（选根着）/`structural_goal`（验线）——一个字段无法同时承担着法打分与结构状态判定；③ 对比来源扩展为三类轴（两个计划 / 同计划两种执行 / 执行 vs 等待，轴 3 限权只做一句话）。新增两条横切约束：**单一事实来源**（direction_score/structural_features/line_features/equivalence_gap 四函数全链路唯一）+ **颜色归一化**（`board.mirror()`，KB 只写走子方视角）。知识层由两级降一级（失衡轴不做，PGN 源矿脉无限、识别不到直接丢弃）。**动工前三道闸门**：M5 冒烟（半天，验证换源判断）→ P0-lite（纯静态零引擎，谓词召回 ≥90%/识别 ≥70%/候选覆盖实战 top-2 ≥80%）→ P0-full（带引擎，污染检查/结构目标达成/可分离性自校准）。P0 判据已全部**免人工标注化**（用 PGN 实战频率统计替代评审标注）。含最小可行路径（2 原型 + 只做轴 1 + 单月数据 + 只出文本，两周 demo）对冲工程量膨胀。当前状态：**待启动，主线仍是 ADR-017**。
 
-**工具链**：`tools/quality_audit/` 质量审计工具（默认流程已取消 AI 标注，仅生成 + 人工查看）。
+**工具链**：`tools/quality_audit/` 质量审计工具（默认流程已取消 AI 标注，仅生成 + 人工查看）。`tools/decision_probe/`（**仅 test 分支**）：决策管线探针——`p0_full_probe`（A2/A3）、`stage4_dualplan_probe`（双计划筛）、`maroczy_e2e_verify`（端到端）、`quality_gate`（质量门槛两层门，PLAN-011 阶段0）。
+
+**Decision 管线实施进展**（PLAN-009/010/011，2026-08）：
+- **PLAN-009**（阶段 1-9，已完成）：ADR-020 决策管线从立项到可用——M5 冒烟/P0-lite/P0-full 三闸门通过、KB 6 原型落地、引擎确定性根治、机制闸、实战对照段、mover_side 角色闸。
+- **PLAN-010**（已完成）：KB 质量提升——P16 十二维特征向量定稿、direction/structural_goal 双字段、可分离性多局面实测。关键结论：**carlsbad/hanging/maroczy 的 paired/A3 临界是引擎续走趋同的系统性问题**（wholeline spike 实证约束越强越收敛），是 KB 计划/goal 设计属性非执行保真度属性——记 known limitation 不强修。Tier A 措辞（"这一局里他选的是 X"）已在 PLAN-009 阶段9 落地。
+- **PLAN-011**（阶段 0-3 完成 `24efb6d`，阶段 4 收尾中）：交付质量冲刺——质量门槛两层门（快速门确定性/storyboard 真比较式率、慢速门段级缺失率）+ 存量 5 原型质量结论（majority 改善、iqp partial、carlsbad/hanging known limit）+ 新增 Benoni 原型但 A3 全不过判 `in_production:false`（P16 十二维翼盲，诚实证伪产 12 维可表达性缺口报告）+ `--decision` 生产入口（文本/视频双路径，拆分 `_decision_core`）。**阶段 4**：2026-08-09 实测 `python main.py --decision <fen>` 产出完整正片（`output/decision_hanging_75ac1d.mp4` + sidecar，四维达标）；修 TTS 环境冲突（用户级 torch 2.13.0+cpu / numpy 2.5.1 遮蔽 conda 配对版本，见硬约束）；慢速门基线补跑中。
 
 ## 项目结构
 
 按管线单向分层（ADR-016），详细目录读代码为准，不在此复制。核心层：
 - `src/infra/`：`llm_backend.py`(后端抽象+单例+release)、`logger.py`
 - `src/chess_utils/`：material/position/tactic（消除函数级重复）
-- `src/analysis/`：`insight_extractor.py`(棋理事实+_compute_tension)、`endgame_kb.py`、`themes_kb.py`
+- `src/analysis/`：`insight_extractor.py`(棋理事实+_compute_tension)、`endgame_kb.py`、`themes_kb.py`、`structure_id.py`(兵形原型识别)、`structure_features.py`(P16 十二维)、`direction.py`(方向打分)
 - `src/solver/`：`stockfish_analyzer.py`(单线三阶段)、`tablebase.py`(Syzygy)
-- `src/storyboard/`：compressor/`key_move_locator.py`/`endgame_builder.py`(_assign_narrative_role)/puzzle_builder/prelude
-- `src/commentator/`：endgame/puzzle 解说、`generator.py`(主流程)、`validators.py`、`text_filters.py`、`grammar.py`(GBNF)、`json_utils.py`
-- `src/pipeline/`：endgame(5步)/puzzle(4步) 管线；`src/media/`：渲染/TTS/字幕/合成
-- `data/`(endgame_kb/puzzle_themes/commentary_examples/quality_benchmark_phaseN)、`syzygy/`、`tools/`、`main.py`、`docs/`(SPEC/plans/adr)
+- `src/storyboard/`：compressor/`key_move_locator.py`/`endgame_builder.py`(_assign_narrative_role)/puzzle_builder/prelude/`decision_builder.py`(决策比较式叙事)
+- `src/commentator/`：endgame/puzzle/`decision_commentary.py`(决策解说) 、`generator.py`(主流程)、`validators.py`、`text_filters.py`、`grammar.py`(GBNF)、`json_utils.py`
+- `src/pipeline/`：endgame(5步)/puzzle(4步)/decision(识别→引擎→storyboard→解说→TTS→渲染) 三管线；`src/media/`：渲染/TTS/字幕/合成
+- `data/`(`structure_kb.json` 决策知识库 / endgame_kb/puzzle_themes/commentary_examples/`quality_benchmark_decision`/quality_benchmark_phaseN)、`syzygy/`、`tools/`、`main.py`、`docs/`(SPEC/plans/adr)
 
 ## 文档与记忆系统
 
 - 四层文档职责：CLAUDE.md=长期领域语言/架构决策索引/硬约束/当前状态；docs/adr/=决策论证；docs/SPEC.md=行为契约+高层状态（不存详细施工步骤）；docs/plans/PLAN-XXX=详细实施路线与全过程证据。
 - **CLAUDE.md**（本文件）：项目当前状态。每次会话开始先读。
 - **docs/SPEC.md**：行为契约+高层状态。
-- **docs/plans/**：PLAN-001（Phase 3 质量修复，**已作废** 2026-07-21，后继 PLAN-004）、PLAN-002（DeepSeek API 为主本地兜底后端，已完成）、PLAN-003（Phase 4 结构可靠性修复，已完成）、PLAN-004（API 时代解说质量修复与验证闭环，**已完成** 2026-07-22 收口）、PLAN-005（视频生成视听优化，**已完成** 2026-07-27 收口）、PLAN-006（解说节奏与情感表达优化，执行中，待端到端观感验证）、PLAN-007（解说词二次润色，执行中，待切 `ENABLE_POLISH=true`）、PLAN-008（表达层精修与约束松绑，**已完成** 2026-07-28）、PLAN-009（多战略意图讲解第三条决策管线，**已立项待启动** 2026-08-01/02 R1，动工前 M5 冒烟 + P0-lite/full 闸门，非当前主线）。
+- **docs/plans/**：PLAN-001（Phase 3 质量修复，**已作废** 2026-07-21，后继 PLAN-004）、PLAN-002（DeepSeek API 为主本地兜底后端，已完成）、PLAN-003（Phase 4 结构可靠性修复，已完成）、PLAN-004（API 时代解说质量修复与验证闭环，**已完成** 2026-07-22 收口）、PLAN-005（视频生成视听优化，**已完成** 2026-07-27 收口）、PLAN-006（解说节奏与情感表达优化，执行中，待端到端观感验证）、PLAN-007（解说词二次润色，执行中，待切 `ENABLE_POLISH=true`）、PLAN-008（表达层精修与约束松绑，**已完成** 2026-07-28）、PLAN-009（多战略意图讲解第三条决策管线，**已完成** 阶段1-9）、PLAN-010（决策管线阶段9遗留问题修复与KB质量提升，**已完成**）、PLAN-011（决策管线交付质量冲刺与战略储备扩充，阶段0-3完成 `24efb6d`，阶段4收尾中）。
 - **docs/FINDINGS-002**：多战略意图讲解方案评审与遗留问题（P0 双闸门判据 + P1~P23 问题清单），PLAN-009 各阶段动工前逐条回查。
+- **docs/HANDOFF-001/002**：决策管线遗留问题与交付验收交接台账（不进 git，会话间移交用）。
 - **docs/REFACTORING_PLAN.md**：全项目结构重构详细设计方案（ADR-016，已实施）。
 - **docs/Phase2 Review Findings.md**：Phase 2 代码审查发现（4个问题已全部修复）。
 - **docs/adr/ADR-XXX.md**：架构决策完整论证（注意状态字段：已采纳/暂缓/已废弃）。
