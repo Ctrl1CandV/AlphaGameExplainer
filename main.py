@@ -1,4 +1,7 @@
-from src.pipeline import run, run_video, run_puzzle, run_puzzle_video
+from src.pipeline import (
+    run, run_video, run_puzzle, run_puzzle_video,
+    run_decision, run_decision_video,
+)
 from src.common import Logger
 import sys
 import os
@@ -7,10 +10,12 @@ def main():
     """
     默认生成视频，--text仅输出解说文本
     --puzzle切换到Puzzle战术讲解链路
+    --decision切换到多战略意图讲解链路（输入单个 FEN）
     残局模式支持传入文件路径（.fen/.pgn/.txt），或不传参进入交互式输入
     """
     text_mode = "--text" in sys.argv
     puzzle_mode = "--puzzle" in sys.argv
+    decision_mode = "--decision" in sys.argv
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
 
     # Puzzle单题模式
@@ -66,7 +71,14 @@ def main():
         input_text = "\n".join(lines)
 
     try:
-        if text_mode:
+        if decision_mode:
+            # 多战略意图讲解：输入是单个 FEN（决策点局面）。文本模式共用
+            # `_decision_core` 只算内容不出视频；两路径的 SPEC §8 放弃闸一致。
+            if text_mode:
+                run_decision(input_text)
+            else:
+                run_decision_video(input_text)
+        elif text_mode:
             run(input_text)
         else:
             run_video(input_text)

@@ -1,16 +1,16 @@
 {
  "kb_snapshot": {
-  "content_sha256": "3e2e01b256c178cc12b78bbb703cb92422006d848d1767186e59b656bacfd43d",
-  "git_blob_hash": "af86cb199de22b172b144b5b5597c806966152bb",
-  "head_commit": "8ea7114c174315d2b0a005bead53f01cb470e57b"
+  "content_sha256": "e7087f2978608944f32c2951d66e7dbd40453e8340e654358a35eabe1f2ed57d",
+  "git_blob_hash": "bca95e98d56924032b67a3798ec6f42156807606",
+  "head_commit": "2cdcf276f57a85fa54ee116fd9ab9f1949fe562d"
  },
- "timestamp": "2026-08-08 17:18",
+ "timestamp": "2026-08-08 17:29",
  "per_arch_sampled": 3,
  "fast_gate": {
   "a2": {
-   "total": 9,
-   "achieved": 9,
-   "rate_pct": 100.0,
+   "total": 11,
+   "achieved": 10,
+   "rate_pct": 90.9,
    "passed": true,
    "records": [
     {
@@ -131,6 +131,32 @@
      "significant": false,
      "first_move": "h3",
      "reason": ""
+    },
+    {
+     "archetype": "benoni",
+     "plan": "中心突破",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "Re1",
+     "reason": ""
+    },
+    {
+     "archetype": "benoni",
+     "plan": "后翼扩张",
+     "achieved": false,
+     "start_satisfied": false,
+     "satisfied_after_start": false,
+     "progress": {
+      "opp_isolated_qside": 0
+     },
+     "significant": false,
+     "first_move": "a4",
+     "reason": "线内未达成且无显著移动"
     }
    ]
   },
@@ -327,6 +353,30 @@
      ],
      "cross_median": 0.325,
      "passed": false
+    },
+    "benoni": {
+     "within": [
+      0.625,
+      0.5,
+      0.125,
+      1.375,
+      0.75,
+      1.375
+     ],
+     "within_median": 0.6875,
+     "cross": [
+      0.375,
+      1.5,
+      0.875,
+      0.25,
+      1.125,
+      0.5,
+      0.375,
+      1.0,
+      0.375
+     ],
+     "cross_median": 0.5,
+     "passed": false
     }
    },
    "passed": false,
@@ -378,7 +428,13 @@
     0.575,
     0.65,
     0.325,
-    0.575
+    0.575,
+    0.625,
+    0.5,
+    0.125,
+    1.375,
+    0.75,
+    1.375
    ],
    "all_cross": [
     0.875,
@@ -452,7 +508,16 @@
     0.575,
     0.325,
     0.575,
-    0.0
+    0.0,
+    0.375,
+    1.5,
+    0.875,
+    0.25,
+    1.125,
+    0.5,
+    0.375,
+    1.0,
+    0.375
    ]
   },
   "storyboard": [

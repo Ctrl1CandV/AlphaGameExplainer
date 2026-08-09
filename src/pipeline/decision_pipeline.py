@@ -313,10 +313,18 @@ def _screen_actual_move(board: chess.Board, actual: str,
     return san
 
 
-def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
-                           output_dir: Optional[str] = None,
-                           voice_prompt: Optional[str] = None) -> str:
-    """决策管线主入口（8a 线性视频版）。返回输出视频路径。
+def _decision_core(input_fen: str, provenance: Optional[str] = None) -> Optional[dict]:
+    """决策管线**前半段**：识别 → 引擎探索 → storyboard → LLM 解说 → 释放 LLM。
+
+    返回 bundle dict（含 `arch`/`kb`/`board`/`sb`/`by_name`/`commentary`），
+    或 `None`（任一 SPEC §8 放弃点——无原型/不在产品池/无可行计划/解说 aborted）。
+
+    **文本路径（`run_decision --text`）与视频路径（`_run_decision_pipeline`）
+    共用此函数**（PLAN-011 阶段 3）——此前 `_run_decision_pipeline` 是单一耦合
+    函数、无中间出口，文本模式无法复用。拆分点在原「2. 视频组装」注释处（LLM
+    解说完成、`_release_llm` 之后）：前半段是「算内容」（识别/引擎/storyboard/
+    解说，含 SPEC §8 全部放弃闸），后半段是「出视频」（TTS/渲染/合成/sidecar）。
+    拆分是纯函数提取，前半段逐行行为不变。
 
     `provenance`：实战续走**首着**（SAN 或 UCI），经双重校验后才进解说。
     **不是开局名**——传开局名会被当作非法着拒掉，实战对照段静默缺席
@@ -364,7 +372,7 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
     arch, _, _ = detect_pawn_structure(board)
     if arch is None:
         Logger.warn("无法识别兵形原型——按 SPEC §8 放弃（决策管线无回退主体）")
-        return ""
+        return None
 
     # 产品池闸门（08.04）：原型须通过 P0-full A3 可分离性才可出片。
     # 闸门由 KB 的 `in_production` 字段驱动（缺省 True——已验证原型无需标注），
@@ -377,7 +385,7 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
             f"原型 {arch}（{kb[arch].get('cn', '')}）不在产品池——"
             f"{kb[arch].get('in_production_note', '未通过可分离性验证')}"
             "按 SPEC §8 放弃本片生成")
-        return ""
+        return None
     # 只保留**决策点走子方真能执行**的计划（08.04 补，Critical）。
     #
     # KB 的 iqp 条目里 4 条计划分属两种角色：2 条是孤兵持有方的选择
@@ -403,7 +411,7 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
             # 不退化成「讲对手的计划」。
             Logger.warn(f"原型 {arch} 无 mover_side={side} 的计划——"
                         "按 SPEC §8 放弃本片生成")
-            return ""
+            return None
 
     opens = explore_open(board, sf, k=4, depth=14)
     baseline = waiting_baseline(board, sf, depth=12)
@@ -484,7 +492,7 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
     if not sb.get("routes"):
         Logger.warn(f"原型 {arch}（{kb[arch].get('cn', '')}）在本局面无可行计划"
                     "——按 SPEC §8 放弃本片生成")
-        return ""
+        return None
     # 计划线挂回 storyboard（视频渲染用——口播无坐标，画面需着法）。
     #
     # 按**计划名**匹配，不按位置（08.04 修）。`sb["routes"]` 是
@@ -523,7 +531,7 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
     if getattr(commentary, "aborted", False):
         Logger.error(f"解说生成失败（{getattr(commentary, 'aborted_reason', '?')}）"
                      "——按 SPEC §8 放弃本片生成")
-        return ""
+        return None
     # 解说预览（诊断——对照视频字幕核对解说段完整性）
     Logger.info("===== 解说词预览 =====")
     if commentary.opening:
@@ -534,6 +542,35 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
     if commentary.summary:
         Logger.info(f"[总结] {commentary.summary[:60]}...")
     Logger.info(f"===== 解说段数 {len(commentary.segments)} =====")
+
+    # 拆分点（PLAN-011 阶段 3）：前半段「算内容」到此结束，打包返回。
+    # `by_name` 供视频路径挂线 + sidecar A2 轨迹；`board` 供 sidecar 视角锚定。
+    return {"arch": arch, "kb": kb, "board": board, "sb": sb,
+            "by_name": by_name, "commentary": commentary}
+
+
+def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
+                           output_dir: Optional[str] = None,
+                           voice_prompt: Optional[str] = None) -> str:
+    """决策管线视频路径（8a 线性视频版）。返回输出视频路径，放弃时返回 ""。
+
+    前半段（识别→引擎→storyboard→解说）委托 `_decision_core`（与文本路径共用）；
+    本函数是**后半段**：视频组装 → TTS → 多序列渲染 → 字幕合成 → 评审 sidecar。
+    `_decision_core` 返回 None（任一 SPEC §8 放弃点）时本函数返回 ""，行为与
+    拆分前一致。
+    """
+    import json
+    from src.analysis.structure_features import goal_trajectory
+
+    core = _decision_core(input_fen, provenance)
+    if core is None:
+        return ""      # SPEC §8 放弃点已在 _decision_core 内 warn/error
+    arch = core["arch"]
+    kb = core["kb"]
+    board = core["board"]
+    sb = core["sb"]
+    by_name = core["by_name"]
+    commentary = core["commentary"]
 
     # 2. 视频组装
     segments = build_video_segments(sb, commentary)
@@ -680,6 +717,43 @@ def _run_decision_pipeline(input_fen: str, provenance: Optional[str] = None,
         for d in seq_dirs:
             if os.path.isdir(d):
                 shutil.rmtree(d, ignore_errors=True)
+
+
+def run_decision(input_fen: str, provenance: Optional[str] = None) -> None:
+    """输出纯解说文本，对应 `--decision --text`（对齐 puzzle 的 run_puzzle）。
+
+    与视频路径共用 `_decision_core`（PLAN-011 阶段 3）——文本模式只跑到
+    「算完内容」就打印解说，不进 TTS/渲染/合成，省去视频链路的耗时；且因
+    共用 core，SPEC §8 全部放弃闸（无原型/不在产品池/无可行计划/解说 aborted）
+    与视频路径完全一致，不存在「文本能出、视频放弃」这类口径分裂。
+    core 返回 None（任一放弃点）时静默返回，放弃原因已由 core 内 warn/error。
+    """
+    core = _decision_core(input_fen, provenance)
+    if core is None:
+        return
+    commentary = core["commentary"]
+    if commentary.opening:
+        print(commentary.opening + "\n")
+    for seg in getattr(commentary, "segments", []):
+        print(f"[{getattr(seg, 'id', '?')}] "
+              f"{getattr(seg, 'voiceover', '')}\n")
+    if commentary.summary:
+        print(commentary.summary)
+
+
+def run_decision_video(input_fen: str, voice_prompt: str = "",
+                       provenance: Optional[str] = None) -> str:
+    """生成决策讲解视频，对应 `--decision`（默认）。返回视频路径，放弃返回 ""。
+
+    薄封装 `_run_decision_pipeline`（视频后半段）——统一默认输出到 output/，
+    与两条老管线的产出目录对齐；空 `voice_prompt` 归一为 None 交由底层取默认。
+    """
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    output_dir = os.path.join(root, "output")
+    os.makedirs(output_dir, exist_ok=True)
+    return _run_decision_pipeline(input_fen, provenance=provenance,
+                                  output_dir=output_dir,
+                                  voice_prompt=voice_prompt or None)
 
 
 if __name__ == "__main__":
