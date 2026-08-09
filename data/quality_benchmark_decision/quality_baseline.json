@@ -1,0 +1,898 @@
+{
+ "kb_snapshot": {
+  "content_sha256": "4d0e4c3cc5dfaeeda7d6785b3dc0ce9762d5ff8f758ff9e724233eed12f49749",
+  "git_blob_hash": "041bfd57fb222b86744e721f3594bd5537fb550d",
+  "head_commit": "69e373553b44cd45901d5e862b9a06e7151fa15d"
+ },
+ "timestamp": "2026-08-09 13:05",
+ "per_arch_sampled": 3,
+ "fast_gate": {
+  "a2": {
+   "total": 11,
+   "achieved": 10,
+   "rate_pct": 90.9,
+   "passed": true,
+   "records": [
+    {
+     "archetype": "carlsbad",
+     "plan": "少数派攻击",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "any.opp_isolated_qside": 0,
+      "any.opp_backward": 1
+     },
+     "significant": true,
+     "first_move": "a3",
+     "reason": ""
+    },
+    {
+     "archetype": "carlsbad",
+     "plan": "中心突破",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "e4",
+     "reason": ""
+    },
+    {
+     "archetype": "iqp",
+     "plan": "对孤兵施压",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "opp_isolated_center": 0
+     },
+     "significant": false,
+     "first_move": "Qd3",
+     "reason": ""
+    },
+    {
+     "archetype": "iqp",
+     "plan": "保持孤兵（利用动态潜力）",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "opp_isolated_center": 0,
+      "mover_pawns_past_mid": 0
+     },
+     "significant": false,
+     "first_move": "Re1",
+     "reason": ""
+    },
+    {
+     "archetype": "iqp",
+     "plan": "推进兑掉孤兵",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "d5",
+     "reason": ""
+    },
+    {
+     "archetype": "maroczy",
+     "plan": "王翼进攻",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "Bg5",
+     "reason": ""
+    },
+    {
+     "archetype": "maroczy",
+     "plan": "后翼扩张",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "opp_isolated_qside": 1
+     },
+     "significant": true,
+     "first_move": "Rb1",
+     "reason": ""
+    },
+    {
+     "archetype": "majority",
+     "plan": "多数翼推进",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "passed_diff": 1
+     },
+     "significant": true,
+     "first_move": "Na5",
+     "reason": ""
+    },
+    {
+     "archetype": "majority",
+     "plan": "王翼行动",
+     "achieved": true,
+     "start_satisfied": true,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 0
+     },
+     "significant": false,
+     "first_move": "h3",
+     "reason": ""
+    },
+    {
+     "archetype": "benoni",
+     "plan": "中心突破",
+     "achieved": true,
+     "start_satisfied": false,
+     "satisfied_after_start": true,
+     "progress": {
+      "mover_pawns_past_mid": 1
+     },
+     "significant": true,
+     "first_move": "Re1",
+     "reason": ""
+    },
+    {
+     "archetype": "benoni",
+     "plan": "后翼扩张",
+     "achieved": false,
+     "start_satisfied": false,
+     "satisfied_after_start": false,
+     "progress": {
+      "opp_isolated_qside": 0
+     },
+     "significant": false,
+     "first_move": "a4",
+     "reason": "线内未达成且无显著移动"
+    }
+   ]
+  },
+  "a3": {
+   "per_situation": {
+    "carlsbad": {
+     "within": [
+      0.0,
+      0.25,
+      0.25,
+      1.375,
+      0.75,
+      1.625
+     ],
+     "within_median": 0.5,
+     "cross": [
+      0.875,
+      0.5,
+      1.375,
+      0.875,
+      0.5,
+      1.375,
+      1.125,
+      0.75,
+      1.125
+     ],
+     "cross_median": 0.875,
+     "passed": true
+    },
+    "hanging": {
+     "within": [
+      1.0,
+      0.75,
+      1.5,
+      2.075,
+      1.2,
+      1.375
+     ],
+     "within_median": 1.2875,
+     "cross": [
+      1.875,
+      0.45,
+      1.325,
+      1.125,
+      0.95,
+      1.325,
+      1.875,
+      0.95,
+      1.575
+     ],
+     "cross_median": 1.325,
+     "passed": true
+    },
+    "stonewall": {
+     "within": [
+      0.75,
+      1.375,
+      1.125,
+      1.5,
+      2.291666666666667,
+      1.9583333333333333
+     ],
+     "within_median": 1.4375,
+     "cross": [
+      2.375,
+      1.375,
+      1.0833333333333333,
+      1.875,
+      1.125,
+      1.8333333333333333,
+      1.5,
+      0.0,
+      1.9583333333333333
+     ],
+     "cross_median": 1.5,
+     "passed": true
+    },
+    "maroczy": {
+     "within": [
+      0.0,
+      0.25,
+      0.25,
+      0.7,
+      0.0,
+      0.7
+     ],
+     "within_median": 0.25,
+     "cross": [
+      0.7,
+      0.0,
+      0.7,
+      0.7,
+      0.0,
+      0.7,
+      0.45,
+      0.25,
+      0.45
+     ],
+     "cross_median": 0.45,
+     "passed": true
+    },
+    "majority_a": {
+     "within": [
+      0.575,
+      0.9583333333333333,
+      1.2833333333333332,
+      0.325,
+      1.0,
+      1.075
+     ],
+     "within_median": 0.9791666666666666,
+     "cross": [
+      1.075,
+      0.75,
+      0.325,
+      0.75,
+      0.825,
+      0.25,
+      1.7833333333333332,
+      1.7083333333333333,
+      1.0333333333333332
+     ],
+     "cross_median": 0.825,
+     "passed": false
+    },
+    "majority_b": {
+     "within": [
+      0.625,
+      0.7,
+      0.575,
+      1.6583333333333332,
+      1.6583333333333332,
+      0.75
+     ],
+     "within_median": 0.725,
+     "cross": [
+      1.1583333333333332,
+      0.5,
+      0.75,
+      1.2833333333333332,
+      1.125,
+      1.125,
+      0.7083333333333333,
+      1.2,
+      0.95
+     ],
+     "cross_median": 1.125,
+     "passed": true
+    },
+    "iqp_holder": {
+     "within": [
+      0.875,
+      1.0,
+      0.125,
+      1.6666666666666665,
+      1.8666666666666667,
+      0.2
+     ],
+     "within_median": 0.9375,
+     "cross": [
+      1.8666666666666667,
+      0.7,
+      0.5,
+      1.7416666666666667,
+      0.575,
+      0.375,
+      1.6166666666666667,
+      0.7,
+      0.5
+     ],
+     "cross_median": 0.7,
+     "passed": false
+    },
+    "iqp_stage4": {
+     "within": [
+      0.25,
+      0.325,
+      0.575,
+      0.65,
+      0.325,
+      0.575
+     ],
+     "within_median": 0.44999999999999996,
+     "cross": [
+      0.0,
+      0.65,
+      0.325,
+      0.25,
+      0.9,
+      0.575,
+      0.325,
+      0.575,
+      0.0
+     ],
+     "cross_median": 0.325,
+     "passed": false
+    },
+    "benoni": {
+     "within": [
+      0.625,
+      0.5,
+      0.125,
+      1.375,
+      0.75,
+      1.375
+     ],
+     "within_median": 0.6875,
+     "cross": [
+      0.375,
+      1.5,
+      0.875,
+      0.25,
+      1.125,
+      0.5,
+      0.375,
+      1.0,
+      0.375
+     ],
+     "cross_median": 0.5,
+     "passed": false
+    }
+   },
+   "passed": false,
+   "all_within": [
+    0.0,
+    0.25,
+    0.25,
+    1.375,
+    0.75,
+    1.625,
+    1.0,
+    0.75,
+    1.5,
+    2.075,
+    1.2,
+    1.375,
+    0.75,
+    1.375,
+    1.125,
+    1.5,
+    2.291666666666667,
+    1.9583333333333333,
+    0.0,
+    0.25,
+    0.25,
+    0.7,
+    0.0,
+    0.7,
+    0.575,
+    0.9583333333333333,
+    1.2833333333333332,
+    0.325,
+    1.0,
+    1.075,
+    0.625,
+    0.7,
+    0.575,
+    1.6583333333333332,
+    1.6583333333333332,
+    0.75,
+    0.875,
+    1.0,
+    0.125,
+    1.6666666666666665,
+    1.8666666666666667,
+    0.2,
+    0.25,
+    0.325,
+    0.575,
+    0.65,
+    0.325,
+    0.575,
+    0.625,
+    0.5,
+    0.125,
+    1.375,
+    0.75,
+    1.375
+   ],
+   "all_cross": [
+    0.875,
+    0.5,
+    1.375,
+    0.875,
+    0.5,
+    1.375,
+    1.125,
+    0.75,
+    1.125,
+    1.875,
+    0.45,
+    1.325,
+    1.125,
+    0.95,
+    1.325,
+    1.875,
+    0.95,
+    1.575,
+    2.375,
+    1.375,
+    1.0833333333333333,
+    1.875,
+    1.125,
+    1.8333333333333333,
+    1.5,
+    0.0,
+    1.9583333333333333,
+    0.7,
+    0.0,
+    0.7,
+    0.7,
+    0.0,
+    0.7,
+    0.45,
+    0.25,
+    0.45,
+    1.075,
+    0.75,
+    0.325,
+    0.75,
+    0.825,
+    0.25,
+    1.7833333333333332,
+    1.7083333333333333,
+    1.0333333333333332,
+    1.1583333333333332,
+    0.5,
+    0.75,
+    1.2833333333333332,
+    1.125,
+    1.125,
+    0.7083333333333333,
+    1.2,
+    0.95,
+    1.8666666666666667,
+    0.7,
+    0.5,
+    1.7416666666666667,
+    0.575,
+    0.375,
+    1.6166666666666667,
+    0.7,
+    0.5,
+    0.0,
+    0.65,
+    0.325,
+    0.25,
+    0.9,
+    0.575,
+    0.325,
+    0.575,
+    0.0,
+    0.375,
+    1.5,
+    0.875,
+    0.25,
+    1.125,
+    0.5,
+    0.375,
+    1.0,
+    0.375
+   ]
+  },
+  "storyboard": [
+   {
+    "archetype": "carlsbad",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r3r3/pp1q1pk1/2p3p1/3p4/1P1P3p/4P1PP/P2Q1PK1/R4R2 w - - 0 21"
+   },
+   {
+    "archetype": "carlsbad",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r4nk1/1p2rppp/2pq4/3pN2b/P2P4/1RQBP3/5PPP/R5K1 w - - 3 21"
+   },
+   {
+    "archetype": "carlsbad",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r4rk1/1p2b1p1/p1n1R2p/qp1p1p1P/3P4/P2Q1NB1/1P3PP1/1B3K1R w - - 1 21"
+   },
+   {
+    "archetype": "hanging",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21"
+   },
+   {
+    "archetype": "hanging",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "2rr2k1/pb2q1pp/1p2pp2/4N3/2PPn3/5B1P/PQ3PP1/2RR2K1 w - - 0 21"
+   },
+   {
+    "archetype": "hanging",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "b1rqrbk1/2p2ppp/pp2pnn1/4N3/2PP4/2NB2QP/PP3PPB/3RR1K1 w - - 20 21"
+   },
+   {
+    "archetype": "iqp",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "1r4k1/p3nr1p/2pqp1p1/2Np1b2/3P4/1P2QN2/P4PPP/R3R1K1 w - - 1 21"
+   },
+   {
+    "archetype": "iqp",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "2nr1rk1/pp3pbp/1q2b1p1/8/1PPp2P1/P2P1N1P/1B3PB1/R2QR1K1 w - - 1 21"
+   },
+   {
+    "archetype": "iqp",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "2r1r1k1/3q1ppp/pp3n2/2bP4/P1p2P2/2Nn2P1/3Q1PBP/BR3RK1 w - - 3 21"
+   },
+   {
+    "archetype": "majority",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "1r3r1k/p1nqp1bp/3p1p2/2p2P2/2P2N2/4B1P1/PP4QP/4RRK1 w - - 3 21"
+   },
+   {
+    "archetype": "majority",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "2kr3r/p1q2p2/1p2p1p1/2b1Pn2/2Pp1P1p/P2B1Q1P/2PB2P1/1R3RK1 w - - 0 21"
+   },
+   {
+    "archetype": "majority",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "2r1nr1k/p3qp1P/1n2p1pP/1p1pP3/3N1B2/2P1QP2/P1P5/2K2R1R w - - 0 21"
+   },
+   {
+    "archetype": "maroczy",
+    "n_routes": 2,
+    "paired": true,
+    "real_compare": true,
+    "axis_type": 1,
+    "fen": "3r1rk1/2q2p1p/3p1bp1/p1nQpP2/1pP1P3/5NN1/PP4PP/2R2RK1 w - - 1 21"
+   },
+   {
+    "archetype": "benoni",
+    "n_routes": 0,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": null,
+    "reason": "no_archetype_or_not_in_production",
+    "fen": "r1q2r2/1n2p1kp/pp1p1pp1/2pP4/2P1P1bP/1P4P1/P2QNPBK/4R1N1 w - - 0 21"
+   },
+   {
+    "archetype": "maroczy",
+    "n_routes": 2,
+    "paired": false,
+    "real_compare": false,
+    "axis_type": 1,
+    "fen": "r2qr1k1/5pb1/3pb2p/2p1pNpP/p1PnP1P1/1P1QB3/P4PB1/R4RK1 w - - 0 21"
+   }
+  ],
+  "storyboard_rates": {
+   "carlsbad": {
+    "real_compare": 0,
+    "sampled": 3,
+    "rate_pct": 0.0
+   },
+   "hanging": {
+    "real_compare": 2,
+    "sampled": 3,
+    "rate_pct": 66.7
+   },
+   "iqp": {
+    "real_compare": 1,
+    "sampled": 3,
+    "rate_pct": 33.3
+   },
+   "majority": {
+    "real_compare": 1,
+    "sampled": 3,
+    "rate_pct": 33.3
+   },
+   "maroczy": {
+    "real_compare": 1,
+    "sampled": 2,
+    "rate_pct": 50.0
+   },
+   "benoni": {
+    "real_compare": 0,
+    "sampled": 1,
+    "rate_pct": 0.0
+   }
+  }
+ },
+ "slow_gate": {
+  "per_archetype_rates": {
+   "carlsbad": {
+    "sampled": 3,
+    "pipeline_fail": 1,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 33.3,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "hanging": {
+    "sampled": 3,
+    "pipeline_fail": 0,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 0.0,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "iqp": {
+    "sampled": 3,
+    "pipeline_fail": 0,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 0.0,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "majority": {
+    "sampled": 3,
+    "pipeline_fail": 0,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 0.0,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   },
+   "maroczy": {
+    "sampled": 3,
+    "pipeline_fail": 1,
+    "crash": 0,
+    "position_with_missing": 0,
+    "pipeline_fail_rate": 33.3,
+    "crash_rate": 0.0,
+    "missing_rate": 0.0
+   }
+  },
+  "positions": [
+   {
+    "fen": "r3r3/pp1q1pk1/2p3p1/3p4/1P1P3p/4P1PP/P2Q1PK1/R4R2 w - - 0 21",
+    "archetype": "carlsbad",
+    "url": "https://lichess.org/bmMKL3we",
+    "status": "pipeline_fail"
+   },
+   {
+    "fen": "r4nk1/1p2rppp/2pq4/3pN2b/P2P4/1RQBP3/5PPP/R5K1 w - - 3 21",
+    "archetype": "carlsbad",
+    "url": "https://lichess.org/3LWgQUMM",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "r4rk1/1p2b1p1/p1n1R2p/qp1p1p1P/3P4/P2Q1NB1/1P3PP1/1B3K1R w - - 1 21",
+    "archetype": "carlsbad",
+    "url": "https://lichess.org/b2dWjnLX",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21",
+    "archetype": "hanging",
+    "url": "https://lichess.org/DEtGOyHm",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2rr2k1/pb2q1pp/1p2pp2/4N3/2PPn3/5B1P/PQ3PP1/2RR2K1 w - - 0 21",
+    "archetype": "hanging",
+    "url": "https://lichess.org/IXGbnsCX",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "b1rqrbk1/2p2ppp/pp2pnn1/4N3/2PP4/2NB2QP/PP3PPB/3RR1K1 w - - 20 21",
+    "archetype": "hanging",
+    "url": "https://lichess.org/HXvk1WGB",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "1r4k1/p3nr1p/2pqp1p1/2Np1b2/3P4/1P2QN2/P4PPP/R3R1K1 w - - 1 21",
+    "archetype": "iqp",
+    "url": "https://lichess.org/9MxWEpnk",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2nr1rk1/pp3pbp/1q2b1p1/8/1PPp2P1/P2P1N1P/1B3PB1/R2QR1K1 w - - 1 21",
+    "archetype": "iqp",
+    "url": "https://lichess.org/xk0tLsGS",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2r1r1k1/3q1ppp/pp3n2/2bP4/P1p2P2/2Nn2P1/3Q1PBP/BR3RK1 w - - 3 21",
+    "archetype": "iqp",
+    "url": "https://lichess.org/S5mdrH5d",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "1r3r1k/p1nqp1bp/3p1p2/2p2P2/2P2N2/4B1P1/PP4QP/4RRK1 w - - 3 21",
+    "archetype": "majority",
+    "url": "https://lichess.org/jMGdydQD",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2kr3r/p1q2p2/1p2p1p1/2b1Pn2/2Pp1P1p/P2B1Q1P/2PB2P1/1R3RK1 w - - 0 21",
+    "archetype": "majority",
+    "url": "https://lichess.org/HOLYoRWL",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "2r1nr1k/p3qp1P/1n2p1pP/1p1pP3/3N1B2/2P1QP2/P1P5/2K2R1R w - - 0 21",
+    "archetype": "majority",
+    "url": "https://lichess.org/33BkdR2k",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "3r1rk1/2q2p1p/3p1bp1/p1nQpP2/1pP1P3/5NN1/PP4PP/2R2RK1 w - - 1 21",
+    "archetype": "maroczy",
+    "url": "https://lichess.org/ugTSb0Em",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   },
+   {
+    "fen": "r1q2r2/1n2p1kp/pp1p1pp1/2pP4/2P1P1bP/1P4P1/P2QNPBK/4R1N1 w - - 0 21",
+    "archetype": "maroczy",
+    "url": "https://lichess.org/SoToRQAJ",
+    "status": "pipeline_fail"
+   },
+   {
+    "fen": "r2qr1k1/5pb1/3pb2p/2p1pNpP/p1PnP1P1/1P1QB3/P4PB1/R4RK1 w - - 0 21",
+    "archetype": "maroczy",
+    "url": "https://lichess.org/wGihg84o",
+    "status": "ok",
+    "n_routes": 2,
+    "goal_ok": [
+     true,
+     true
+    ],
+    "missing_plan_segs": []
+   }
+  ]
+ }
+}
