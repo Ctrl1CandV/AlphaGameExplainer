@@ -1,0 +1,67 @@
+{
+  "_说明": "PLAN-011 收口后的交差演示片单。从 stage4_dualplan_result.json 的 40 个双计划局面里，按 storyboard 层 paired=true（真比较式，两条线真分岔）优先、equiv=true 且 dist 大次之的原则筛选，覆盖产品池 5 原型。carlsbad 因引擎续走趋同（known limitation）无 paired=true 局面，取 dist 最大的 equiv-fallback。每个条目的 pick_reason 记录入选理由。",
+  "generated": "2026-08-09",
+  "selection_rule": "storyboard paired=true 优先；无则 equiv=true 且 max_pair_distance 最大者",
+  "playlist": [
+    {
+      "archetype": "carlsbad",
+      "plans": ["少数派攻击", "中心突破"],
+      "fen": "r3r3/pp1q1pk1/2p3p1/3p4/1P1P3p/4P1PP/P2Q1PK1/R4R2 w - - 0 21",
+      "url": "https://lichess.org/bmMKL3we",
+      "storyboard_paired": false,
+      "equiv": true,
+      "dist": 1.125,
+      "pick_reason": "carlsbad 已知限制（3/3 paired=false 引擎续走趋同），取 dist 最大 equiv-fallback 作代表——少数派攻击 vs 中心突破是 carlsbad 最经典的教学对"
+    },
+    {
+      "archetype": "hanging",
+      "plans": ["推进悬兵", "保持悬兵（利用动态潜力）"],
+      "fen": "2r1r1k1/pp2bppp/1nnp4/5q2/2PP4/1Q3NBP/P2N1PP1/1R2R1K1 w - - 1 21",
+      "url": "https://lichess.org/DEtGOyHm",
+      "storyboard_paired": true,
+      "equiv": false,
+      "dist": 0.75,
+      "pick_reason": "paired=true 真比较式，已跑过正片四维评审全达标（PLAN-011 阶段4），作为 hanging 主力演示"
+    },
+    {
+      "archetype": "iqp",
+      "plans": ["对孤兵施压", "推进消除孤兵"],
+      "fen": "r3r1k1/p2b1pp1/1p5p/3p2q1/P1nP4/2PB2BP/2Q2PP1/R3R1K1 w - - 9 21",
+      "url": "https://lichess.org/fsd5pNpl",
+      "storyboard_paired": true,
+      "equiv": true,
+      "dist": 1.625,
+      "pick_reason": "paired=true + equiv=true + dist 最大（1.625），iqp 最优候选；教学对=施压 vs 消除"
+    },
+    {
+      "archetype": "iqp",
+      "plans": ["保持孤兵（利用动态潜力）", "推进兑掉孤兵"],
+      "fen": "r1r3k1/n3b1pp/1q2pn2/p2p4/1p1P1P2/1P2N1P1/PB1Qb1BP/R3R1K1 w - - 0 21",
+      "url": "https://lichess.org/0MtosU8f",
+      "storyboard_paired": true,
+      "equiv": true,
+      "dist": 1.583,
+      "pick_reason": "paired=true，且计划对不同于上一条（保持 vs 兑掉），展示 iqp 的另一教学面（动态潜力派）"
+    },
+    {
+      "archetype": "majority",
+      "plans": ["多数翼推进", "王翼行动"],
+      "fen": "r1r3k1/2qbbppp/3pp3/6P1/1p2P3/p3BPP1/PPPQ4/1K1R1B1R w - - 0 21",
+      "url": "https://lichess.org/Y8PFoDIs",
+      "storyboard_paired": true,
+      "equiv": true,
+      "dist": 0.5,
+      "pick_reason": "paired=true + equiv=true，majority 主力演示"
+    },
+    {
+      "archetype": "maroczy",
+      "plans": ["王翼进攻", "后翼扩张"],
+      "fen": "r3r1k1/1p3ppp/n1pp4/3Pp3/1PP1P3/P1N3Pq/5P1P/R2Q1RK1 w - - 2 21",
+      "url": "https://lichess.org/wwRmlPCQ",
+      "storyboard_paired": true,
+      "equiv": true,
+      "dist": 1.575,
+      "pick_reason": "paired=true + equiv=true + dist 最大（1.575），maroczy 最优候选；王翼进攻 vs 后翼扩张是 Maroczy Bind 的经典教学对"
+    }
+  ]
+}
