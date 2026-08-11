@@ -56,12 +56,12 @@
     {
       "archetype": "maroczy",
       "plans": ["王翼进攻", "后翼扩张"],
-      "fen": "r3r1k1/1p3ppp/n1pp4/3Pp3/1PP1P3/P1N3Pq/5P1P/R2Q1RK1 w - - 2 21",
-      "url": "https://lichess.org/wwRmlPCQ",
+      "fen": "3r1rk1/2q2p1p/3p1bp1/p1nQpP2/1pP1P3/5NN1/PP4PP/2R2RK1 w - - 1 21",
+      "url": "https://lichess.org/ugTSb0Em",
       "storyboard_paired": true,
       "equiv": true,
-      "dist": 1.575,
-      "pick_reason": "paired=true + equiv=true + dist 最大（1.575），maroczy 最优候选；王翼进攻 vs 后翼扩张是 Maroczy Bind 的经典教学对"
+      "dist": 0.708,
+      "pick_reason": "完整管线确认识别为 maroczy（wwRmlPCQ 在收紧判据后被识别为 majority，故换 ugTSb0Em）；王翼进攻 vs 后翼扩张是 Maroczy Bind 的经典教学对"
     }
   ]
 }
