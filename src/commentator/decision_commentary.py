@@ -155,6 +155,42 @@ def _tradeoffs_cn(tm: dict) -> str:
     return "、".join(parts) if parts else "无明显代价"
 
 
+def _strip_fact_numbers(fact: str) -> str:
+    """剥离独有事实尾部的结构特征数值（「（0.75 vs 0.5）」）。
+
+    unique_facts 形如「XX末端YY显著（0.75 vs 0.5）」——括号里的小数对比值
+    是程序判定「显著」用的结构特征值，对观众无任何意义（不是步数、不是子力
+    价值），照念会让解说冒出「零点七五对零点五」这类让人一头雾水的数字
+    （08.11 用户实测反馈）。LLM 原样照抄 prompt 里给的数值。
+
+    校验侧零风险：`_kw_matches` 按区域词（后翼/中心）+主体词（孤立兵/开放线）
+    匹配，从不匹配数值部分——剥掉括号后「XX末端YY显著」照样能命中校验。
+
+    只剥小数对比括号，不动「兵着承诺 4 步」这类有意义整数（观众能理解步数）。
+    """
+    import re
+    # 「（0.75 vs 0.5）」「(0.2 vs 0.0)」——含小数点的对比括号整体剥掉
+    return re.sub(r"[（(]\s*\d+\.\d+\s*vs\s*\d+\.\d+\s*[)）]", "", fact).strip()
+
+
+def _baseline_cn(baseline) -> str:
+    """反事实基线数值 → 中文紧迫性程度词（开场段注入用）。
+
+    baseline 是引擎 eval 的 cp 整数（如 96、-20），开场段把「基线评估为
+    {baseline}」照直注入，LLM 念成「基线评估为九十六」（08.11 用户实测反馈：
+    一头雾水）。对观众有意义的是「这个局面差到什么程度」，不是数值本身。
+    转成三档中文程度词：明显不利 / 相当差 / 略处下风（|cp|≥100/50/<50）。
+    """
+    if baseline is None:
+        return "相当被动"
+    v = abs(int(baseline))
+    if v >= 100:
+        return "明显不利"
+    if v >= 50:
+        return "相当被动"
+    return "略处下风"
+
+
 def _match_provenance_plan(board, storyboard: dict,
                            provenance_san: Optional[str]) -> Optional[str]:
     """实战续着（SAN）映射到计划名（Tier A——P12 措辞降级用）。
@@ -235,8 +271,9 @@ def build_header(storyboard: dict) -> str:
         # 调 safe_puzzle_seed_text 同一策略）：模型看到的就是可播的中文，
         # 不必依赖它「记得别抄坐标」，也不必靠后处理补救。
         f"【战略前提】{safe_decision_seed_text(dp.get('strategic_premise', ''))}",
-        f"【反事实基线】若不做任何战略推进（等待），局面基线评估为 "
-        f"{dp.get('baseline')}——这是紧迫性的度量，只在开场用一句话铺垫。",
+        f"【反事实基线】若不做任何战略推进（等待），局面会"
+        f"{_baseline_cn(dp.get('baseline'))}——这是紧迫性的度量，"
+        "只在开场用一句话铺垫（说程度，不报数值）。",
     ]
     return "\n".join(parts)
 
@@ -261,7 +298,10 @@ def _plan_prompt_text(node: dict, is_first: bool) -> str:
     facts = node.get("unique_facts", [])
     if facts:
         lines.append("独有结构事实（必须讲出至少一条，且只能讲这些程序给出的事实）：")
-        lines.extend(f"  - {f}" for f in facts)
+        # 注入前剥离结构特征数值（「（0.75 vs 0.5）」）——观众听不懂小数
+        # 对比，LLM 会照念成「零点七五对零点五」（08.11 实测）。校验
+        # `_kw_matches` 只按区域词+主体词匹配，剥数值不影响命中。
+        lines.extend(f"  - {_strip_fact_numbers(f)}" for f in facts)
     return "\n".join(lines)
 
 
@@ -288,7 +328,8 @@ def build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
             parts.append(
                 "【开场】局面概览：先诊断局面类型与核心矛盾（战略前提），"
                 f"{choice_line}，"
-                f"最后用一句话铺垫反事实紧迫性（基线 {node.get('baseline')}）。")
+                f"最后用一句话铺垫反事实紧迫性（{ _baseline_cn(node.get('baseline'))}，"
+                "只说程度不报数值）。")
         elif ntype == "plan":
             parts.append(_plan_prompt_text(node, is_first=node.get("idx") == 0))
         elif ntype == "compare":
