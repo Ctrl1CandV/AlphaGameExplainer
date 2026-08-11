@@ -107,17 +107,26 @@ def build_video_segments(
 ) -> List[Segment]:
     """决策解说 → 视频 segments（叙事单元 → Segment）。
 
-    开场/对比/总结段 moves 空（静态画面）；计划段 moves = 计划线前
-    LINE_DISPLAY_PLY 着（从决策点出发——画面演示，口播无坐标）。
+    计划段 moves = 计划线前 LINE_DISPLAY_PLY 着（从决策点出发——画面演示，
+    口播无坐标）。对比段复用第一条计划的前几步（让对比讲解时画面仍在走子，
+    而非完全静止——08.11 用户实测反馈「讲解和落子完全没联动」）。
+
+    全段 pacing=slow + emphasis=pivotal：教学解说需从容，ChatTTS [speed_3]
+    比默认 [speed_5] 慢约 40%（08.11 用户实测反馈「语速过快」）。decision 段
+    不复用 endgame/puzzle 的 emphasis 分档，统一 pivotal 取最慢档。
     """
     routes = decision_storyboard.get("routes", [])
     segs: List[Segment] = []
+    # decision 段统一慢速教学档（slow + pivotal → ChatTTS speed=3）
+    _TEACH_PACING = "slow"
+    _TEACH_EMPHASIS = "pivotal"
 
     # 开场（决策点静态画面）
     segs.append(Segment(
         move_idx=0, text=getattr(commentary, "opening", "") or
         "这个局面存在多条可行的战略路线。",
-        moves=[], phase="decision"))
+        moves=[], phase="decision",
+        pacing=_TEACH_PACING, emphasis_level=_TEACH_EMPHASIS))
 
     # 计划段（各自从决策点渲染）
     for i, route in enumerate(routes):
@@ -130,9 +139,10 @@ def build_video_segments(
                 break
         segs.append(Segment(
             move_idx=i + 1, text=text or f"方案：{route.get('name', '?')}",
-            moves=moves, phase=route.get("name", "plan")))
+            moves=moves, phase=route.get("name", "plan"),
+            pacing=_TEACH_PACING, emphasis_level=_TEACH_EMPHASIS))
 
-    # 对比段（停在计划末局面）。**只有两条以上计划才有对比段**——
+    # 对比段。**只有两条以上计划才有对比段**——
     # 必须与 `decision_commentary._build_decision_nodes` 的 `if len(routes) >= 2`
     # 同条件（08.04 修）。此前本处无条件取 id = len(routes)+1，而单线退化时
     # （可行计划 1 个，P11 允许且算成功产出）解说节点只有
@@ -140,6 +150,12 @@ def build_video_segments(
     # 的 id。于是总结文本被当成对比段取走，紧接着又被总结段取一次，成片里
     # 同一段话连播两遍（实测 majority 局面：段2 与总结相似度 0.991）。
     # 节点结构是解说侧定义的，视频侧不能自己推算 id——条件必须两处一致。
+    #
+    # 对比段 moves 保持空（归入末序列静态定格）。08.11 曾尝试给对比段复用
+    # 第一条计划走法以增强联动，但 `_split_sequences` 用 moves 非空识别序列
+    # 起点，带 moves 的对比段会被误切为独立序列、从上一段末局面续推导致
+    # 非法着法崩溃——故回退。对比讲解的画面联动改由计划段已渲染的走法
+    # 定格承载（观众刚看完甲乙两路走法，对比段定格在分岔态势上）。
     if len(routes) >= 2:
         cmp_text = ""
         for seg in getattr(commentary, "segments", []):
@@ -148,12 +164,14 @@ def build_video_segments(
                 break
         segs.append(Segment(
             move_idx=len(routes) + 1, text=cmp_text, moves=[],
-            phase="compare"))
+            phase="compare",
+            pacing=_TEACH_PACING, emphasis_level=_TEACH_EMPHASIS))
 
     # 总结段
     summary = getattr(commentary, "summary", "") or ""
     segs.append(Segment(move_idx=len(segs), text=summary, moves=[],
-                        phase="summary"))
+                        phase="summary",
+                        pacing=_TEACH_PACING, emphasis_level=_TEACH_EMPHASIS))
     return segs
 
 
