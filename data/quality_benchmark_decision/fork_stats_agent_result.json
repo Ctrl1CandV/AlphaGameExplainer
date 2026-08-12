@@ -1,0 +1,52 @@
+{
+ "total": 225,
+ "m5_forcing": 18,
+ "m5_quiet": 207,
+ "m6_balanced": 204,
+ "m5_quiet_and_m6": 186,
+ "fork_stats": {
+  "equiv_diff_zone_total": 164,
+  "pct_of_all": 72.9,
+  "pct_of_quiet": 74.4,
+  "pct_of_quiet_m6": 73.7,
+  "note": "指标正名：等强异 zone 首着对占比——真战略分岔的代理下界。zone 三桶粒度粗，出子次序假阳性 + 同zone真分歧假阴性。阶段1.6 人工抽检校准。"
+ },
+ "axis4_k2_material": {
+  "has_k2_total": 161,
+  "pct_of_all": 71.6,
+  "has_k2_quiet": 161,
+  "pct_of_quiet": 77.8
+ },
+ "gap_distribution_top1_top2": {
+  "≤30": 143,
+  "≤60": 41,
+  ">300": 9,
+  "≤150": 15,
+  "≤80": 8,
+  "≤300": 9
+ },
+ "zone_pair_distribution_top1_top2": {
+  "queenside-queenside": 32,
+  "center-kingside": 57,
+  "center-center": 29,
+  "center-queenside": 43,
+  "kingside-kingside": 26,
+  "kingside-queenside": 38
+ },
+ "gap_median": 21,
+ "kb_constrained": {},
+ "run_config": {
+  "pgn": "lichess_elite_2025-11.pgn",
+  "max_games": 250,
+  "k": 3,
+  "depth": 10,
+  "kb_analysis": false,
+  "resumed_records": 0
+ },
+ "kb_snapshot": {
+  "git_blob_hash": "041bfd57fb222b86744e721f3594bd5537fb550d",
+  "content_sha256": "4d0e4c3cc5dfaeeda7d6785b3dc0ce9762d5ff8f758ff9e724233eed12f49749",
+  "head_commit": "460ceee576d790db3334641f1b4d0635f18ecce5"
+ },
+ "elapsed_s": 76.2
+}

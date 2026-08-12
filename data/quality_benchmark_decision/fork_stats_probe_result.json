@@ -1,0 +1,63 @@
+{
+ "total": 352,
+ "m5_forcing": 35,
+ "m5_quiet": 317,
+ "m6_balanced": 308,
+ "m5_quiet_and_m6": 279,
+ "fork_stats": {
+  "equiv_diff_zone_total": 326,
+  "pct_of_all": 92.6,
+  "pct_of_quiet": 92.7,
+  "pct_of_quiet_m6": 93.2,
+  "note": "指标正名：等强异 zone 首着对占比——真战略分岔的代理下界。zone 三桶粒度粗，出子次序假阳性 + 同zone真分歧假阴性。阶段1.6 人工抽检校准。"
+ },
+ "axis4_k2_material": {
+  "has_k2_total": 280,
+  "pct_of_all": 79.5,
+  "has_k2_quiet": 280,
+  "pct_of_quiet": 88.3
+ },
+ "gap_distribution_top1_top2": {
+  "≤30": 213,
+  "≤150": 27,
+  ">300": 14,
+  "≤60": 56,
+  "≤300": 21,
+  "≤80": 21
+ },
+ "zone_pair_distribution_top1_top2": {
+  "queenside-queenside": 42,
+  "center-queenside": 73,
+  "center-kingside": 75,
+  "center-center": 55,
+  "kingside-kingside": 42,
+  "kingside-queenside": 65
+ },
+ "gap_median": 18.0,
+ "kb_constrained": {
+  "archetype_hit": 141,
+  "with_gate_data": 125,
+  "n_feasible_dist": {
+   "2": 24,
+   "0": 45,
+   "1": 56
+  },
+  "axis4_trigger_domain(n==1)": 56,
+  "axis1_material(n>=2)": 24,
+  "axis4_pool_source_available": 17
+ },
+ "run_config": {
+  "pgn": "lichess_elite_2025-11.pgn",
+  "max_games": 400,
+  "k": 5,
+  "depth": 14,
+  "kb_analysis": true,
+  "resumed_records": 0
+ },
+ "kb_snapshot": {
+  "git_blob_hash": "041bfd57fb222b86744e721f3594bd5537fb550d",
+  "content_sha256": "4d0e4c3cc5dfaeeda7d6785b3dc0ce9762d5ff8f758ff9e724233eed12f49749",
+  "head_commit": "460ceee576d790db3334641f1b4d0635f18ecce5"
+ },
+ "elapsed_s": 310.9
+}
