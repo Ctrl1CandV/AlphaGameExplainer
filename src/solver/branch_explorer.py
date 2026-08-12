@@ -287,6 +287,39 @@ def waiting_baseline(
                 pass
 
 
+def eval_position(
+    board: chess.Board,
+    sf_path: str,
+    depth: int = 8,
+) -> Optional[int]:
+    """单局面浅评，返回**轮走方视角** cp（PLAN-012 轴 4 战术崩盘筛用）。
+
+    与 ``waiting_baseline`` 同引擎管理模式（popen → analyse → quit），
+    但不翻转走子权——直接评估当前局面。将杀折算 ±MATE_CP。
+    失败返回 None（失败安全：调用方判为「不拦」）。
+    """
+    engine = None
+    try:
+        engine = _open_engine(sf_path)
+        info = engine.analyse(board, chess.engine.Limit(depth=depth))
+        score = info.get("score")
+        if score is None:
+            return None
+        rel = score.relative
+        m = rel.mate()
+        if m is not None:
+            return MATE_CP if m > 0 else -MATE_CP
+        return rel.score() or 0
+    except Exception:
+        return None
+    finally:
+        if engine is not None:
+            try:
+                engine.quit()
+            except Exception:
+                pass
+
+
 def assess_actual_move(
     board: chess.Board,
     move: chess.Move,
