@@ -167,6 +167,31 @@ def build_video_segments(
             phase="compare",
             pacing=_TEACH_PACING, emphasis_level=_TEACH_EMPHASIS))
 
+    # 轴 4 对照段（ADR-021 次要 2，PLAN-012 阶段 2.7 补做）：
+    # rejected_route 非空时，从 commentary.segments 按 id 取对照段文本。
+    # moves 用 rejected_route 的 _line_pv 前 N 着——对照线也**从决策点出发**
+    # 演示，与计划段同语义（「如果走那条会怎样」）。但 _split_sequences 用
+    # moves 非空识别序列起点（每个带 moves 的段切一刀），给了 moves 的对照段
+    # 会被切为独立序列从决策点渲染——这正是我们想要的（对照线独立动画）。
+    # 对照段 id = len(routes)+1（与 compare 段同位，但 axis 4 时 len(routes)==1，
+    # compare 不生成，对照段占据这个 id 槽——见 _build_decision_nodes）。
+    rejected_route = decision_storyboard.get("rejected_route")
+    if rejected_route and len(routes) == 1:
+        rej_text = ""
+        rej_id = len(routes) + 1  # 对照节点 id（_build_decision_nodes 分配）
+        for seg in getattr(commentary, "segments", []):
+            if int(getattr(seg, "id", -1)) == rej_id:
+                rej_text = getattr(seg, "voiceover", "")
+                break
+        # 对照线 moves 从决策点出发——但若文本为空（对照段被 post_process
+        # 丢弃 = 段级语义退回单线），不生成视频段（避免空文本定格）
+        if rej_text:
+            rej_moves = (rejected_route.get("_line_pv") or [])[:LINE_DISPLAY_PLY]
+            segs.append(Segment(
+                move_idx=rej_id, text=rej_text, moves=rej_moves,
+                phase=rejected_route.get("name", "rejected"),
+                pacing=_TEACH_PACING, emphasis_level=_TEACH_EMPHASIS))
+
     # 总结段
     summary = getattr(commentary, "summary", "") or ""
     segs.append(Segment(move_idx=len(segs), text=summary, moves=[],
@@ -331,6 +356,165 @@ def _screen_actual_move(board: chess.Board, actual: str,
     return san
 
 
+def _k2_crash_ok(
+    board: chess.Board,
+    k2_branch,
+    sf_path: str,
+    max_plies: int = 4,
+    crash_cp: int = 200,
+) -> bool:
+    """K2 战术崩盘筛（ADR-021 §决策 2 第 3 颗子弹，peer_review R1）。
+
+    沿 k2 pv 前 ``max_plies`` 着逐着浅评（depth=8），任一点走子方视角
+    cp 骤降 ≥``crash_cp`` → 判崩盘，返回 False。sf_path 不可用 → True（安全通过）。
+
+    视角归一化：``eval_position`` 返回轮走方视角 cp；沿 pv 奇着后轮到对手，
+    须 negate 回决策点走子方视角才能与前一点比较。
+    """
+    if not sf_path or not k2_branch.pv:
+        return True
+    from src.solver.branch_explorer import eval_position
+
+    b = board.copy()
+    prev_cp = k2_branch.cp  # root eval（走子方视角）
+    for mv in k2_branch.pv[:max_plies]:
+        try:
+            b.push(mv)
+        except Exception:              # noqa: BLE001
+            break
+        raw = eval_position(b, sf_path, depth=8)
+        if raw is None:
+            continue  # 评估失败：不拦（让下游安全网兜底）
+        cur_cp = raw if b.turn == board.turn else -raw
+        if prev_cp - cur_cp >= crash_cp:
+            return False
+        prev_cp = cur_cp
+    return True
+
+
+def _select_axis4_contrast(
+    board: chess.Board,
+    primary: "PlanOutcome",
+    outcomes: list,
+    opens: list,
+    sf_path: str = "",
+) -> Optional[dict]:
+    """轴 4 对照路线选择（ADR-021，PLAN-012 阶段 2）。
+
+    仅在 n_feasible==1 时由 ``_decision_core`` 调用。两层优先级：
+      1. 池内层：feasible=False 且 mech_ok=True 且 gap∈(80,150] 的被拒计划
+         （机制闸淘汰者 mech_ok=False **永不进对照**——致命 1 修复）。
+      2. K2 层：opens[j](j≥1) gap∈(0,150] 且 zone≠正选 KB target_zone
+         （同 zone → 拒绝：轴 2 领地，次要 1 修复：参照取 KB target_zone
+         而非首着落点）。
+
+    空差分放弃：primary 与对照的 unique_facts 为空 → return None（致命 3 修复：
+    只剩 gap 数字撑不起对照段，硬讲即编造）。
+
+    返回 rejected_route dict（含 source/name/mechanism/gap_cp/gap_level/
+    unique_facts/direction/_line_pv），或 None（放弃轴 4 退回单线）。
+    """
+    from src.analysis.direction import equivalence_gap, direction_zone
+    from src.analysis.structure_features import structural_features
+    from src.storyboard.decision_builder import (
+        AXIS4_GAP_HI, AXIS4_POOL_GAP_LO, gap_level_cn, unique_facts,
+    )
+
+    primary_name = primary.plan.get("name", "正选")
+    primary_end = primary.end_features or primary.start_features
+    if not primary_end:
+        return None
+    primary_zone = primary.plan.get("direction", {}).get("target_zone", "")
+
+    # --- 池内层 ---
+    pool_candidates = [
+        o for o in outcomes
+        if not o.feasible and o.mech_ok and o.line_pv
+        and o.gap_cp is not None
+        and AXIS4_POOL_GAP_LO < o.gap_cp <= AXIS4_GAP_HI
+    ]
+    contrast = None
+    if pool_candidates:
+        best = min(pool_candidates, key=lambda o: o.gap_cp)
+        contrast = {
+            "source": "pool",
+            "name": best.plan.get("name", "?"),
+            "mechanism": best.plan.get("mechanism", ""),
+            "gap_cp": best.gap_cp,
+            "end_features": best.end_features or best.start_features,
+            "pv": best.line_pv,
+            "direction": best.plan.get("direction", {}),
+        }
+
+    # --- K2 层（池内层无候选时）---
+    if contrast is None and len(opens) >= 2:
+        for j in range(1, len(opens)):
+            k2 = opens[j]
+            gap = equivalence_gap(opens[0].cp, k2.cp)
+            if gap <= 0 or gap > AXIS4_GAP_HI:
+                continue
+            if direction_zone(k2.move) == primary_zone:
+                continue
+            # 战术崩盘筛（ADR-021 §决策 2 第 3 颗子弹，peer_review R1）：
+            # K2 是自由线、无机制闸等价物——沿 pv 前 4 着逐着浅评（depth=8），
+            # 任一点走子方视角 cp 骤降 ≥200 → 判崩盘，跳过。
+            # 不依赖空差分安全网：丢子会改变 passed_diff/open_files 等多维特征，
+            # 使差分非空反而通过安全网——须在此显式拦。
+            if sf_path and not _k2_crash_ok(board, k2, sf_path):
+                Logger.info(f"[Decision] K2 候选 {board.san(k2.move) if k2.move else '?'}"
+                            f" 战术崩盘筛未过——跳过")
+                continue
+            # K2 末端特征：沿 pv 推到底（与 project 末端同量级，peer_review R2：
+            # K2 pv 长度可能短于 project 的 ply-20 采样，但失败方向偏「过度放弃」
+            # ——末端较浅→差分更小→易触发空差分放弃→退回单线，不产出错误内容）
+            b = board.copy()
+            for mv in k2.pv:
+                try:
+                    b.push(mv)
+                except Exception:          # noqa: BLE001
+                    break
+            k2_end = structural_features(b, board.turn)
+            try:
+                k2_san = board.san(k2.move)
+            except Exception:              # noqa: BLE001
+                k2_san = "?"
+            contrast = {
+                "source": "k2",
+                "name": f"次优选择（{k2_san}）",
+                "mechanism": "",
+                "gap_cp": gap,
+                "end_features": k2_end,
+                "pv": list(k2.pv),
+                "direction": {},
+            }
+            break
+
+    if contrast is None:
+        return None
+
+    # --- 空差分放弃 ---
+    facts = unique_facts(
+        primary_end, contrast["end_features"],
+        primary_name, contrast["name"])
+    if not facts:
+        Logger.info("[Decision] 轴 4 对照与正选 unique_facts 差分为空"
+                    "——放弃轴 4，退回单线")
+        return None
+
+    Logger.info(f"[Decision] 轴 4 对照选定：{contrast['name']}"
+                f"（source={contrast['source']}, gap={contrast['gap_cp']}cp）")
+    return {
+        "source": contrast["source"],
+        "name": contrast["name"],
+        "mechanism": contrast["mechanism"],
+        "gap_cp": contrast["gap_cp"],
+        "gap_level": gap_level_cn(contrast["gap_cp"]),
+        "unique_facts": facts,
+        "direction": contrast["direction"],
+        "_line_pv": contrast["pv"],
+    }
+
+
 def _decision_core(input_fen: str, provenance: Optional[str] = None) -> Optional[dict]:
     """决策管线**前半段**：识别 → 引擎探索 → storyboard → LLM 解说 → 释放 LLM。
 
@@ -468,7 +652,7 @@ def _decision_core(input_fen: str, provenance: Optional[str] = None) -> Optional
                     f"（结构目标既未达成也未朝达成移动），不参与选线")
         outcomes.append(PlanOutcome(
             plan=plan, line_cp=line.cp, line_pv=line.pv,
-            feasible=feas and mech_ok, gap_cp=gap, trend=tr,
+            feasible=feas and mech_ok, gap_cp=gap, mech_ok=mech_ok, trend=tr,
             tradeoffs=tm.__dict__,
             start_features=structural_features(board),
             end_features=tr.get("end_features", [])))
@@ -496,10 +680,20 @@ def _decision_core(input_fen: str, provenance: Optional[str] = None) -> Optional
     if provenance:
         provenance = _screen_actual_move(board, provenance, sf)
 
+    # 轴 4 对照选择（ADR-021，PLAN-012 阶段 2）：仅 n_feasible==1 时触发。
+    # 严格加法——n_feasible≥2 走轴 1（rejected_route 恒 None，行为不变）；
+    # n_feasible==0 无正选可对比，轴 4 不触发。空差分/无候选 → None → 退回轴 3 单线。
+    # 复用单次列表推导（peer_review R4：避免与 build_decision_storyboard 内部重复计算）。
+    feasible_plans = [o for o in outcomes if o.feasible and o.line_pv]
+    rejected_route = None
+    if len(feasible_plans) == 1:
+        rejected_route = _select_axis4_contrast(
+            board, feasible_plans[0], outcomes, opens, sf)
+
     sb = build_decision_storyboard(
         DecisionInput(fen=input_fen, provenance=provenance), outcomes,
         archetype=arch, strategic_premise=kb[arch]["theory"],
-        baseline=baseline)
+        baseline=baseline, rejected_route=rejected_route)
     # 零可行计划闸（08.04 补，与上面的机制闸配套）。
     #
     # 机制闸把「结构目标不成立」的计划也判为不可行后，`sb["routes"]` 可能为空

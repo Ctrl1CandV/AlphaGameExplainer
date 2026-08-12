@@ -85,9 +85,18 @@ MAX_VOICEOVER_CHARS = 130
 _NODE_ROLE_CN = {
     "opening": "开场",
     "plan": "计划",
+    "rejected": "为什么不那样走",
     "compare": "对比",
     "summary": "总结",
 }
+
+# 轴 4 措辞限权（ADR-021 §措辞限权）：validator 可机判化。
+# 正面锚词——对照段必须命中至少一个（缺失即判废）。
+AXIS4_ANCHOR_WORDS = ("稍逊", "略差", "不如", "差了", "稍差", "稍弱", "逊色")
+# 等强措辞硬错误短表（轴 4 对照段出现即判废——三词上限防枚举漏）。
+AXIS4_FORBIDDEN_EQUAL = ("各有取舍", "各有侧重", "看你风格")
+# 灾难定性硬错误（窗口内 ≤150 的对照不是败着）。
+AXIS4_FORBIDDEN_DISASTER = ("败着", "就输了", "送子", "直接丢", "彻底丢")
 
 # 维度中文名（与 decision_builder._DIM_CN 同源——独有事实校验用关键词）
 _DIM_CN = {
@@ -245,6 +254,25 @@ def _build_decision_nodes(storyboard: dict) -> List[dict]:
                   "names": [_route_plan_name(storyboard, i)
                             for i in range(len(routes))],
                   "provenance_plan": storyboard.get("provenance_plan")})
+    # 轴 4 对照节点（ADR-021）：rejected_route 非空时在 summary 前插入。
+    # axis_type=4 时 routes 只有 1 条（正选），compare 节点不生成（len<2）。
+    # 对照段插在 plan 之后、summary 之前——叙事弧：
+    #   诊断 → 正选计划 → 「为什么不那样走」→ 条件性建议。
+    rejected = storyboard.get("rejected_route")
+    if rejected and len(routes) == 1:
+        # summary 的 id 让位给对照段——重新分配 id
+        summary_node = nodes.pop()  # 取出刚加的 summary
+        summary_id = summary_node["id"]
+        nodes.append({
+            "id": summary_id,
+            "type": "rejected",
+            "name": rejected.get("name", "次优选择"),
+            "gap_level": rejected.get("gap_level", ""),
+            "unique_facts": rejected.get("unique_facts", []),
+            "primary_name": routes[0].get("name", "正选"),
+        })
+        summary_node["id"] = summary_id + 1
+        nodes.append(summary_node)
     return nodes
 
 
@@ -332,6 +360,30 @@ def build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
                 "只说程度不报数值）。")
         elif ntype == "plan":
             parts.append(_plan_prompt_text(node, is_first=node.get("idx") == 0))
+        elif ntype == "rejected":
+            # 轴 4 对照段（ADR-021）：「为什么不那样走」。
+            # 措辞范式：诱惑力 → 但代价是 → 所以正选更优。定性为「更差但合理」。
+            # gap 量级由程序注入（文本零数字）。
+            # R2 修复（PLAN-008 教训）：不在指令里枚举禁用词（负面提及强化被禁内容），
+            # 改用正面定性指令；validator 侧的硬错误清单兜底。
+            # R3 修复：显式给 LLM 对照段的字数约束（全局 60-110 vs 对照段 ≤60）。
+            gap_word = node.get("gap_level", "近一个兵")
+            facts = node.get("unique_facts", [])
+            fact_lines = ("\n".join(f"  - {_strip_fact_numbers(f)}"
+                                   for f in facts) if facts else "  - （无独有事实——讲评估差距即可）")
+            parts.append(
+                f"【为什么不那样走】这一段讨论「{node['name']}」这条路线——"
+                f"它**看起来也合理**，但比正选「{node.get('primary_name', '')}」"
+                f"差约{gap_word}。"
+                "先说出这条路的**诱惑力**（为什么人想走它），"
+                "然后说出它的**代价**——必须包含以下独有事实中的至少一条：\n"
+                f"{fact_lines}\n"
+                f"最后用一句话收束：正因为付出{gap_word}的代价，"
+                f"「{node.get('primary_name', '')}」更值得选。"
+                "**措辞要求**：把这条路线定性为「稍逊的合理替代」——"
+                f"用程度词（稍逊/略差/差了约{gap_word}）描述差距，"
+                "定性落点必须是「合理但更差」。"
+                "**这一段要简短——控制在 60 字以内（比正选段更短）。**")
         elif ntype == "compare":
             parts.append(
                 f"【对比】直接对比两条路线（{node['names'][0]} vs {node['names'][1]}）："
@@ -397,7 +449,7 @@ def build_chunk_prompt(header: str, chunk_nodes: list, chunk_idx: int,
     # 可行性闸淘汰掉的「保持悬兵」。
     legend = "、".join(
         f"{n['id']}={_NODE_ROLE_CN.get(n.get('type'), n.get('type', '?'))}"
-        + (f"（{n.get('name')}）" if n.get("type") == "plan" else "")
+        + (f"（{n.get('name')}）" if n.get("type") in ("plan", "rejected") else "")
         for n in chunk_nodes
     )
     parts.append(f"id 用数字，本次只输出这些 id：{legend}。"
@@ -475,11 +527,28 @@ def _plan_display_name(name: str) -> str:
     return name.split("（")[0].split("(")[0].strip()
 
 
+def _rejected_max_chars(chunk_nodes: list) -> int:
+    """轴 4 对照段字数上限 = 同 chunk 内 plan 段实际长度的 60%（ADR-021 d）。
+
+    校验在 validate_chunk 内逐段跑——此时同 chunk 的 plan 段可能尚未生成
+    （取决于 LLM 输出顺序），无法精确取其字数。保守策略：用 plan 段的字数
+    上限 MAX_VOICEOVER_CHARS(130) 的 60% = 78 作为硬上界——略宽于实际 60%
+    （plan 段通常 60-110 字，真实 60% = 36-66），但比 130 紧很多，足以防
+    对照段喧宾夺主。
+    """
+    return int(MAX_VOICEOVER_CHARS * 0.6)
+
+
 def validate_chunk(data: dict, chunk_nodes: list) -> tuple:
     """四层校验：① 表层硬闸；② 字数上限；③ 战略名提及；④ 独有事实命中（P9）。
 
     返回 (ok, errors)。段级失败不报废——校验失败的段在 post_process 里
     丢弃（该段不输出）。
+
+    **轴 4 对照段（rejected）的限权失败采用段级语义**（ADR-021 SPEC §8 兼容
+    + peer_review R1）：rejected 段的错（锚词/禁词/字数/独有事实）不升级为
+    chunk 级失败，而是将该段标记为 ``_reject_drop``——generator 不重试、
+    post_process 丢弃该段，整片正常出（对照段缺席=退回单线，符合 ADR-021）。
     """
     errors = []
     segments = data.get("segments", [])
@@ -508,6 +577,31 @@ def validate_chunk(data: dict, chunk_nodes: list) -> tuple:
         if len(text) > MAX_VOICEOVER_CHARS:
             errors.append(
                 f"id {nid} 超长（{len(text)} 字 > {MAX_VOICEOVER_CHARS}）")
+        if node.get("type") == "rejected":
+            # 轴 4 对照段限权（ADR-021，PLAN-012 阶段 3）。
+            # R1 修复：错不进 errors（不触发 generator 重试/aborted），
+            # 而是标 ``_reject_drop`` 让 post_process 丢弃——段级语义，
+            # 确保对照段失败时整片仍出（退回单线，不阻塞）。
+            rej_errors = []
+            plan_max = _rejected_max_chars(chunk_nodes)
+            if len(text) > plan_max:
+                rej_errors.append(f"超限({len(text)}>{plan_max})")
+            # a) 正面锚词：必须命中至少一个「更差」锚词
+            if not any(w in text for w in AXIS4_ANCHOR_WORDS):
+                rej_errors.append("缺更差锚词")
+            # b) 等强措辞硬错误（三词短表）
+            for w in AXIS4_FORBIDDEN_EQUAL:
+                if w in text:
+                    rej_errors.append(f"等强措辞「{w}」")
+            # c) 灾难定性硬错误
+            for w in AXIS4_FORBIDDEN_DISASTER:
+                if w in text:
+                    rej_errors.append(f"灾难定性「{w}」")
+            # d) 独有事实命中（与 plan 节点同口径——防套话）
+            if not _check_unique_facts(text, node.get("unique_facts", [])):
+                rej_errors.append("未命中独有事实")
+            if rej_errors:
+                seg["_reject_drop"] = "; ".join(rej_errors)
         # ② 战略名提及（主体名——plan 段提本计划；compare/summary 提任一）
         if node.get("type") in ("plan", "compare", "summary"):
             if node.get("type") == "plan":
@@ -516,10 +610,6 @@ def validate_chunk(data: dict, chunk_nodes: list) -> tuple:
                 names = [_plan_display_name(n) for n in node.get("names", [])]
             if names and not any(n and n in text for n in names):
                 errors.append(f"id {nid} 未提及战略名 {names}")
-        # ③ 独有事实命中（plan 节点——防同质化）
-        if node.get("type") == "plan":
-            if not _check_unique_facts(text, node.get("unique_facts", [])):
-                errors.append(f"id {nid} 未命中独有事实")
     return (not errors, errors)
 
 
@@ -550,6 +640,12 @@ def build_fallback_voiceover(chunk_nodes: list, json_prompt: str) -> list:
         elif ntype == "compare":
             text = ("两条路线的主要差别在于结构走向与代价。"
                     "选择取决于局面更看重哪一端。")
+        elif ntype == "rejected":
+            # 轴 4 兜底（ADR-021）：锚词 + gap 量级 + 收束
+            gap_word = node.get("gap_level", "近一个兵")
+            text = (f"为什么不走{node.get('name', '那条')}？"
+                    f"它稍逊于正选——差了约{gap_word}。"
+                    "结构上付出了代价，所以不是最优选择。")
         else:
             text = ("综合来看，两条路线各有明确的结构取舍："
                     "一条换来兵形稳固，另一条换来对方弱点的形成。")
@@ -561,16 +657,26 @@ def build_fallback_voiceover(chunk_nodes: list, json_prompt: str) -> list:
 
 def post_process(commentary: GeneratedCommentary, all_segments: list,
                  nodes: list, storyboard: dict, backend) -> None:
-    """校验失败的段丢弃（段级失败语义）；组装 opening/summary。"""
+    """校验失败的段丢弃（段级失败语义）；组装 opening/summary。
+
+    轴 4 对照段（rejected）被 validate_chunk 标 ``_reject_drop`` 时，
+    在此丢弃——对照段缺席 = 退回单线，整片正常出（ADR-021 §SPEC §8 兼容）。
+    """
     node_by_id = {int(n["id"]): n for n in nodes}
     kept = []
     for seg in all_segments:
+        # 轴 4 段级丢弃（R1 修复：不阻塞整片）
+        drop_reason = getattr(seg, "_reject_drop", None) or seg.get("_reject_drop") if isinstance(seg, dict) else getattr(seg, "_reject_drop", None)
+        if drop_reason:
+            node = node_by_id.get(int(getattr(seg, "id", -1) if not isinstance(seg, dict) else seg.get("id", -1)))
+            Logger.info(f"[Decision] 对照段丢弃（{drop_reason}）——退回单线")
+            continue
         node = node_by_id.get(int(getattr(seg, "id", -1)))
         if node is None:
             continue
         text = getattr(seg, "voiceover", "")
         ok_surface, _ = validate_puzzle_voiceover_surface(text)
-        if node.get("type") == "plan":
+        if node.get("type") in ("plan", "rejected"):
             ok_facts = _check_unique_facts(text, node.get("unique_facts", []))
         else:
             ok_facts = True

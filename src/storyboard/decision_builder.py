@@ -51,6 +51,10 @@ DIVERGENCE_MIN_RUN = 3
 # unique_facts 差分的显著阈值（归一化 0-1——1 个孤立兵 = 1/3 ≈ 0.33）
 FACT_DELTA = 0.2
 
+# 轴 4 gap 窗口（ADR-021）：对照线与正选的评估差上下界。
+AXIS4_GAP_HI = 150       # 上界：对齐 M5 standout(150cp)——超过是「犯错」不是「更差但合理」
+AXIS4_POOL_GAP_LO = 80   # 池内层下界：= branch_explorer.DEFAULT_FEASIBLE_CP（可行性闸阈值）
+
 # 维度中文名（unique_facts 输出用——与 structure_features.DIMS 对应）
 _DIM_CN = {
     "opp_isolated_qside": "对方后翼孤立兵",
@@ -81,8 +85,9 @@ class PlanOutcome:
     plan: dict                          # KB plans[] 条目
     line_cp: Optional[int] = None       # 约束线 cp（None = 无约束线）
     line_pv: List[chess.Move] = field(default_factory=list)
-    feasible: bool = False              # 可行性闸
+    feasible: bool = False              # 可行性闸（feas_cp AND mech_ok）
     gap_cp: Optional[int] = None
+    mech_ok: bool = True                # 机制闸单独保留（PLAN-012 轴 4 池内层来源需要）
     trend: dict = field(default_factory=dict)      # project() 结果
     tradeoffs: dict = field(default_factory=dict)  # quantify_tradeoffs 结果
     start_features: List[float] = field(default_factory=list)
@@ -142,10 +147,32 @@ def unique_facts(
     return facts
 
 
+def axis_type_full(n_feasible: int, has_rejected: bool = False) -> int:
+    """P20 + ADR-021 对比轴形态判定。
+
+    ≥2 可行 → 轴 1（等强双计划）；==1 且有轴 4 对照 → 轴 4（正选 vs 更差
+    的合理替代）；==1 无对照 / ==0 → 轴 3（执行 vs 等待，一句话铺垫）。
+    """
+    if n_feasible >= 2:
+        return 1
+    if n_feasible == 1 and has_rejected:
+        return 4
+    return 3
+
+
 def axis_type_for(n_feasible: int) -> int:
-    """P20 对比轴形态：≥2 可行计划 → 轴 1（两计划对比）；1 个 → 轴 3
-    （执行 vs 等待——只做一句话铺垫，不独立对比段）。"""
-    return 1 if n_feasible >= 2 else 3
+    """旧签名 thin wrapper（peer_review 重大 5：不破坏 quality_gate 等现有调用）。"""
+    return axis_type_full(n_feasible, has_rejected=False)
+
+
+# 轴 4 gap 量级中文分档（ADR-021 措辞限权：程序注入，解说零阿拉伯数字）
+def gap_level_cn(gap_cp: int) -> str:
+    """gap_cp → 中文量级词，供 commentary 注入。"""
+    if gap_cp < 80:
+        return "不到一个兵"
+    if gap_cp <= 120:
+        return "近一个兵"
+    return "超过一个兵"
 
 
 def build_decision_storyboard(
@@ -154,13 +181,16 @@ def build_decision_storyboard(
     archetype: Optional[str] = None,
     strategic_premise: str = "",
     baseline: Optional[int] = None,
+    rejected_route: Optional[dict] = None,
 ) -> dict:
     """组装比较式 storyboard。
 
     - 只保留通过可行性闸的计划（P8 选线判据 1）；
     - 两计划的分歧深度（P8）达标才成对——收敛过快 → 降级（记录
       divergence 供阶段 7 决策，不硬删计划——P11 单线退化保底）；
-    - unique_facts：每计划 vs 其余计划末端的独有事实（P9）。
+    - unique_facts：每计划 vs 其余计划末端的独有事实（P9）；
+    - **轴 4（ADR-021）**：rejected_route 非空且 n_feasible==1 时 axis_type=4，
+      对照线随 storyboard 带出但不进 routes（routes 仍只含可行正选）。
     """
     feasible = [o for o in outcomes if o.feasible and o.line_pv]
     routes = []
@@ -201,7 +231,7 @@ def build_decision_storyboard(
             "unique_facts": facts,
         })
 
-    axis = axis_type_for(len(routes))
+    axis = axis_type_full(len(routes), has_rejected=(rejected_route is not None))
     # 成对分歧深度（P8——多计划时）
     divergences = []
     for i in range(len(routes)):
@@ -227,6 +257,7 @@ def build_decision_storyboard(
                         "unique_ratio": r["tradeoffs"].get(
                             "unique_ratio", 0.0)} for r in routes],
         # axis_type=3：只做一句话铺垫（P20 边界——不独立成对比段）
+        # axis_type=4：rejected_route 是对照内容（ADR-021）
         "waiting_note": (f"等待（不作为）基线 {baseline}" if axis == 3
                          and baseline is not None else None),
     }
@@ -242,6 +273,10 @@ def build_decision_storyboard(
         "comparison_axes": comparison_axes,
         "divergences": divergences,
         "provenance": decision.provenance,
+        # 轴 4 对照路线（ADR-021）：None = 无轴 4（axis 1/3 现状不变）。
+        # 非空时含 source(gap/k2)/name/gap_cp/gap_level/line/end_features/
+        # unique_facts/direction——供解说层（阶段 3）生成「为什么不那样走」段。
+        "rejected_route": rejected_route,
     }
 
 
