@@ -320,7 +320,7 @@
    {
     "name": "后翼扩张",
     "mover_side": "mover",
-    "mechanism": "b4-c5 兵冲击对方石墙的 d5 根基，制造孤立/后退兵后长期施压",
+    "mechanism": "b4-c5 兵冲击对方石墙的 d5 根基，推进后翼兵换取空间，伺机制造对方弱兵",
     "direction": {
      "pawn_files": [
       "c",
@@ -338,6 +338,9 @@
       },
       {
        "opp_backward": ">=1"
+      },
+      {
+       "mover_qside_pawns_past_mid": ">=1"
       }
      ]
     },
@@ -359,7 +362,7 @@
      ]
     },
     "structural_goal": {
-     "mover_pawns_past_mid": ">=1"
+     "mover_center_pawns_past_mid": ">=1"
     },
     "cost": "e4 突破后中心兵形不复固定，e 兵可能成为新弱点",
     "typical_mistakes": "e4 突破缺乏子力支援被对方反压",
@@ -462,7 +465,7 @@
      ]
     },
     "structural_goal": {
-     "mover_pawns_past_mid": ">=2"
+     "mover_center_pawns_past_mid": ">=2"
     },
     "cost": "e5 推进后中心兵不再固定，黑方可 …fxe5 或 …dxe5 打开反击线路",
     "typical_mistakes": "e5 推进缺乏子力支援被黑方兑换后中心反压",
@@ -471,7 +474,7 @@
    {
     "name": "后翼扩张",
     "mover_side": "mover",
-    "mechanism": "b4-b5 兵推进（配合 c4），压制黑方后翼、制造 c6/d6 弱格或孤立兵",
+    "mechanism": "推进后翼兵换取空间与压制，伺机制造对方弱兵",
     "direction": {
      "pawn_files": [
       "b",
@@ -483,7 +486,17 @@
      ]
     },
     "structural_goal": {
-     "opp_isolated_qside": ">=1"
+     "any": [
+      {
+       "opp_isolated_qside": ">=1"
+      },
+      {
+       "opp_backward": ">=1"
+      },
+      {
+       "mover_qside_pawns_past_mid": ">=1"
+      }
+     ]
     },
     "cost": "后翼兵推进后 a/b 线可能被黑方利用（c 线半开放已给黑反击条件）",
     "typical_mistakes": "b4 过早推进被黑方 …cxb4 打开后翼反击",

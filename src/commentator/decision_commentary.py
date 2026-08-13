@@ -42,6 +42,7 @@ try:  # 直接运行自检时补充项目根到 sys.path
     from src.commentator.validators import validate_puzzle_voiceover_surface
     from src.common import GeneratedCommentary
     from src.infra.llm_backend import create_backend_from_env
+    from src.analysis.structure_features import DIM_CN
 except ModuleNotFoundError:
     import os
     import sys
@@ -59,6 +60,7 @@ except ModuleNotFoundError:
     from src.commentator.validators import validate_puzzle_voiceover_surface
     from src.common import GeneratedCommentary
     from src.infra.llm_backend import create_backend_from_env
+    from src.analysis.structure_features import DIM_CN
 
 logging.getLogger("chess.engine").setLevel(logging.CRITICAL)
 
@@ -98,21 +100,9 @@ AXIS4_FORBIDDEN_EQUAL = ("各有取舍", "各有侧重", "看你风格")
 # 灾难定性硬错误（窗口内 ≤150 的对照不是败着）。
 AXIS4_FORBIDDEN_DISASTER = ("败着", "就输了", "送子", "直接丢", "彻底丢")
 
-# 维度中文名（与 decision_builder._DIM_CN 同源——独有事实校验用关键词）
-_DIM_CN = {
-    "opp_isolated_qside": "后翼孤立兵",
-    "opp_isolated_center": "中心孤立兵",
-    "opp_isolated_kside": "王翼孤立兵",
-    "opp_backward": "后退兵",
-    "passed_diff": "通路兵",
-    "mover_pawns_past_mid": "兵过中线",
-    "pawn_islands_diff": "兵岛",
-    "open_files": "开放线",
-    "half_open_own": "半开放线",
-    "outposts": "前哨",
-    "knight_bishop_diff": "轻子",
-    "opp_king_exposure": "王暴露",
-}
+# 维度中文名单一来源：structure_features.DIM_CN（ADR-022 决策 4 合并）。
+# 原本地短名拷贝已删除——trend 注入改用 DIM_CN 长名（如「增强对方后翼孤立兵」
+# 替代旧「增强后翼孤立兵」），语义更精确，属 PLAN-013 预期变更（漂移登记 1.5）。
 
 # 认识论边界与表达形态锚定（ADR-020 约束 4/6 + ADR-018 范例）
 _HEADER_CONSTRAINTS = [
@@ -139,7 +129,7 @@ def _trend_cn(trend: dict) -> str:
     """趋势中文摘要（形态化注入——无坐标）。"""
     parts = []
     for t in trend.get("trends", []) or []:
-        dim = _DIM_CN.get(t.dimension, t.dimension)
+        dim = DIM_CN.get(t.dimension, t.dimension)
         parts.append(f"{'增强' if t.direction == 'increasing' else '削弱'}{dim}")
     shift = trend.get("archetype_shift")
     if shift:

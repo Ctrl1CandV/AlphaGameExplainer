@@ -1,15 +1,20 @@
 """结构特征向量与结构目标求值（决策管线，ADR-020）。
 
-P16 定稿（2026-08-03，12 维固定向量）的宿主模块。职责：
+P16 宿主模块。**v2（15 维，ADR-022 决策 1，PLAN-013 阶段 1）**：在 v1
+12 维基础上 append-only 追加 3 个翼向拆分维（索引 12-14），解 P16 十二维
+翼盲（`mover_pawns_past_mid` 混算三翼，抹掉推进方向信息）。旧聚合维保留、
+旧 goal 零改动。职责：
 
-- `structural_features(board)`：P16 12 维特征向量（走子方视角，0-1 有界）
+- `structural_features(board)`：P16 15 维特征向量（走子方视角，0-1 有界）
 - `line_features(line)`：一条线的特征序列（阶段 5 趋势采样 / P8 分歧深度用）
 - `goal_satisfied(board, structural_goal)`：A2 结构目标达成判定
 - `feature_distance(fv_a, fv_b)`：A3 可分离性 / P8 分歧深度的距离度量
 
 **为什么必须跨原型固定同一组维度（P16）**：推进型计划会把局面从原型 X
 变成原型 Y（如 IQP 推 d5 兑掉后孤兵消失），若特征随原型变，两条线之间的距离
-就没有定义，A2/A3/P8 三项判据全部塌掉。维度集定稿后**不可边做边加**。
+就没有定义，A2/A3/P8 三项判据全部塌掉。维度集**不可随意增删改序**——v2 的
+append-only 扩维经 ADR-022 裁决（同轮全量基线重钉 + 存量抽验 + planner
+裁决三件套），不是「边做边加」。维度集上限 ≤20（ADR-022 决策 4）。
 
 颜色归一化（P22）：**本模块自行归一化，调用方不需要预先 mirror**。
 原设计把归一化责任推给调用方，但三个调用方全都没做，黑方走子时 12 维中
@@ -45,10 +50,41 @@ DIMS: List[Tuple[str, str, float]] = [
     ("outposts",             "己方前哨轻子数",           4.0),
     ("knight_bishop_diff",   "轻子对比（己方马-象数差）", 4.0),
     ("opp_king_exposure",    "对方王暴露度（王周围格中对方兵不控制的格数）", 8.0),
+    # P16 v2 翼向扩维（ADR-022 决策 1，PLAN-013 阶段 1）——append-only，
+    # 索引 0-11 不动、旧聚合维 mover_pawns_past_mid 保留。上界取各翼物理
+    # 上限（3/2/3），单兵敏感度（0.33/0.5/0.33）> FACT_DELTA=0.2 是刻意的
+    # ——翼向信号就是要浮出 unique_facts 差分（解 P16 十二维翼盲）。
+    ("mover_qside_pawns_past_mid",  "己方后翼（a-c 线）过中线兵数", 3.0),
+    ("mover_center_pawns_past_mid", "己方中心（d-e 线）过中线兵数", 2.0),
+    ("mover_kside_pawns_past_mid",  "己方王翼（f-h 线）过中线兵数", 3.0),
 ]
 
 DIM_NAMES: List[str] = [d[0] for d in DIMS]
 DIM_COUNT = len(DIMS)
+
+# 维度中文名（unique_facts 输出 + trend 注入单一来源，ADR-022 决策 4）。
+# 原分散在 decision_builder / decision_commentary 两份拷贝（内容不同），
+# 合并于此。新维中文名须含区域词（后翼/中心/王翼）+ 主体词（兵过中线），
+# 对齐 decision_commentary._REGION_WORDS/_SUBJECT_WORDS——否则经 trend/
+# unique_facts 注入时英文维度名泄漏进 prompt 导致整片报废（对抗审查重大 4）。
+DIM_CN: Dict[str, str] = {
+    "opp_isolated_qside": "对方后翼孤立兵",
+    "opp_isolated_center": "对方中心孤立兵",
+    "opp_isolated_kside": "对方王翼孤立兵",
+    "opp_backward": "对方后退兵",
+    "passed_diff": "己方通路兵优势",
+    "mover_pawns_past_mid": "己方兵过中线",
+    "pawn_islands_diff": "己方兵岛优势",
+    "open_files": "开放线",
+    "half_open_own": "己方半开放线",
+    "outposts": "己方前哨轻子",
+    "knight_bishop_diff": "己方轻子对比",
+    "opp_king_exposure": "对方王暴露度",
+    # P16 v2 翼向维——区域词+主体词「兵过中线」对齐 validator 校验
+    "mover_qside_pawns_past_mid": "己方后翼兵过中线",
+    "mover_center_pawns_past_mid": "己方中心兵过中线",
+    "mover_kside_pawns_past_mid": "己方王翼兵过中线",
+}
 
 _MOVER = chess.WHITE
 _OPPONENT = chess.BLACK
@@ -194,7 +230,7 @@ def _mirror_normalize(board: chess.Board) -> chess.Board:
 
 def _raw_features(board: chess.Board,
                   mover_color: Optional[bool] = None) -> Dict[str, int]:
-    """P16 12 维的**原始计数**（单一事实来源）。
+    """P16 15 维的**原始计数**（单一事实来源）。
 
     `structural_features`（归一化）与 `goal_satisfied`（谓词求值）都从这里取数，
     禁止两处各自实现——goal 用真实计数（"opp_isolated_qside >= 1"），
@@ -246,14 +282,29 @@ def _raw_features(board: chess.Board,
         "knight_bishop_diff": (len(board.pieces(chess.KNIGHT, _MOVER))
                                - len(board.pieces(chess.BISHOP, _MOVER))),
         "opp_king_exposure": _king_exposure(board, board.king(_OPPONENT)),
+        # P16 v2 翼向维（ADR-022 决策 1）——分翼过中线兵数，与聚合维
+        # mover_pawns_past_mid 同源：三翼之和恒等于聚合值（单测钉此不变量）。
+        # file 分桶 a-c/d-e/f-h 与 _QS/_CE/_KS 同口径。
+        "mover_qside_pawns_past_mid": sum(
+            1 for sq in board.pieces(chess.PAWN, _MOVER)
+            if chess.square_file(sq) in (0, 1, 2)
+            and chess.square_rank(sq) >= _MID_RANK),
+        "mover_center_pawns_past_mid": sum(
+            1 for sq in board.pieces(chess.PAWN, _MOVER)
+            if chess.square_file(sq) in (3, 4)
+            and chess.square_rank(sq) >= _MID_RANK),
+        "mover_kside_pawns_past_mid": sum(
+            1 for sq in board.pieces(chess.PAWN, _MOVER)
+            if chess.square_file(sq) in (5, 6, 7)
+            and chess.square_rank(sq) >= _MID_RANK),
     }
 
 
 def structural_features(board: chess.Board,
                         mover_color: Optional[bool] = None) -> List[float]:
-    """P16 12 维结构特征向量（走子方视角，每维 0-1 有界）。
+    """P16 15 维结构特征向量（走子方视角，每维 0-1 有界）。
 
-    返回长度 12 的 float 列表，索引与 DIM_NAMES 对应。颜色归一化在
+    返回长度 15 的 float 列表，索引与 DIM_NAMES 对应。颜色归一化在
     `_raw_features` 内部完成，调用方无需自行 mirror。
 
     `mover_color`：视角锚点。单个局面可省略（用 `board.turn`）；**沿一条线

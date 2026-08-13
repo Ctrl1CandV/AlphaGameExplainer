@@ -26,6 +26,7 @@ import chess
 
 try:
     from src.analysis.structure_features import (
+        DIM_CN,
         DIM_NAMES,
         line_features,
         structural_features,
@@ -36,6 +37,7 @@ except ModuleNotFoundError:  # 直接运行自检时补充项目根到 sys.path
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__),
                                                     "..", "..")))
     from src.analysis.structure_features import (
+        DIM_CN,
         DIM_NAMES,
         line_features,
         structural_features,
@@ -55,21 +57,8 @@ FACT_DELTA = 0.2
 AXIS4_GAP_HI = 150       # 上界：对齐 M5 standout(150cp)——超过是「犯错」不是「更差但合理」
 AXIS4_POOL_GAP_LO = 80   # 池内层下界：= branch_explorer.DEFAULT_FEASIBLE_CP（可行性闸阈值）
 
-# 维度中文名（unique_facts 输出用——与 structure_features.DIMS 对应）
-_DIM_CN = {
-    "opp_isolated_qside": "对方后翼孤立兵",
-    "opp_isolated_center": "对方中心孤立兵",
-    "opp_isolated_kside": "对方王翼孤立兵",
-    "opp_backward": "对方后退兵",
-    "passed_diff": "己方通路兵优势",
-    "mover_pawns_past_mid": "己方兵过中线",
-    "pawn_islands_diff": "己方兵岛优势",
-    "open_files": "开放线",
-    "half_open_own": "己方半开放线",
-    "outposts": "己方前哨轻子",
-    "knight_bishop_diff": "己方轻子对比",
-    "opp_king_exposure": "对方王暴露度",
-}
+# 维度中文名单一来源：structure_features.DIM_CN（ADR-022 决策 4 合并）
+# 原本地拷贝已删除——decision_builder 与 decision_commentary 共用同一份。
 
 
 @dataclass
@@ -137,7 +126,7 @@ def unique_facts(
         return facts
     for i, (va, vb) in enumerate(zip(features_a, features_b)):
         dim = DIM_NAMES[i]
-        cn = _DIM_CN.get(dim, dim)
+        cn = DIM_CN.get(dim, dim)
         if va - vb >= delta:
             facts.append(f"{label_a}末端{cn}显著（{round(va, 2)} vs "
                          f"{round(vb, 2)}）")
