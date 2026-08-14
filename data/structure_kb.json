@@ -310,7 +310,7 @@
   },
   "theory": "石墙三兵（d+f 前伸 + e 支撑）形成坚固中心墙：兵形稳固但空间受限；对抗石墙方从后翼扩张或中心突破瓦解其根基，石墙持有方以王翼进攻为主旋律",
   "in_production": false,
-  "in_production_note": "维持停用（用户裁决 2026-08-08）。原始依据「组内中位 1.275 > 跨计划 1.167」出自对偶数长度取上中位的有偏 estimator（偏向 FAIL）；PLAN-010 补测轮改用 statistics.median 真中位重测，stonewall 实为 组内 1.4375 < 跨计划 1.5（margin 仅 +0.0625，通过）。但余量极薄、换 depth/根着/局面即可能翻回，且石墙是封闭兵链（d4-e3-f4）、两计划推进后结构差异天然小于开放型原型——维持停用，待补正交维度（如 exclude_pawn_targets）并做多局面复测（非单局面单深度）确认可分离性稳健后再启用。",
+  "in_production_note": "维持停用（用户裁决 2026-08-08；PLAN-013 REV-002 裁决三复核确认）。历史：原始依据「组内中位 1.275 > 跨计划 1.167」出自有偏 estimator；PLAN-010 真中位重测 margin 仅 +0.0625。PLAN-013 子空间 A3 v2（P16 翼向扩维 + goal 翼向化后）复测：margin 0.833-0.125=0.708，远超 0.3 要求——但这是**单边分离**：有效维全部来自后翼扩张（mover_qside/opp_backward/opp_isolated_qside），中心突破贡献 0 有效维（e3-e4-e5 推进 16 着内 goal_ok=False，白 e 兵需推到 e5 才过线，未达成）。A3 可分离性好 ≠ 两计划都讲得出。维持停用的论证主轴是**程序性条件未满足**（冻结判据 2.2 要求 ≥3 局面×≥2 深度复测、2.3 要求 planner+用户确认，当前仅单局面单深度+margin 一项达标），非「会产出坏解说」。解锁条件：①多局面复测（阶段 0 已备 fork_stats 停用命中簇 8 个自然局面池）；②A2 中心突破可达或 goal 重定义（如把 16 着不可达的过线 goal 降级为方向级 e3-e4 推进，属 KB 设计变更需单独验证）；③用户确认。",
   "axes": {
    "axis1": "后翼扩张 vs 中心突破（对抗石墙方两方向）",
    "axis2": "突破时机（e4 被兑/g4 被吃，typical_mistakes 素材）",
@@ -443,8 +443,7 @@
    ]
   },
   "theory": "白方 d5 楔入黑方阵地形成中心空间优势，c4 固定后翼；黑方 c5+d6 半开放 c 线反击。白方两路：中心 e4-e5 突破扩大楔子、或后翼 b4-b5 扩张压制黑方后翼。黑方寻求 c 线开放 + 后翼多数兵反击。",
-  "in_production": false,
-  "in_production_note": "A3 可分离性未过（PLAN-011 阶段2 实测：3/3 决策点组内距离 ≥ 跨计划距离，如首局面组内 0.6875 > 跨 0.5）。识别器已定稿（`_benoni_check`，与 maroczy 收紧后无归属冲突），但『中心突破 vs 后翼扩张』两计划在封闭中心楔结构下引擎续走趋同——与 carlsbad/maroczy/hanging 同型的封闭中心可分离性问题，且更严重（全不过而非临界）；且『后翼扩张』goal `opp_isolated_qside>=1` 在约束线 16 着内不可达（A2 失败）。识别器与 KB 条目保留供后续复用（换 goal 思路或扩 P16 维度后复测 A3 再启用）；本阶段判为诚实证伪，不纳入产品池。",
+  "production_note": "PLAN-013 解禁（2026-08-13）：P16 v2 翼向扩维（mover_center/qside_pawns_past_mid）+ KB goal 翼向化（中心突破 mover_center>=2 非 3a、后翼扩张加逃生舱 any）后，子空间 A3 v2 复测通过（margin 0.125，PLAN-011 时 3/3 全不过 margin 全负→翻转）；A2 两计划 goal_ok=True。原 PLAN-011 证伪的「12 维翼盲 + 全空间 A3 趋同噪声」两因均由 ADR-022 修复。",
   "axes": {
    "axis1": "中心突破 vs 后翼扩张（同方两计划）",
    "axis2": "推进时机（过早 e5 被反压/过早 b4 漏 c 线，typical_mistakes 素材）",
@@ -501,6 +500,70 @@
     "cost": "后翼兵推进后 a/b 线可能被黑方利用（c 线半开放已给黑反击条件）",
     "typical_mistakes": "b4 过早推进被黑方 …cxb4 打开后翼反击",
     "source": "Benko / Pachman"
+   }
+  ]
+ },
+ "dutch_kid": {
+  "cn": "荷兰/古印度王翼结构",
+  "identify": {
+   "pawn_pattern": "对方 f5 兵（王翼前伸），非石墙（无 d5+e6 三兵）",
+   "opening_hints": [
+    "Dutch Defense (A80-A99)",
+    "King's Indian Defense 变例"
+   ]
+  },
+  "theory": "对方 f5 兵是王翼空间推进的标志（荷兰防御/古印度防御）。走子方面对对方王翼前伸，可选择王翼对攻（推进 g/h 兵冲击 f5）或后翼反击（利用对方王翼倾注的空间在后翼扩张）。",
+  "in_production": false,
+  "in_production_note": "A3 子空间可分离性未过（PLAN-013 阶段3 实测：5/5 fork_stats 命中局面 cross=0.0——两计划执行线在翼向维 mover_kside/qside_pawns_past_mid 上终局趋同，16 着内走子方兵未推过中线）。识别器已定稿（opp_f5 非石墙，零归属冲突，33 局面命中 9.4%），但『王翼进攻 vs 后翼反击』属翼向推进型，中局 16 着引擎续走趋同（与 carlsbad/hanging 同型的系统性问题，子空间度量未能分开）。识别器与 KB 条目保留，待后续换 goal 思路或延长约束线深度后复测。",
+  "axes": {
+   "axis1": "王翼进攻 vs 后翼反击（同方两计划）",
+   "axis3": "执行 vs 等待（反事实基线）"
+  },
+  "plans": [
+   {
+    "name": "王翼进攻",
+    "mover_side": "mover",
+    "mechanism": "推进王翼兵（g/h）冲击对方 f5 兵，配合轻子对王翼施压",
+    "direction": {
+     "pawn_files": [
+      "g",
+      "h"
+     ],
+     "target_zone": "kingside",
+     "break_squares": [
+      "g5",
+      "h5"
+     ]
+    },
+    "structural_goal": {
+     "mover_kside_pawns_past_mid": ">=1"
+    },
+    "cost": "王翼兵推进后自身王翼松动，若对方 f5 兵稳固则反受牵制",
+    "typical_mistakes": "王翼推进过早缺乏子力配合，被对方 f5 兵稳固防守",
+    "source": "Soltis《Pawn Structure Chess》荷兰章 / Pachman"
+   },
+   {
+    "name": "后翼反击",
+    "mover_side": "mover",
+    "mechanism": "后翼多数兵推进制造通路兵，利用对方王翼倾注的空间在后翼扩张",
+    "direction": {
+     "pawn_files": [
+      "a",
+      "b",
+      "c"
+     ],
+     "target_zone": "queenside",
+     "break_squares": [
+      "b5",
+      "c5"
+     ]
+    },
+    "structural_goal": {
+     "mover_qside_pawns_past_mid": ">=1"
+    },
+    "cost": "放弃王翼对攻，若后翼扩张迟缓则对方 f5 兵的王翼进攻先手兑现",
+    "typical_mistakes": "后翼推进过慢，对方王翼进攻率先得手",
+    "source": "Pachman / Watson《Secrets of Modern Chess Strategy》"
    }
   ]
  }

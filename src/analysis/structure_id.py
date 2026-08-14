@@ -184,6 +184,27 @@ def _benoni_check(board: chess.Board) -> bool:
             and _pawn_on(board, _OPPONENT, "d6"))
 
 
+def _dutch_kid_check(board: chess.Board) -> bool:
+    """荷兰/古印度王翼结构：对方 f5 兵（王翼前伸），非石墙（无 d5+e6）。
+
+    opp_f5 是 Dutch Defense / KID 黑方 ...f5 的标志——对方主动的王翼
+    空间推进。走子方面对它有两路：王翼对攻（推进 g/h 冲击 f5）或后翼
+    反击（利用对方王翼倾注的空间在后翼扩张）。
+
+    排除 stonewall（d5+f5+e6 三兵）——已在优先级链先识别。两者互斥：
+    stonewall 要求 d5+e6，本判据排除 d5+e6。
+
+    插优先级 stonewall 之后、majority 之前（PLAN-013 阶段 3；阶段 0
+    候选定标：19 局面 9.0%，零归属冲突、零 Stonewall 重叠）。
+    """
+    if not _pawn_on(board, _OPPONENT, "f5"):
+        return False
+    if (_pawn_on(board, _OPPONENT, "d5")
+            and _pawn_on(board, _OPPONENT, "e6")):
+        return False
+    return True
+
+
 def _majority_check(board: chess.Board) -> bool:
     """多数兵：mover 在翼侧有兵多数（后翼 a-c 线或王翼 f-h 线
     己方兵数 ≥3 且对方同翼 ≤2），且多数翼至少一兵未过中线（可推进）。
@@ -300,6 +321,8 @@ def detect_pawn_structure(board: chess.Board) -> Tuple[Optional[str], float, dic
             return "benoni", 1.0, features
         if _stonewall_check(b):
             return "stonewall", 1.0, features
+        if _dutch_kid_check(b):
+            return "dutch_kid", 1.0, features
         if _majority_check(b):
             return "majority", 1.0, features
         return None, 0.0, features
