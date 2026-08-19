@@ -14,20 +14,65 @@
 | **Puzzle 战术** | 战术题 | 战术机理（叉/牵制/闪击）与落地手段 |
 | **Decision 决策** | 中局局面 | 多个战略计划的取舍对比 |
 
-## 快速开始
+## 部署（迁移到新电脑）
 
-### 环境
+按顺序执行。前置依赖（Python 环境、外部程序）必须先装好，否则运行会报错。
 
-- Python 3.12（项目使用 conda 环境，依赖见 `requirements.txt`）
-- Stockfish 引擎（仓库内含 Windows x64 avx2 版本）
-- Syzygy 3-6 子表库（`syzygy/` 目录）
-- DeepSeek API Key（配置在 `.env` 的 `DEEPSEEK_API_KEY`；无 key 时回退本地 llama.cpp）
+### 1. 系统前置依赖
+
+| 依赖 | 说明 | 验证命令 |
+|---|---|---|
+| **Python 3.12** | 建议用 conda 建独立环境，避免污染系统 Python | `python --version` |
+| **FFmpeg** | moviepy 合成视频必需。安装后加入系统 PATH，或在 `.env` 填绝对路径 | `ffmpeg -version` |
+| **Stockfish** | 仓库已含 Windows x64 avx2 版（`stockfish-windows-x86-64-avx2.exe`）。非 Windows 或非 avx2 CPU 需自行下载对应版本 | — |
+
+> **CPU 注意**：仓库自带的是 avx2 版本。若目标机 CPU 不支持 avx2（较老机型），Stockfish 会启动失败，需从官网下载对应指令集版本替换，并更新 `.env` 的 `STOCKFISH_PATH`。
+
+### 2. 建环境、装依赖
 
 ```bash
+# 建 conda 环境（推荐）
+conda create -n explainer python=3.12
+conda activate explainer
+
+# 装 Python 依赖
 pip install -r requirements.txt
 ```
 
-### 运行
+> **TTS 依赖版本敏感**：ChatTTS 经 numba/torchaudio 硬依赖 torch 与 numpy，版本错配会导致 TTS 初始化失败、视频链路卡死。若视频链路报 TTS 相关错误，确认 `torch`/`torchaudio`/`numpy` 三者版本配套（详见 `CLAUDE.md` 硬约束段）。只出文本（`--text`）不加载 TTS，可先用文本模式验证主链路。
+
+### 3. 配置 `.env`
+
+项目根目录的 `.env` 存放密钥与本机路径，**不进版本库**。从模板复制一份再填：
+
+```bash
+cp .env.example .env      # Windows: copy .env.example .env
+```
+
+然后编辑 `.env`，**至少**填这几项：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | 是 | DeepSeek API 密钥；解说生成的主后端 |
+| `STOCKFISH_PATH` | 是 | 引擎路径。用仓库自带版本时填相对路径 `stockfish-windows-x86-64-avx2.exe` 即可 |
+| `SYZYGY_PATH` | 否 | 残局表库目录，填 `syzygy`。缺失时残局走 Stockfish 求解，不影响运行 |
+| `FFMPEG_PATH` | 否 | FFmpeg 已加入系统 PATH 时留空即可；否则填 ffmpeg 可执行文件的绝对路径 |
+
+> 路径变量支持相对路径（自动相对项目根解析）或绝对路径。跨机部署优先用相对路径。
+
+### 4. 验证部署
+
+```bash
+# 最轻量：只出解说文本，不碰 TTS/视频，先确认引擎 + API 通
+python main.py --text path/to/endgame.fen
+
+# 完整链路：出视频（需 FFmpeg + TTS 就绪）
+python main.py path/to/endgame.fen
+```
+
+文本模式跑通说明「引擎求解 + API 解说」链路正常；视频模式跑通说明「TTS + FFmpeg 渲染」链路也正常。
+
+## 运行
 
 ```bash
 # 残局讲解（默认出视频；--text 只出解说文本）
@@ -42,9 +87,7 @@ python main.py --decision path/to/position.fen
 python main.py --decision --text path/to/position.fen
 ```
 
-不带文件参数运行残局模式会进入交互式输入（粘贴 PGN/FEN，输入 `END` 结束）。
-
-输出视频位于 `output/` 目录。
+不带文件参数运行残局模式会进入交互式输入（粘贴 PGN/FEN，输入 `END` 结束）。输出视频位于 `output/` 目录。
 
 ## 目录结构
 
